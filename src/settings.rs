@@ -1064,6 +1064,9 @@ mod tests {
 
     #[test]
     fn detects_a_held_settings_instance_guard() {
+        #[cfg(target_os = "windows")]
+        let key = format!("dev.Upyr.Upyr.Settings.Test.{}", std::process::id());
+        #[cfg(not(target_os = "windows"))]
         let key = std::env::temp_dir()
             .join(format!("upyr-settings-test-{}", std::process::id()))
             .to_string_lossy()
