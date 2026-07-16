@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Upyr
+Comment=Fix English and Ukrainian text typed with the wrong keyboard layout
+Exec=/usr/lib/upyr/upyr-background
+Icon=upyr
+Terminal=false
+Categories=Utility;Accessibility;
+StartupNotify=false

@@ -1,0 +1,142 @@
+name: Release packages
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-14
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build universal macOS binaries
+        run: |
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+          mkdir -p target/release
+          lipo -create target/aarch64-apple-darwin/release/upyr target/x86_64-apple-darwin/release/upyr -output target/release/upyr
+          lipo -create target/aarch64-apple-darwin/release/upyr-background target/x86_64-apple-darwin/release/upyr-background -output target/release/upyr-background
+          lipo -create target/aarch64-apple-darwin/release/upyr-settings target/x86_64-apple-darwin/release/upyr-settings -output target/release/upyr-settings
+      - name: Import Developer ID certificate
+        if: env.APPLE_CERTIFICATE != ''
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/upyr.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/upyr-signing.keychain-db"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERTIFICATE_PATH"
+          security create-keychain -p temporary "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p temporary "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k temporary "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | awk -F '"' 'NR == 1 { print $2 }')
+          test -n "$IDENTITY"
+          echo "UPYR_MACOS_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+      - name: Build and verify app bundle
+        run: bash packaging/macos/package.sh
+      - name: Verify packaged conversion
+        run: test "$(dist/Upyr.app/Contents/MacOS/upyr convert ghbdsn)" = "привіт"
+      - name: Notarize release DMG
+        if: env.APPLE_ID != ''
+        run: |
+          DMG=$(find dist -name '*.dmg' -print -quit)
+          xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-macos
+          path: |
+            dist/*.dmg
+            dist/*.zip
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-latest
+    env:
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      UPYR_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Prepare Windows signing
+        if: env.WINDOWS_CERTIFICATE != ''
+        shell: pwsh
+        run: |
+          $certificate = Join-Path $env:RUNNER_TEMP "upyr.pfx"
+          [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
+          if (-not $signTool) { throw "signtool.exe was not found" }
+          "UPYR_CERTIFICATE_PATH=$certificate" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "UPYR_SIGNTOOL_PATH=$($signTool.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Build installer and portable package
+        shell: pwsh
+        run: ./packaging/windows/package.ps1
+      - name: Verify packaged conversion
+        shell: pwsh
+        run: |
+          $cli = Get-ChildItem dist/upyr-windows-x86_64-*/upyr.exe | Select-Object -First 1
+          if ((& $cli.FullName convert ghbdsn) -ne "привіт") { throw "Packaged conversion smoke test failed" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-windows
+          path: |
+            dist/*-setup.exe
+            dist/*.zip
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxkbcommon-dev libwayland-dev libgtk-3-dev libayatana-appindicator3-dev
+      - run: cargo build --release --locked
+      - name: Build DEB and portable package
+        run: bash packaging/linux/package.sh
+      - name: Verify packaged conversion
+        run: test "$(find dist/upyr-linux-* -type f -name upyr -perm -111 -exec {} convert ghbdsn \; -quit)" = "привіт"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-linux
+          path: |
+            dist/*.deb
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --verify-tag
