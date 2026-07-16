@@ -78,6 +78,20 @@ fn settings_instance_key() -> Result<String> {
     }
 }
 
+/// Returns true while the separate settings process owns its single-instance
+/// guard. Global actions should stay quiet in that state so recording an
+/// existing shortcut does not also trigger a conversion in the background app.
+pub fn is_open() -> bool {
+    let Ok(key) = settings_instance_key() else {
+        return false;
+    };
+    instance_is_held(&key)
+}
+
+fn instance_is_held(key: &str) -> bool {
+    SingleInstance::new(key).is_ok_and(|instance| !instance.is_single())
+}
+
 pub fn spawn() -> Result<()> {
     #[cfg(target_os = "macos")]
     if let Some(bundle) = packaged_macos_bundle()? {
@@ -1046,5 +1060,19 @@ mod tests {
             pretty_hotkey("Ctrl+Alt+Space").as_deref(),
             Some("Ctrl + Alt + Space")
         );
+    }
+
+    #[test]
+    fn detects_a_held_settings_instance_guard() {
+        let key = std::env::temp_dir()
+            .join(format!("upyr-settings-test-{}", std::process::id()))
+            .to_string_lossy()
+            .into_owned();
+        let guard = SingleInstance::new(&key).unwrap();
+
+        assert!(guard.is_single());
+        assert!(instance_is_held(&key));
+        drop(guard);
+        assert!(!instance_is_held(&key));
     }
 }

@@ -94,6 +94,8 @@ Settings are organized into General, Automatic, Shortcuts, Feedback, and Advance
 
 Optional switch feedback is disabled by default. `show_layout_indicator` briefly displays the target language flag next to the pointer for `layout_indicator_duration_ms`, and `play_switch_sound` adds a local system sound. Feedback runs only after Upyr confirms a real OS input-source change. The overlay uses AppKit on macOS, a non-activating Win32 window on Windows, and a GTK popup on Linux/X11. Linux sound playback uses `canberra-gtk-play` when available.
 
+When testing locally on macOS, the packaging script embeds stable designated requirements in its ad-hoc signatures. Accessibility approval therefore survives normal Upyr rebuilds even without a Developer ID certificate. The background app also ignores global shortcuts while Settings is open, allowing an existing shortcut to be recorded without running its action.
+
 ## Platform notes
 
 ### macOS

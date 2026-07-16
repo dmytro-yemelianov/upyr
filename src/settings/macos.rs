@@ -745,7 +745,7 @@ fn make_shortcuts_page(
     page_header(
         &page,
         "Shortcuts",
-        "Click a recorder, then press a physical key combination. Esc cancels.",
+        "Click a recorder, then press a physical key combination. Upyr actions are paused here.",
         mtm,
     );
     page.addSubview(&label(

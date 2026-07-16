@@ -25,9 +25,18 @@ if [ -n "${UPYR_MACOS_SIGNING_IDENTITY:-}" ]; then
     codesign --force --deep --options runtime --timestamp \
         --sign "$UPYR_MACOS_SIGNING_IDENTITY" "$APP"
 else
-    # An ad-hoc signature makes local/test bundles structurally complete. Release
-    # CI uses a Developer ID identity when the repository secrets are configured.
-    codesign --force --deep --sign - "$APP"
+    # Explicit designated requirements keep local Accessibility permission tied
+    # to each bundle identifier instead of the ad-hoc signature's changing
+    # CDHash. Release CI uses a Developer ID identity when secrets are present.
+    codesign --force --sign - --identifier dev.Upyr.Upyr.CLI \
+        --requirements '=designated => identifier "dev.Upyr.Upyr.CLI"' \
+        "$CONTENTS/MacOS/upyr"
+    codesign --force --sign - \
+        --requirements '=designated => identifier "dev.Upyr.Upyr.Settings"' \
+        "$SETTINGS_APP"
+    codesign --force --sign - \
+        --requirements '=designated => identifier "dev.Upyr.Upyr"' \
+        "$APP"
 fi
 
 rm -f "$DIST/upyr-macos-universal-$VERSION.dmg" "$DIST/upyr-macos-universal-$VERSION.zip"

@@ -279,6 +279,21 @@ impl App {
         self.set_auto_suspended(false);
     }
 
+    fn handle_hotkey(&mut self, event: GlobalHotKeyEvent) {
+        if self.paused || event.state != HotKeyState::Released {
+            return;
+        }
+        if settings::is_open() {
+            debug!("ignoring global hotkey while Upyr Settings is open");
+            return;
+        }
+        if event.id == self.hotkey.id() {
+            self.perform_conversion(false);
+        } else if event.id == self.last_word_hotkey.id() {
+            self.perform_conversion(true);
+        }
+    }
+
     fn handle_auto_key(&mut self, event: AutoKeyEvent) {
         if self.paused || self.processing || !self.config.auto_correct {
             return;
@@ -592,20 +607,7 @@ impl ApplicationHandler<AppEvent> for App {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
-            AppEvent::HotKey(event)
-                if !self.paused
-                    && event.id == self.hotkey.id()
-                    && event.state == HotKeyState::Released =>
-            {
-                self.perform_conversion(false);
-            }
-            AppEvent::HotKey(event)
-                if !self.paused
-                    && event.id == self.last_word_hotkey.id()
-                    && event.state == HotKeyState::Released =>
-            {
-                self.perform_conversion(true);
-            }
+            AppEvent::HotKey(event) => self.handle_hotkey(event),
             AppEvent::Menu(event) => self.handle_menu(event_loop, &event),
             AppEvent::ModifierGesture(action) if !self.paused => {
                 self.perform_conversion(action == GestureAction::PreviousWord);
@@ -622,7 +624,6 @@ impl ApplicationHandler<AppEvent> for App {
             #[cfg(target_os = "macos")]
             AppEvent::AccessibilityGranted => self.handle_accessibility_granted(event_loop),
             AppEvent::ModifierGesture(_) => {}
-            AppEvent::HotKey(_) => {}
             AppEvent::HideLayoutIndicator(_) => {}
         }
     }
