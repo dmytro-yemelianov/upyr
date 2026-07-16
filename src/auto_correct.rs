@@ -221,6 +221,13 @@ fn evaluate_candidates(candidates: &Candidates, config: &Config) -> AutoDecision
 
     let source_known = known(candidates.source_language, &source_word);
     let target_known = known(candidates.target_language, &target_word);
+    if matches!(candidates.source_language, Language::English)
+        && (looks_like_deliberate_latin_identifier(&candidates.source_word)
+            || looks_like_deliberate_latin_technical_token(&candidates.source_word))
+        && !target_known
+    {
+        return AutoDecision::Reset;
+    }
     // Measure the intended candidate, not the visible source token. On a
     // Ukrainian layout, physical letter keys such as `[];'\\,./` are ordinary
     // letters even though the same positions look like punctuation in English.
@@ -328,6 +335,17 @@ impl Candidates {
     }
 
     fn preserving_terminal_delimiter(sample: &WordSample, full: &Self) -> Option<Self> {
+        // If the same physical key is punctuation in the target layout too,
+        // keep the ordinary physical conversion. The alternative exists for
+        // punctuation-to-letter ambiguity such as `Jkmuf,` -> `Ольгаб`.
+        if full
+            .target_word
+            .chars()
+            .last()
+            .is_some_and(is_terminal_delimiter)
+        {
+            return None;
+        }
         let delimiter = full.source_word.chars().last()?;
         if !is_terminal_delimiter(delimiter) {
             return None;
@@ -559,6 +577,68 @@ fn is_title_case_word(word: &str) -> bool {
     letters.next().is_some_and(char::is_uppercase) && letters.all(char::is_lowercase)
 }
 
+fn looks_like_deliberate_latin_identifier(word: &str) -> bool {
+    let token = word.trim_matches(|character: char| !character.is_alphabetic());
+    if token.chars().count() < 2
+        || !token
+            .chars()
+            .all(|character| character.is_ascii_alphabetic())
+    {
+        return false;
+    }
+
+    let all_uppercase = token
+        .chars()
+        .all(|character| character.is_ascii_uppercase());
+    let internal_uppercase = token
+        .chars()
+        .skip(1)
+        .any(|character| character.is_ascii_uppercase());
+    let has_lowercase = token
+        .chars()
+        .any(|character| character.is_ascii_lowercase());
+    all_uppercase || (internal_uppercase && has_lowercase)
+}
+
+fn looks_like_deliberate_latin_technical_token(word: &str) -> bool {
+    if word.contains("://") || word.contains("::") || word.contains('@') || word.contains('_') {
+        return true;
+    }
+    if word
+        .char_indices()
+        .any(|(index, character)| character == '/' && index > 0 && index + 1 < word.len())
+    {
+        return true;
+    }
+
+    let Some((stem, suffix)) = word.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty()
+        && stem
+            .chars()
+            .any(|character| character.is_ascii_alphabetic())
+        && matches!(
+            suffix
+                .trim_matches(|character: char| !character.is_ascii_alphabetic())
+                .to_ascii_lowercase()
+                .as_str(),
+            "com"
+                | "org"
+                | "net"
+                | "io"
+                | "dev"
+                | "app"
+                | "rs"
+                | "toml"
+                | "json"
+                | "yaml"
+                | "yml"
+                | "md"
+                | "txt"
+        )
+}
+
 fn terminal_delimiter_is_likely(candidates: &Candidates, config: &Config) -> bool {
     let source_word = normalize_word(&candidates.source_word);
     let target_word = normalize_word(&candidates.target_word);
@@ -738,7 +818,7 @@ mod tests {
         for (physical, layout, expected_source, expected_replacement) in [
             ("Jkmuf,", SystemLayout::English, "Jkmuf, ", "Ольга, "),
             ("Jkmuf.", SystemLayout::English, "Jkmuf. ", "Ольга. "),
-            ("Olha?", SystemLayout::Ukrainian, "Щдрф, ", "Olha, "),
+            ("Olha?", SystemLayout::Ukrainian, "Щдрф, ", "Olha? "),
             ("Olha/", SystemLayout::Ukrainian, "Щдрф. ", "Olha. "),
             ("Olha,", SystemLayout::Ukrainian, "Щдрфб ", "Olha, "),
             ("Olha.", SystemLayout::Ukrainian, "Щдрфю ", "Olha. "),
@@ -900,6 +980,20 @@ mod tests {
                 AutoDecision::Correct(_)
             ));
         }
+        for source in ["FAANG", "SaaS", "NASDAQ", "iPhone", "ServiceNow"] {
+            assert_eq!(
+                evaluate(&sample(source, SystemLayout::English), &Config::default()),
+                AutoDecision::Reset,
+                "deliberate Latin identifier must end the source-language segment: {source}"
+            );
+        }
+        for source in ["github.com", "src/main.rs", "https://example.com"] {
+            assert_eq!(
+                evaluate(&sample(source, SystemLayout::English), &Config::default()),
+                AutoDecision::Reset,
+                "technical token must end the source-language segment: {source}"
+            );
+        }
     }
 
     #[test]
@@ -1034,3 +1128,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "auto_correct_synthetic_tests.rs"]
+mod synthetic_typing_tests;
