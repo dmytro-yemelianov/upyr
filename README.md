@@ -10,7 +10,7 @@ Upyr supports two local workflows. The explicit workflow is always available:
 2. Press `CmdOrCtrl+Alt+Space`.
 3. Upyr copies the selection, detects its direction, converts the physical-key positions, and pastes it back.
 
-Automatic correction is opt-in. When enabled, Upyr can recognize a confidently mistyped word as soon as you press Space—for example, `ghbdsn` becomes `привіт` while an already valid `hello` remains unchanged. A native global key-down listener keeps only a short input prefix in memory; typed input is never logged or sent anywhere.
+Automatic correction is opt-in. When enabled, Upyr can recognize a confidently mistyped word as soon as you press Space—for example, `ghbdsn` becomes `привіт` while an already valid `hello` remains unchanged. It also recognizes likely proper names (`Jkmuf` → `Ольга`, `Щдрф` → `Olha`) and scores an ambiguous final physical punctuation key both as a layout letter and as punctuation, so `Jkmuf,` becomes `Ольга,` without breaking `[ks,` → `хліб`. A native global key-down listener keeps only a short input prefix in memory; typed input is never logged or sent anywhere.
 
 Upyr also adds a **U** icon to the macOS menu bar or system tray. Its menu can convert text, pause/resume Upyr, open the native settings window, reload the configuration, or quit the app.
 

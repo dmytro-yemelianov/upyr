@@ -187,6 +187,24 @@ impl AutoWordTracker {
 
 pub fn evaluate(sample: &WordSample, config: &Config) -> AutoDecision {
     let candidates = Candidates::new(sample);
+
+    // A physical punctuation key can either be a letter in the other layout
+    // (`,.` -> `бю`) or punctuation the user wants to keep. Score the
+    // punctuation-preserving interpretation first, then fall back to the
+    // ordinary whole-token conversion. This keeps `[ks,` -> `хліб`, while
+    // allowing `Jkmuf,` -> `Ольга,`.
+    if let Some(preserved) = Candidates::preserving_terminal_delimiter(sample, &candidates)
+        && terminal_delimiter_is_likely(&preserved, config)
+    {
+        if let AutoDecision::Correct(correction) = evaluate_candidates(&preserved, config) {
+            return AutoDecision::Correct(correction);
+        }
+    }
+
+    evaluate_candidates(&candidates, config)
+}
+
+fn evaluate_candidates(candidates: &Candidates, config: &Config) -> AutoDecision {
     let source_word = normalize_word(&candidates.source_word);
     let target_word = normalize_word(&candidates.target_word);
     if target_word.is_empty() || source_word == target_word {
@@ -234,16 +252,34 @@ pub fn evaluate(sample: &WordSample, config: &Config) -> AutoDecision {
         && target_model.grams >= 3
         && target_model.coverage >= minimum_coverage
         && advantage >= required_advantage;
+    let physical_letter_model_match = !source_known
+        && current_word_length >= config.auto_correct_min_word_length
+        && physical_punctuation_evidence > 0
+        && candidates
+            .target_word
+            .chars()
+            .all(|character| character.is_alphabetic() || matches!(character, '\'' | '’'))
+        && target_model.grams >= 3
+        && target_model.coverage >= minimum_coverage
+        && advantage >= -0.05;
+    let source_name_model = language_likelihood(candidates.source_language, &source_word);
+    let target_name_model = language_likelihood(candidates.target_language, &target_word);
+    let proper_name_model_match = !source_known
+        && current_word_length >= config.auto_correct_min_word_length
+        && is_title_case_word(&candidates.target_word)
+        && target_name_model.grams >= 3
+        && target_name_model.coverage >= minimum_coverage.min(0.22)
+        && target_name_model.coverage - source_name_model.coverage >= required_advantage.min(0.07);
     let source_model_match = context_characters
         >= minimum_characters.max(config.auto_correct_min_word_length)
         && source_model.grams >= 3
         && source_model.coverage >= minimum_coverage
         && source_model.coverage - target_model.coverage >= minimum_advantage;
 
-    if dictionary_match || model_match {
+    if dictionary_match || model_match || physical_letter_model_match || proper_name_model_match {
         return AutoDecision::Correct(AutoCorrection {
-            expected_source: candidates.source_context,
-            replacement: candidates.target_context,
+            expected_source: candidates.source_context.clone(),
+            replacement: candidates.target_context.clone(),
             direction: candidates.direction,
         });
     }
@@ -289,6 +325,47 @@ impl Candidates {
                 target_language: Language::English,
             },
         }
+    }
+
+    fn preserving_terminal_delimiter(sample: &WordSample, full: &Self) -> Option<Self> {
+        let delimiter = full.source_word.chars().last()?;
+        if !is_terminal_delimiter(delimiter) {
+            return None;
+        }
+
+        let mut physical_word = sample.physical_word.clone();
+        physical_word.pop()?;
+        if physical_word.is_empty() {
+            return None;
+        }
+
+        let (physical_without_boundary, boundary) = sample
+            .physical_context
+            .strip_suffix(' ')
+            .map_or((sample.physical_context.as_str(), ""), |context| {
+                (context, " ")
+            });
+        let physical_prefix = physical_without_boundary.strip_suffix(&sample.physical_word)?;
+        let physical_target_word = match sample.source_layout {
+            SystemLayout::English => to_ukrainian(&physical_word),
+            SystemLayout::Ukrainian => physical_word.clone(),
+        };
+        let physical_target_context = match sample.source_layout {
+            SystemLayout::English => to_ukrainian(&format!("{physical_prefix}{physical_word}")),
+            SystemLayout::Ukrainian => format!("{physical_prefix}{physical_word}"),
+        };
+        let target_word = format!("{physical_target_word}{delimiter}");
+        let target_context = format!("{physical_target_context}{delimiter}{boundary}");
+
+        Some(Self {
+            source_word: full.source_word.clone(),
+            target_word,
+            source_context: full.source_context.clone(),
+            target_context,
+            direction: full.direction,
+            source_language: full.source_language,
+            target_language: full.target_language,
+        })
     }
 }
 
@@ -473,6 +550,40 @@ fn normalize_word(word: &str) -> String {
         .to_lowercase()
 }
 
+fn is_terminal_delimiter(character: char) -> bool {
+    matches!(character, ',' | '.' | '!' | '?' | ':' | ';' | '…')
+}
+
+fn is_title_case_word(word: &str) -> bool {
+    let mut letters = word.chars().filter(|character| character.is_alphabetic());
+    letters.next().is_some_and(char::is_uppercase) && letters.all(char::is_lowercase)
+}
+
+fn terminal_delimiter_is_likely(candidates: &Candidates, config: &Config) -> bool {
+    let source_word = normalize_word(&candidates.source_word);
+    let target_word = normalize_word(&candidates.target_word);
+    if target_word.chars().count() < config.auto_correct_min_word_length
+        || known(candidates.source_language, &source_word)
+    {
+        return false;
+    }
+    if known(candidates.target_language, &target_word) {
+        return true;
+    }
+
+    let source_model = language_likelihood(candidates.source_language, &source_word);
+    let target_model = language_likelihood(candidates.target_language, &target_word);
+    let advantage = target_model.coverage - source_model.coverage;
+    let (minimum_coverage, minimum_advantage, _) =
+        model_thresholds(config.auto_correct_sensitivity);
+    if is_title_case_word(&candidates.target_word) {
+        target_model.coverage >= minimum_coverage.min(0.22)
+            && advantage >= minimum_advantage.min(0.07)
+    } else {
+        target_model.coverage >= minimum_coverage && advantage >= minimum_advantage
+    }
+}
+
 fn physical_english_character(key: Keycode, shifted: bool) -> Option<char> {
     let letter = match key {
         Keycode::A => Some('a'),
@@ -612,6 +723,47 @@ mod tests {
     }
 
     #[test]
+    fn recognizes_mistyped_proper_names_in_both_directions() {
+        for (physical, layout, expected) in [
+            ("Jkmuf", SystemLayout::English, "Ольга"),
+            ("Olha", SystemLayout::Ukrainian, "Olha"),
+        ] {
+            let correction = correction(evaluate(&sample(physical, layout), &Config::default()));
+            assert_eq!(correction.replacement, expected);
+        }
+    }
+
+    #[test]
+    fn preserves_terminal_punctuation_when_it_is_more_likely_than_a_layout_letter() {
+        for (physical, layout, expected_source, expected_replacement) in [
+            ("Jkmuf,", SystemLayout::English, "Jkmuf, ", "Ольга, "),
+            ("Jkmuf.", SystemLayout::English, "Jkmuf. ", "Ольга. "),
+            ("Olha?", SystemLayout::Ukrainian, "Щдрф, ", "Olha, "),
+            ("Olha/", SystemLayout::Ukrainian, "Щдрф. ", "Olha. "),
+            ("Olha,", SystemLayout::Ukrainian, "Щдрфб ", "Olha, "),
+            ("Olha.", SystemLayout::Ukrainian, "Щдрфю ", "Olha. "),
+        ] {
+            let correction = correction(evaluate(
+                &context_sample(physical, &format!("{physical} "), layout),
+                &Config::default(),
+            ));
+            assert_eq!(correction.expected_source, expected_source);
+            assert_eq!(correction.replacement, expected_replacement);
+        }
+    }
+
+    #[test]
+    fn keeps_terminal_physical_punctuation_as_a_letter_when_that_forms_a_word() {
+        let correction = correction(evaluate(
+            &sample("[ks,", SystemLayout::English),
+            &Config::default(),
+        ));
+
+        assert_eq!(correction.expected_source, "[ks,");
+        assert_eq!(correction.replacement, "хліб");
+    }
+
+    #[test]
     fn ngram_model_recognizes_words_missing_from_dictionary() {
         for (physical, expected) in [
             ("lfdfq", "давай"),
@@ -733,6 +885,11 @@ mod tests {
             "github",
             "codex",
             "dmytro",
+            "Codex",
+            "Dmytro",
+            "Rust",
+            "Apple",
+            "Windows",
             "println",
             "github.com",
             "src/main.rs",
