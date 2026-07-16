@@ -532,6 +532,18 @@ mod tests {
     }
 
     #[test]
+    fn recognizes_mistyped_ukrainian_word_with_bracket_key() {
+        let correction = correction(evaluate(
+            &sample("pf[sl", SystemLayout::English),
+            &Config::default(),
+        ));
+
+        assert_eq!(correction.expected_source, "pf[sl");
+        assert_eq!(correction.replacement, "захід");
+        assert_eq!(correction.direction, Direction::EnglishToUkrainian);
+    }
+
+    #[test]
     fn recognizes_mistyped_english_greeting() {
         let correction = correction(evaluate(
             &sample("hello", SystemLayout::Ukrainian),
