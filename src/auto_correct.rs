@@ -189,7 +189,7 @@ pub fn evaluate(sample: &WordSample, config: &Config) -> AutoDecision {
     let candidates = Candidates::new(sample);
     let source_word = normalize_word(&candidates.source_word);
     let target_word = normalize_word(&candidates.target_word);
-    if source_word.is_empty() || target_word.is_empty() || source_word == target_word {
+    if target_word.is_empty() || source_word == target_word {
         return AutoDecision::Reset;
     }
 
@@ -203,7 +203,10 @@ pub fn evaluate(sample: &WordSample, config: &Config) -> AutoDecision {
 
     let source_known = known(candidates.source_language, &source_word);
     let target_known = known(candidates.target_language, &target_word);
-    let current_word_length = source_word.chars().count();
+    // Measure the intended candidate, not the visible source token. On a
+    // Ukrainian layout, physical letter keys such as `[];'\\,./` are ordinary
+    // letters even though the same positions look like punctuation in English.
+    let current_word_length = target_word.chars().count();
     let context_characters = candidates
         .target_context
         .chars()
@@ -217,11 +220,20 @@ pub fn evaluate(sample: &WordSample, config: &Config) -> AutoDecision {
     let advantage = target_model.coverage - source_model.coverage;
     let (minimum_coverage, minimum_advantage, minimum_characters) =
         model_thresholds(config.auto_correct_sensitivity);
+    let physical_punctuation_evidence = physical_layout_punctuation_evidence(
+        &candidates.source_context,
+        &candidates.target_context,
+    );
+    let required_advantage = if physical_punctuation_evidence > 0 {
+        minimum_advantage / 2.0
+    } else {
+        minimum_advantage
+    };
     let model_match = !source_known
         && context_characters >= minimum_characters.max(config.auto_correct_min_word_length)
         && target_model.grams >= 3
         && target_model.coverage >= minimum_coverage
-        && advantage >= minimum_advantage;
+        && advantage >= required_advantage;
     let source_model_match = context_characters
         >= minimum_characters.max(config.auto_correct_min_word_length)
         && source_model.grams >= 3
@@ -236,10 +248,7 @@ pub fn evaluate(sample: &WordSample, config: &Config) -> AutoDecision {
         });
     }
 
-    if (source_known && !target_known)
-        || source_model_match
-        || has_unsafe_source_punctuation(&candidates.source_word)
-    {
+    if (source_known && !target_known) || source_model_match {
         AutoDecision::Reset
     } else {
         AutoDecision::Continue
@@ -451,17 +460,17 @@ fn model_thresholds(sensitivity: AutoCorrectSensitivity) -> (f32, f32, usize) {
     }
 }
 
+fn physical_layout_punctuation_evidence(source: &str, target: &str) -> usize {
+    source
+        .chars()
+        .zip(target.chars())
+        .filter(|(source, target)| source.is_alphabetic() != target.is_alphabetic())
+        .count()
+}
+
 fn normalize_word(word: &str) -> String {
     word.trim_matches(|character: char| !character.is_alphabetic())
         .to_lowercase()
-}
-
-fn has_unsafe_source_punctuation(word: &str) -> bool {
-    word.chars().any(|character| {
-        !character.is_alphabetic()
-            && !matches!(character, '\'' | '’')
-            && !character.is_ascii_alphanumeric()
-    })
 }
 
 fn physical_english_character(key: Keycode, shifted: bool) -> Option<char> {
@@ -694,6 +703,17 @@ mod tests {
     }
 
     #[test]
+    fn converts_reported_physical_punctuation_as_ukrainian_letters() {
+        let correction = correction(evaluate(
+            &context_sample(",'.", ",j ]] ';b [e.v,f ,'. ,'. ", SystemLayout::English),
+            &Config::default(),
+        ));
+
+        assert_eq!(correction.expected_source, ",j ]] ';b [e.v,f ,'. ,'. ");
+        assert_eq!(correction.replacement, "бо її єжи хуюмба бєю бєю ");
+    }
+
+    #[test]
     fn leaves_valid_words_exceptions_and_technical_text_alone() {
         assert_eq!(
             evaluate(&sample("hello", SystemLayout::English), &Config::default()),
@@ -709,7 +729,15 @@ mod tests {
             ),
             AutoDecision::Reset
         );
-        for source in ["github", "codex", "dmytro", "println"] {
+        for source in [
+            "github",
+            "codex",
+            "dmytro",
+            "println",
+            "github.com",
+            "src/main.rs",
+            "https://example.com",
+        ] {
             assert!(!matches!(
                 evaluate(&sample(source, SystemLayout::English), &Config::default()),
                 AutoDecision::Correct(_)
@@ -835,8 +863,17 @@ mod tests {
 
     #[test]
     fn physical_punctuation_supports_ukrainian_letters() {
-        assert_eq!(physical_english_character(Keycode::Comma, false), Some(','));
-        assert_eq!(physical_english_character(Keycode::Dot, false), Some('.'));
-        assert_eq!(physical_english_character(Keycode::Slash, true), Some('?'));
+        for (key, character) in [
+            (Keycode::LeftBracket, '['),
+            (Keycode::RightBracket, ']'),
+            (Keycode::Semicolon, ';'),
+            (Keycode::Apostrophe, '\''),
+            (Keycode::BackSlash, '\\'),
+            (Keycode::Comma, ','),
+            (Keycode::Dot, '.'),
+            (Keycode::Slash, '/'),
+        ] {
+            assert_eq!(physical_english_character(key, false), Some(character));
+        }
     }
 }

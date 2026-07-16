@@ -389,8 +389,8 @@ mod platform {
         match target {
             SystemLayout::English if id == "com.apple.keylayout.abc" => 0,
             SystemLayout::English if id == "com.apple.keylayout.us" => 1,
-            SystemLayout::Ukrainian if id.ends_with(".ukrainian-pc") => 0,
-            SystemLayout::Ukrainian if id.ends_with(".ukrainian") => 1,
+            SystemLayout::Ukrainian if id.ends_with(".ukrainian") => 0,
+            SystemLayout::Ukrainian if id.ends_with(".ukrainian-pc") => 1,
             _ => 2,
         }
     }
@@ -520,10 +520,10 @@ mod platform {
         }
 
         #[test]
-        fn prefers_pc_ukrainian_and_abc_english() {
+        fn prefers_standard_ukrainian_and_abc_english() {
             assert!(
-                preference("com.apple.keylayout.Ukrainian-PC", SystemLayout::Ukrainian)
-                    < preference("third.party.Ukrainian", SystemLayout::Ukrainian)
+                preference("com.apple.keylayout.Ukrainian", SystemLayout::Ukrainian)
+                    < preference("com.apple.keylayout.Ukrainian-PC", SystemLayout::Ukrainian)
             );
             assert!(
                 preference("com.apple.keylayout.ABC", SystemLayout::English)
