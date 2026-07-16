@@ -1,5 +1,7 @@
 /target/
 /dist/
+/.cache/
+__pycache__/
 *.log
 .DS_Store
 .codebase-memory/

@@ -1,5 +1,3 @@
-use std::{collections::HashSet, sync::OnceLock};
-
 use device_query::Keycode;
 
 use crate::{
@@ -10,9 +8,15 @@ use crate::{
 
 const ENGLISH_WORDS: &str = include_str!("dictionaries/english.txt");
 const UKRAINIAN_WORDS: &str = include_str!("dictionaries/ukrainian.txt");
+const LANGUAGE_MODEL: &[u8] = include_bytes!("models/language.ngm");
 const MIN_NGRAM: usize = 2;
-const MAX_NGRAM: usize = 4;
+const MAX_NGRAM: usize = 5;
 const MAX_CONTEXT_CHARACTERS: usize = 256;
+#[cfg(test)]
+const MODEL_MAGIC: &[u8; 8] = b"UPYRLM1\0";
+const MODEL_HEADER_SIZE: usize = 12;
+const MODEL_ENTRY_SIZE: usize = 17;
+const MODEL_MAX_STRENGTH: i64 = 127;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AutoKeyEvent {
@@ -305,62 +309,97 @@ struct ModelEvidence {
     grams: usize,
 }
 
-struct LanguageModels {
-    english: NgramProfile,
-    ukrainian: NgramProfile,
+struct NgramModel {
+    bytes: &'static [u8],
 }
 
-struct NgramProfile {
-    grams: HashSet<u128>,
-}
-
-impl NgramProfile {
-    fn train(corpus: &str) -> Self {
-        let mut grams = HashSet::new();
-        for word in corpus
-            .lines()
-            .map(str::trim)
-            .filter(|word| !word.is_empty())
-        {
-            for_each_ngram(word, |gram, _weight| {
-                grams.insert(gram);
-            });
-        }
-        Self { grams }
+impl NgramModel {
+    fn entry_count(&self) -> usize {
+        u32::from_le_bytes(self.bytes[8..12].try_into().expect("model header")) as usize
     }
 
-    fn score(&self, text: &str) -> ModelEvidence {
-        let mut hits = 0usize;
-        let mut total = 0usize;
+    fn key_at(&self, index: usize) -> u128 {
+        let offset = MODEL_HEADER_SIZE + index * MODEL_ENTRY_SIZE;
+        u128::from_le_bytes(
+            self.bytes[offset..offset + 16]
+                .try_into()
+                .expect("model key"),
+        )
+    }
+
+    fn score_at(&self, index: usize) -> i8 {
+        let offset = MODEL_HEADER_SIZE + index * MODEL_ENTRY_SIZE + 16;
+        self.bytes[offset] as i8
+    }
+
+    fn language_score(&self, key: u128) -> i8 {
+        let mut start = 0usize;
+        let mut end = self.entry_count();
+        while start < end {
+            let middle = start + (end - start) / 2;
+            match self.key_at(middle).cmp(&key) {
+                std::cmp::Ordering::Less => start = middle + 1,
+                std::cmp::Ordering::Greater => end = middle,
+                std::cmp::Ordering::Equal => return self.score_at(middle),
+            }
+        }
+        0
+    }
+
+    fn score(&self, language: Language, text: &str) -> ModelEvidence {
+        let mut evidence = 0i64;
+        let mut maximum = 0i64;
+        let mut grams = 0usize;
+        let language_sign = match language {
+            Language::English => -1i64,
+            Language::Ukrainian => 1i64,
+        };
         for token in language_tokens(text) {
             for_each_ngram(&token, |gram, weight| {
-                total += weight;
-                if self.grams.contains(&gram) {
-                    hits += weight;
-                }
+                let weight = weight as i64;
+                grams += 1;
+                maximum += MODEL_MAX_STRENGTH * weight;
+                evidence += self.language_score(gram) as i64 * language_sign * weight;
             });
         }
         ModelEvidence {
-            coverage: if total == 0 {
+            coverage: if maximum == 0 {
                 0.0
             } else {
-                hits as f32 / total as f32
+                evidence as f32 / maximum as f32
             },
-            grams: total,
+            grams,
         }
+    }
+
+    #[cfg(test)]
+    fn is_valid(&self) -> bool {
+        if self.bytes.len() < MODEL_HEADER_SIZE || &self.bytes[..8] != MODEL_MAGIC {
+            return false;
+        }
+        let count = self.entry_count();
+        if MODEL_HEADER_SIZE.checked_add(count.saturating_mul(MODEL_ENTRY_SIZE))
+            != Some(self.bytes.len())
+        {
+            return false;
+        }
+        let mut previous = None;
+        for index in 0..count {
+            let key = self.key_at(index);
+            if self.score_at(index) == 0 || previous.is_some_and(|value| value >= key) {
+                return false;
+            }
+            previous = Some(key);
+        }
+        true
     }
 }
 
 fn language_likelihood(language: Language, text: &str) -> ModelEvidence {
-    static MODELS: OnceLock<LanguageModels> = OnceLock::new();
-    let models = MODELS.get_or_init(|| LanguageModels {
-        english: NgramProfile::train(ENGLISH_WORDS),
-        ukrainian: NgramProfile::train(UKRAINIAN_WORDS),
-    });
-    match language {
-        Language::English => models.english.score(text),
-        Language::Ukrainian => models.ukrainian.score(text),
-    }
+    static MODEL: NgramModel = NgramModel {
+        bytes: LANGUAGE_MODEL,
+    };
+    MODEL.score(language, text)
 }
 
 fn language_tokens(text: &str) -> Vec<String> {
@@ -612,6 +651,50 @@ mod tests {
 
         assert!(target.coverage >= 0.28);
         assert!(target.coverage - source.coverage >= 0.20);
+    }
+
+    #[test]
+    fn embedded_model_is_a_large_language_tagged_ngram_index() {
+        let model = NgramModel {
+            bytes: LANGUAGE_MODEL,
+        };
+
+        assert!(model.is_valid());
+        assert!(model.entry_count() > 90_000);
+        assert!(model.language_score(ngram_key(&['^', 't', 'h'])) < 0);
+        assert!(model.language_score(ngram_key(&['^', 'п', 'р'])) > 0);
+        assert!(
+            !LANGUAGE_MODEL
+                .windows("перевіримо".len())
+                .any(|window| window == "перевіримо".as_bytes())
+        );
+    }
+
+    #[test]
+    fn extracted_ngrams_fall_directly_into_their_language() {
+        for text in ["configuration", "accessibility", "keyboard", "language"] {
+            let english = language_likelihood(Language::English, text);
+            let ukrainian = language_likelihood(Language::Ukrainian, text);
+            assert!(english.coverage > 0.20, "weak English evidence for {text}");
+            assert!(
+                english.coverage > ukrainian.coverage,
+                "misclassified English token {text}"
+            );
+        }
+
+        for text in ["налаштування", "доступність", "клавіатура", "перемикання"]
+        {
+            let english = language_likelihood(Language::English, text);
+            let ukrainian = language_likelihood(Language::Ukrainian, text);
+            assert!(
+                ukrainian.coverage > 0.20,
+                "weak Ukrainian evidence for {text}"
+            );
+            assert!(
+                ukrainian.coverage > english.coverage,
+                "misclassified Ukrainian token {text}"
+            );
+        }
     }
 
     #[test]
