@@ -16,7 +16,7 @@ use winit::{
 #[cfg(target_os = "macos")]
 use crate::accessibility::{self, AccessibilityWatcher};
 use crate::{
-    auto_correct::{AutoDecision, AutoKeyEvent, AutoWordTracker, evaluate},
+    auto_correct::{AutoCorrection, AutoDecision, AutoKeyEvent, AutoWordTracker, evaluate},
     auto_correct_monitor::AutoCorrectMonitor,
     automation::{
         SelectionOutcome, convert_previous_input_if_matches, convert_previous_word,
@@ -36,6 +36,10 @@ enum AppEvent {
     Menu(MenuEvent),
     ModifierGesture(GestureAction),
     AutoKey(AutoKeyEvent),
+    ApplyAutoCorrection {
+        generation: u64,
+        correction: AutoCorrection,
+    },
     ReloadConfiguration,
     HideLayoutIndicator(u64),
     #[cfg(target_os = "macos")]
@@ -55,6 +59,7 @@ struct App {
     tray: Option<Tray>,
     processing: bool,
     paused: bool,
+    auto_generation: u64,
     feedback_generation: u64,
     #[cfg(target_os = "macos")]
     accessibility_watcher: Option<AccessibilityWatcher>,
@@ -135,6 +140,7 @@ pub fn run(config: Config) -> Result<()> {
         tray: None,
         processing: false,
         paused: false,
+        auto_generation: 0,
         feedback_generation: 0,
         #[cfg(target_os = "macos")]
         accessibility_watcher: None,
@@ -295,6 +301,7 @@ impl App {
     }
 
     fn handle_auto_key(&mut self, event: AutoKeyEvent) {
+        self.auto_generation = self.auto_generation.wrapping_add(1);
         if self.paused || self.processing || !self.config.auto_correct {
             return;
         }
@@ -314,20 +321,40 @@ impl App {
         let Some(sample) = self.auto_tracker.observe(event) else {
             return;
         };
-        let correction = match evaluate(&sample, &self.config) {
-            AutoDecision::Correct(correction) => correction,
-            AutoDecision::Continue => return,
+        match evaluate(&sample, &self.config) {
+            AutoDecision::Correct(correction) => self.schedule_auto_correction(correction),
+            AutoDecision::Continue => {}
             AutoDecision::Reset => {
                 self.auto_tracker.clear();
-                return;
             }
-        };
+        }
+    }
 
+    fn schedule_auto_correction(&self, correction: AutoCorrection) {
+        let generation = self.auto_generation;
+        let delay = self.config.auto_correct_delay_ms;
+        let proxy = self.event_proxy.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+            if let Err(error) = proxy.send_event(AppEvent::ApplyAutoCorrection {
+                generation,
+                correction,
+            }) {
+                debug!(%error, "failed to schedule automatic correction");
+            }
+        });
+    }
+
+    fn apply_auto_correction(&mut self, generation: u64, correction: AutoCorrection) {
+        if generation != self.auto_generation
+            || self.paused
+            || self.processing
+            || !self.config.auto_correct
+        {
+            return;
+        }
         self.processing = true;
         self.set_auto_suspended(true);
-        std::thread::sleep(std::time::Duration::from_millis(
-            self.config.auto_correct_delay_ms,
-        ));
         let mut conversion_config = self.config.clone();
         conversion_config.direction = correction.direction;
         let result =
@@ -356,6 +383,7 @@ impl App {
             Err(error) => error!(%error, "automatic correction failed"),
         }
         self.auto_tracker.clear();
+        self.auto_generation = self.auto_generation.wrapping_add(1);
         self.processing = false;
         self.set_auto_suspended(false);
     }
@@ -613,6 +641,10 @@ impl ApplicationHandler<AppEvent> for App {
                 self.perform_conversion(action == GestureAction::PreviousWord);
             }
             AppEvent::AutoKey(event) => self.handle_auto_key(event),
+            AppEvent::ApplyAutoCorrection {
+                generation,
+                correction,
+            } => self.apply_auto_correction(generation, correction),
             AppEvent::ReloadConfiguration => {
                 if let Err(error) = self.reload_configuration() {
                     error!(%error, "could not reload the changed configuration");

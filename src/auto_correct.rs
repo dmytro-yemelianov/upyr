@@ -222,6 +222,11 @@ pub fn evaluate(sample: &WordSample, config: &Config) -> AutoDecision {
         && target_model.grams >= 3
         && target_model.coverage >= minimum_coverage
         && advantage >= minimum_advantage;
+    let source_model_match = context_characters
+        >= minimum_characters.max(config.auto_correct_min_word_length)
+        && source_model.grams >= 3
+        && source_model.coverage >= minimum_coverage
+        && source_model.coverage - target_model.coverage >= minimum_advantage;
 
     if dictionary_match || model_match {
         return AutoDecision::Correct(AutoCorrection {
@@ -231,7 +236,10 @@ pub fn evaluate(sample: &WordSample, config: &Config) -> AutoDecision {
         });
     }
 
-    if (source_known && !target_known) || has_unsafe_source_punctuation(&candidates.source_word) {
+    if (source_known && !target_known)
+        || source_model_match
+        || has_unsafe_source_punctuation(&candidates.source_word)
+    {
         AutoDecision::Reset
     } else {
         AutoDecision::Continue
@@ -607,6 +615,71 @@ mod tests {
             ));
             assert_eq!(correction.replacement, expected);
         }
+    }
+
+    #[test]
+    fn recognizes_reported_mixed_entry_mode_ukrainian_start() {
+        for source in ["entry", "mode", "quite"] {
+            assert_eq!(
+                evaluate(&sample(source, SystemLayout::English), &Config::default()),
+                AutoDecision::Reset,
+                "recognized English must end its language segment: {source}"
+            );
+        }
+
+        let correction = correction(evaluate(
+            &sample("idblrj", SystemLayout::English),
+            &Config::default(),
+        ));
+
+        assert_eq!(correction.expected_source, "idblrj");
+        assert_eq!(correction.replacement, "швидко");
+        assert_eq!(correction.direction, Direction::EnglishToUkrainian);
+    }
+
+    #[test]
+    fn tracker_ends_the_english_segment_before_reported_ukrainian_input() {
+        let mut tracker = AutoWordTracker::default();
+        let mut final_decision = AutoDecision::Continue;
+
+        for character in "entry mode is quite idblrj ".chars() {
+            if character != ' ' && tracker.needs_layout_check() {
+                tracker.set_source_layout(Some(SystemLayout::English));
+            }
+            let key = if character == ' ' {
+                Keycode::Space
+            } else {
+                character
+                    .to_ascii_uppercase()
+                    .to_string()
+                    .parse()
+                    .expect("test phrase uses supported physical keys")
+            };
+            if let Some(sample) = tracker.observe(AutoKeyEvent {
+                key,
+                shifted: false,
+            }) {
+                final_decision = evaluate(&sample, &Config::default());
+                if final_decision == AutoDecision::Reset {
+                    tracker.clear();
+                }
+            }
+        }
+
+        let correction = correction(final_decision);
+        assert_eq!(correction.expected_source, "idblrj ");
+        assert_eq!(correction.replacement, "швидко ");
+    }
+
+    #[test]
+    fn continuous_fast_ukrainian_segment_remains_correctable_at_its_last_boundary() {
+        let correction = correction(evaluate(
+            &context_sample("ghj", "idblrj vf' dbghfdkznb ghj ", SystemLayout::English),
+            &Config::default(),
+        ));
+
+        assert_eq!(correction.expected_source, "idblrj vf' dbghfdkznb ghj ");
+        assert_eq!(correction.replacement, "швидко має виправляти про ");
     }
 
     #[test]
