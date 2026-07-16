@@ -3,18 +3,29 @@ use std::{collections::HashSet, env, path::PathBuf, process::Command};
 #[cfg(target_os = "macos")]
 use std::fs;
 
-use anyhow::{Context, Result, anyhow, bail};
+#[cfg(not(target_os = "macos"))]
+use anyhow::anyhow;
+use anyhow::{Context, Result, bail};
+#[cfg(not(target_os = "macos"))]
 use eframe::egui;
+use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use single_instance::SingleInstance;
 
 use crate::{
     autostart,
-    config::{AutoCorrectSensitivity, Config, GestureAction, ModifierGesture},
+    config::{AutoCorrectSensitivity, Config},
+};
+#[cfg(not(target_os = "macos"))]
+use crate::{
+    config::{GestureAction, ModifierGesture},
     layout::Direction,
 };
 
 #[cfg(target_os = "macos")]
 use crate::config::config_path;
+
+#[cfg(target_os = "macos")]
+mod macos;
 
 pub fn run() -> Result<()> {
     let instance_key = settings_instance_key()?;
@@ -26,19 +37,25 @@ pub fn run() -> Result<()> {
 
     let config = Config::load()?;
     let launch_at_login = autostart::status()?.enabled;
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Upyr Settings")
-            .with_inner_size([680.0, 800.0])
-            .with_min_inner_size([520.0, 560.0]),
-        ..Default::default()
-    };
-    eframe::run_native(
-        "Upyr Settings",
-        options,
-        Box::new(move |_context| Ok(Box::new(SettingsApp::new(config, launch_at_login)))),
-    )
-    .map_err(|error| anyhow!(error.to_string()))
+    #[cfg(target_os = "macos")]
+    return macos::run(config, launch_at_login);
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let options = eframe::NativeOptions {
+            viewport: egui::ViewportBuilder::default()
+                .with_title("Upyr Settings")
+                .with_inner_size([680.0, 800.0])
+                .with_min_inner_size([520.0, 560.0]),
+            ..Default::default()
+        };
+        eframe::run_native(
+            "Upyr Settings",
+            options,
+            Box::new(move |_context| Ok(Box::new(SettingsApp::new(config, launch_at_login)))),
+        )
+        .map_err(|error| anyhow!(error.to_string()))
+    }
 }
 
 fn settings_instance_key() -> Result<String> {
@@ -115,14 +132,166 @@ fn packaged_macos_bundle() -> Result<Option<PathBuf>> {
     Ok(bundle.is_dir().then_some(bundle))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SettingsTab {
+    General,
+    Automatic,
+    Shortcuts,
+    Feedback,
+    Advanced,
+}
+
+impl SettingsTab {
+    #[cfg(not(target_os = "macos"))]
+    const ALL: [Self; 5] = [
+        Self::General,
+        Self::Automatic,
+        Self::Shortcuts,
+        Self::Feedback,
+        Self::Advanced,
+    ];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::General => "General",
+            Self::Automatic => "Automatic",
+            Self::Shortcuts => "Shortcuts",
+            Self::Feedback => "Feedback",
+            Self::Advanced => "Advanced",
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShortcutSlot {
+    Selection,
+    PreviousWord,
+}
+
+struct SearchParameter {
+    tab: SettingsTab,
+    label: &'static str,
+    terms: &'static str,
+}
+
+const SEARCH_PARAMETERS: &[SearchParameter] = &[
+    SearchParameter {
+        tab: SettingsTab::General,
+        label: "Conversion direction",
+        terms: "smart english ukrainian language mapping",
+    },
+    SearchParameter {
+        tab: SettingsTab::General,
+        label: "Switch OS layout",
+        terms: "input source follow converted text",
+    },
+    SearchParameter {
+        tab: SettingsTab::General,
+        label: "Restore clipboard",
+        terms: "pasteboard copy contents",
+    },
+    SearchParameter {
+        tab: SettingsTab::General,
+        label: "Launch at login",
+        terms: "autostart startup boot",
+    },
+    SearchParameter {
+        tab: SettingsTab::Automatic,
+        label: "Automatic correction",
+        terms: "auto fix after space detection",
+    },
+    SearchParameter {
+        tab: SettingsTab::Automatic,
+        label: "Sensitivity",
+        terms: "confidence conservative balanced aggressive",
+    },
+    SearchParameter {
+        tab: SettingsTab::Automatic,
+        label: "Minimum word length",
+        terms: "characters threshold",
+    },
+    SearchParameter {
+        tab: SettingsTab::Automatic,
+        label: "Correction delay",
+        terms: "space milliseconds timing",
+    },
+    SearchParameter {
+        tab: SettingsTab::Automatic,
+        label: "Never correct list",
+        terms: "exceptions dictionary words ignore exclude",
+    },
+    SearchParameter {
+        tab: SettingsTab::Shortcuts,
+        label: "Convert selection shortcut",
+        terms: "hotkey record key combination",
+    },
+    SearchParameter {
+        tab: SettingsTab::Shortcuts,
+        label: "Fix previous word shortcut",
+        terms: "hotkey record backspace key combination",
+    },
+    SearchParameter {
+        tab: SettingsTab::Shortcuts,
+        label: "Modifier gesture",
+        terms: "double control shift trigger",
+    },
+    SearchParameter {
+        tab: SettingsTab::Shortcuts,
+        label: "Gesture action",
+        terms: "selection previous word",
+    },
+    SearchParameter {
+        tab: SettingsTab::Shortcuts,
+        label: "Gesture timeout",
+        terms: "double press milliseconds",
+    },
+    SearchParameter {
+        tab: SettingsTab::Feedback,
+        label: "Language indicator",
+        terms: "flag floating cursor pointer overlay english ukrainian",
+    },
+    SearchParameter {
+        tab: SettingsTab::Feedback,
+        label: "Indicator duration",
+        terms: "flag overlay milliseconds timing",
+    },
+    SearchParameter {
+        tab: SettingsTab::Feedback,
+        label: "Switch sound",
+        terms: "audio effect feedback",
+    },
+    SearchParameter {
+        tab: SettingsTab::Advanced,
+        label: "Copy delay",
+        terms: "clipboard milliseconds timing",
+    },
+    SearchParameter {
+        tab: SettingsTab::Advanced,
+        label: "Paste delay",
+        terms: "clipboard milliseconds timing",
+    },
+    SearchParameter {
+        tab: SettingsTab::Advanced,
+        label: "Clipboard restore delay",
+        terms: "pasteboard milliseconds timing",
+    },
+];
+
+#[cfg(not(target_os = "macos"))]
 struct SettingsApp {
     config: Config,
     exceptions: String,
     launch_at_login: bool,
     status: Option<(bool, String)>,
     style_applied: bool,
+    tab: SettingsTab,
+    search: String,
+    recording: Option<ShortcutSlot>,
+    shortcut_error: Option<String>,
 }
 
+#[cfg(not(target_os = "macos"))]
 impl SettingsApp {
     fn new(config: Config, launch_at_login: bool) -> Self {
         let exceptions = config.auto_correct_exceptions.join("\n");
@@ -132,6 +301,10 @@ impl SettingsApp {
             launch_at_login,
             status: None,
             style_applied: false,
+            tab: SettingsTab::General,
+            search: String::new(),
+            recording: None,
+            shortcut_error: None,
         }
     }
 
@@ -161,13 +334,365 @@ impl SettingsApp {
     fn reset(&mut self) {
         self.config = Config::default();
         self.exceptions.clear();
+        self.recording = None;
+        self.shortcut_error = None;
         self.status = Some((
             true,
             "Defaults restored in the form. Choose Save to apply them.".to_owned(),
         ));
     }
+
+    fn capture_shortcut(&mut self, context: &egui::Context) {
+        let Some(slot) = self.recording else {
+            return;
+        };
+        let event = context.input(|input| {
+            input.events.iter().rev().find_map(|event| match event {
+                egui::Event::Key {
+                    key,
+                    physical_key,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                } => Some((physical_key.unwrap_or(*key), *modifiers)),
+                _ => None,
+            })
+        });
+        let Some((key, modifiers)) = event else {
+            return;
+        };
+        if key == egui::Key::Escape {
+            self.recording = None;
+            self.shortcut_error = None;
+            return;
+        }
+
+        let Some(code) = egui_key_to_code(key) else {
+            self.shortcut_error = Some("That key cannot be used in a global shortcut.".to_owned());
+            return;
+        };
+        let modifiers = hotkey_modifiers(modifiers);
+        if modifiers.is_empty() {
+            self.shortcut_error = Some(
+                "Include Command, Control, Option/Alt, or Shift so normal typing is never captured."
+                    .to_owned(),
+            );
+            return;
+        }
+
+        let value = HotKey::new(Some(modifiers), code).to_string();
+        let other = match slot {
+            ShortcutSlot::Selection => &self.config.last_word_hotkey,
+            ShortcutSlot::PreviousWord => &self.config.hotkey,
+        };
+        if shortcuts_equal(&value, other) {
+            self.shortcut_error =
+                Some("That shortcut is already assigned to the other action.".to_owned());
+            return;
+        }
+        match slot {
+            ShortcutSlot::Selection => self.config.hotkey = value,
+            ShortcutSlot::PreviousWord => self.config.last_word_hotkey = value,
+        }
+        self.recording = None;
+        self.shortcut_error = None;
+    }
+
+    fn draw_general(&mut self, ui: &mut egui::Ui) {
+        section_heading(
+            ui,
+            "General",
+            "Core conversion, clipboard, and startup behavior.",
+        );
+        egui::Grid::new("general-grid")
+            .num_columns(2)
+            .spacing([20.0, 12.0])
+            .show(ui, |ui| {
+                ui.label("Conversion direction");
+                egui::ComboBox::from_id_salt("direction")
+                    .selected_text(direction_label(self.config.direction))
+                    .show_ui(ui, |ui| {
+                        for value in [
+                            Direction::Smart,
+                            Direction::EnglishToUkrainian,
+                            Direction::UkrainianToEnglish,
+                        ] {
+                            ui.selectable_value(
+                                &mut self.config.direction,
+                                value,
+                                direction_label(value),
+                            );
+                        }
+                    });
+                ui.end_row();
+            });
+        ui.add_space(6.0);
+        ui.checkbox(
+            &mut self.config.switch_layout,
+            "Switch the OS layout to match converted text",
+        );
+        ui.checkbox(
+            &mut self.config.restore_clipboard,
+            "Restore clipboard contents after conversion",
+        );
+        ui.checkbox(&mut self.launch_at_login, "Launch Upyr at login");
+    }
+
+    fn draw_automatic(&mut self, ui: &mut egui::Ui) {
+        section_heading(
+            ui,
+            "Automatic correction",
+            "Fix high-confidence wrong-layout text immediately after Space.",
+        );
+        ui.checkbox(
+            &mut self.config.auto_correct,
+            "Correct confidently recognized text after Space",
+        );
+        ui.small(
+            "Opt-in: a short input prefix is kept only in memory, cleared at safe boundaries, and never logged.",
+        );
+        #[cfg(target_os = "macos")]
+        ui.colored_label(
+            egui::Color32::from_rgb(190, 125, 35),
+            "macOS requires Accessibility access. Upyr checks existing access first and offers one restart after permission is granted.",
+        );
+        ui.add_space(8.0);
+        ui.add_enabled_ui(self.config.auto_correct, |ui| {
+            egui::Grid::new("automatic-correction-grid")
+                .num_columns(2)
+                .spacing([20.0, 12.0])
+                .show(ui, |ui| {
+                    ui.label("Sensitivity");
+                    egui::ComboBox::from_id_salt("auto-correct-sensitivity")
+                        .selected_text(sensitivity_label(self.config.auto_correct_sensitivity))
+                        .show_ui(ui, |ui| {
+                            for value in [
+                                AutoCorrectSensitivity::Conservative,
+                                AutoCorrectSensitivity::Balanced,
+                                AutoCorrectSensitivity::Aggressive,
+                            ] {
+                                ui.selectable_value(
+                                    &mut self.config.auto_correct_sensitivity,
+                                    value,
+                                    sensitivity_label(value),
+                                );
+                            }
+                        });
+                    ui.end_row();
+                    ui.label("Minimum word length");
+                    ui.add(
+                        egui::DragValue::new(&mut self.config.auto_correct_min_word_length)
+                            .range(2..=32),
+                    );
+                    ui.end_row();
+                    ui.label("Delay after Space");
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::DragValue::new(&mut self.config.auto_correct_delay_ms)
+                                .range(10..=250),
+                        );
+                        ui.label("ms");
+                    });
+                    ui.end_row();
+                });
+            ui.add_space(8.0);
+            ui.label("Never auto-correct these words");
+            ui.small("One word per line, or separate words with commas.");
+            ui.add(
+                egui::TextEdit::multiline(&mut self.exceptions)
+                    .desired_rows(8)
+                    .desired_width(f32::INFINITY),
+            );
+        });
+    }
+
+    fn draw_shortcuts(&mut self, ui: &mut egui::Ui) {
+        section_heading(
+            ui,
+            "Shortcuts",
+            "Click a recorder, then press the combination you want.",
+        );
+        self.shortcut_row(ui, "Convert selection", ShortcutSlot::Selection);
+        ui.add_space(8.0);
+        self.shortcut_row(ui, "Fix previous word", ShortcutSlot::PreviousWord);
+        if let Some(error) = &self.shortcut_error {
+            ui.add_space(6.0);
+            ui.colored_label(egui::Color32::from_rgb(190, 55, 55), error);
+        }
+        ui.add_space(18.0);
+        section_heading(
+            ui,
+            "Modifier gesture",
+            "An optional double-tap trigger without a regular key.",
+        );
+        egui::Grid::new("gesture-grid")
+            .num_columns(2)
+            .spacing([20.0, 12.0])
+            .show(ui, |ui| {
+                ui.label("Gesture");
+                egui::ComboBox::from_id_salt("modifier-gesture")
+                    .selected_text(gesture_label(self.config.modifier_gesture))
+                    .show_ui(ui, |ui| {
+                        for value in [
+                            ModifierGesture::Disabled,
+                            ModifierGesture::DoubleControl,
+                            ModifierGesture::DoubleShift,
+                            ModifierGesture::DoubleControlShift,
+                        ] {
+                            ui.selectable_value(
+                                &mut self.config.modifier_gesture,
+                                value,
+                                gesture_label(value),
+                            );
+                        }
+                    });
+                ui.end_row();
+                ui.label("Action");
+                egui::ComboBox::from_id_salt("gesture-action")
+                    .selected_text(gesture_action_label(self.config.modifier_gesture_action))
+                    .show_ui(ui, |ui| {
+                        for value in [GestureAction::PreviousWord, GestureAction::Selection] {
+                            ui.selectable_value(
+                                &mut self.config.modifier_gesture_action,
+                                value,
+                                gesture_action_label(value),
+                            );
+                        }
+                    });
+                ui.end_row();
+                ui.label("Double-tap timeout");
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut self.config.modifier_gesture_timeout_ms)
+                            .range(150..=2_000),
+                    );
+                    ui.label("ms");
+                });
+                ui.end_row();
+            });
+    }
+
+    fn shortcut_row(&mut self, ui: &mut egui::Ui, label: &str, slot: ShortcutSlot) {
+        let active = self.recording == Some(slot);
+        let value = match slot {
+            ShortcutSlot::Selection => self.config.hotkey.clone(),
+            ShortcutSlot::PreviousWord => self.config.last_word_hotkey.clone(),
+        };
+        ui.label(egui::RichText::new(label).strong());
+        ui.horizontal(|ui| {
+            let text = if active {
+                "Press shortcut…  (Esc to cancel)".to_owned()
+            } else {
+                pretty_hotkey(&value).unwrap_or_else(|| value.clone())
+            };
+            let response = ui.add_sized(
+                [310.0, 38.0],
+                egui::Button::new(egui::RichText::new(text).monospace()).selected(active),
+            );
+            if response.clicked() {
+                self.recording = Some(slot);
+                self.shortcut_error = None;
+            }
+            let default = Config::default();
+            let default_value = match slot {
+                ShortcutSlot::Selection => default.hotkey,
+                ShortcutSlot::PreviousWord => default.last_word_hotkey,
+            };
+            if ui
+                .add_enabled(value != default_value, egui::Button::new("Reset"))
+                .clicked()
+            {
+                match slot {
+                    ShortcutSlot::Selection => self.config.hotkey = default_value,
+                    ShortcutSlot::PreviousWord => self.config.last_word_hotkey = default_value,
+                }
+                self.recording = None;
+                self.shortcut_error = None;
+            }
+        });
+        ui.small("The shortcut uses physical keys, so it keeps working in either keyboard layout.");
+    }
+
+    fn draw_feedback(&mut self, ui: &mut egui::Ui) {
+        section_heading(
+            ui,
+            "Feedback",
+            "Optional confirmation after Upyr changes the active input source.",
+        );
+        ui.checkbox(
+            &mut self.config.show_layout_indicator,
+            "Show a temporary language flag next to the pointer",
+        );
+        ui.add_enabled_ui(self.config.show_layout_indicator, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Visible for");
+                ui.add(
+                    egui::DragValue::new(&mut self.config.layout_indicator_duration_ms)
+                        .range(250..=3_000),
+                );
+                ui.label("ms");
+            });
+        });
+        ui.checkbox(
+            &mut self.config.play_switch_sound,
+            "Play a subtle sound when the layout changes",
+        );
+        ui.add_space(10.0);
+        ui.small(
+            "Feedback runs only after a real English ↔ Ukrainian OS layout change. It does not fire when the target layout was already active.",
+        );
+    }
+
+    fn draw_advanced(&mut self, ui: &mut egui::Ui) {
+        section_heading(
+            ui,
+            "Advanced timing",
+            "Increase these only for applications with slow clipboard handling.",
+        );
+        egui::Grid::new("timing-grid")
+            .num_columns(3)
+            .spacing([20.0, 12.0])
+            .show(ui, |ui| {
+                timing_row(ui, "Copy delay", &mut self.config.copy_delay_ms, 10, 2_000);
+                timing_row(ui, "Paste delay", &mut self.config.paste_delay_ms, 0, 2_000);
+                timing_row(
+                    ui,
+                    "Clipboard restore delay",
+                    &mut self.config.restore_delay_ms,
+                    0,
+                    5_000,
+                );
+            });
+    }
+
+    fn draw_search_results(&mut self, ui: &mut egui::Ui) {
+        let query = self.search.trim().to_lowercase();
+        section_heading(ui, "Search results", "Choose a setting to open its tab.");
+        let mut found = 0;
+        for parameter in SEARCH_PARAMETERS {
+            let haystack = format!("{} {}", parameter.label, parameter.terms).to_lowercase();
+            if !haystack.contains(&query) {
+                continue;
+            }
+            found += 1;
+            if ui
+                .add_sized(
+                    [ui.available_width(), 38.0],
+                    egui::Button::new(format!("{}  ›  {}", parameter.tab.label(), parameter.label)),
+                )
+                .clicked()
+            {
+                self.tab = parameter.tab;
+                self.search.clear();
+            }
+        }
+        if found == 0 {
+            ui.label("No settings match this search.");
+        }
+    }
 }
 
+#[cfg(not(target_os = "macos"))]
 impl eframe::App for SettingsApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         if !self.style_applied {
@@ -178,274 +703,279 @@ impl eframe::App for SettingsApp {
             context.set_style(style);
             self.style_applied = true;
         }
+        self.capture_shortcut(context);
+
+        egui::TopBottomPanel::top("settings-header").show(context, |ui| {
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new("Upyr Settings").size(22.0).strong());
+                    ui.small("English ↔ Ukrainian keyboard layout correction");
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_sized(
+                        [245.0, 32.0],
+                        egui::TextEdit::singleline(&mut self.search).hint_text("Search settings…"),
+                    );
+                });
+            });
+            ui.add_space(8.0);
+            ui.horizontal_wrapped(|ui| {
+                for tab in SettingsTab::ALL {
+                    if ui.selectable_label(self.tab == tab, tab.label()).clicked() {
+                        self.tab = tab;
+                        self.search.clear();
+                    }
+                }
+            });
+            ui.add_space(5.0);
+        });
+
+        egui::TopBottomPanel::bottom("settings-actions").show(context, |ui| {
+            ui.add_space(6.0);
+            if let Some((success, message)) = &self.status {
+                ui.colored_label(
+                    if *success {
+                        egui::Color32::from_rgb(45, 145, 75)
+                    } else {
+                        egui::Color32::from_rgb(190, 55, 55)
+                    },
+                    message,
+                );
+            }
+            ui.horizontal(|ui| {
+                if ui
+                    .add(
+                        egui::Button::new(egui::RichText::new("Save settings").strong())
+                            .fill(egui::Color32::from_rgb(37, 105, 177)),
+                    )
+                    .clicked()
+                {
+                    self.save();
+                }
+                if ui.button("Reset all").clicked() {
+                    self.reset();
+                }
+                if ui.button("Close").clicked() {
+                    context.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            });
+            ui.add_space(6.0);
+        });
 
         egui::CentralPanel::default().show(context, |ui| {
-            egui::Frame::new()
-                .fill(egui::Color32::from_rgb(37, 83, 145))
-                .corner_radius(10)
-                .inner_margin(16)
-                .show(ui, |ui| {
-                    ui.label(
-                        egui::RichText::new("Upyr Settings")
-                            .size(24.0)
-                            .strong()
-                            .color(egui::Color32::WHITE),
-                    );
-                    ui.label(
-                        egui::RichText::new(
-                            "Local English ↔ Ukrainian keyboard layout correction",
-                        )
-                        .color(egui::Color32::from_rgb(220, 232, 248)),
-                    );
-                });
-            ui.add_space(10.0);
-
             egui::ScrollArea::vertical().show(ui, |ui| {
-                section_heading(
-                    ui,
-                    "Automatic correction",
-                    "Fix high-confidence wrong-layout words immediately after Space.",
-                );
-                ui.checkbox(
-                    &mut self.config.auto_correct,
-                    "Correct confidently recognized words after Space",
-                );
-                ui.small(
-                    "Opt-in: keys are kept only in memory while a word is being typed and are never logged.",
-                );
-                #[cfg(target_os = "macos")]
-                ui.colored_label(
-                    egui::Color32::from_rgb(225, 166, 55),
-                    "macOS requires Accessibility access for Upyr. After granting it, save again or restart Upyr.",
-                );
-                ui.add_enabled_ui(self.config.auto_correct, |ui| {
-                    egui::Grid::new("automatic-correction-grid")
-                        .num_columns(2)
-                        .spacing([16.0, 8.0])
-                        .show(ui, |ui| {
-                            ui.label("Sensitivity");
-                            egui::ComboBox::from_id_salt("auto-correct-sensitivity")
-                                .selected_text(sensitivity_label(
-                                    self.config.auto_correct_sensitivity,
-                                ))
-                                .show_ui(ui, |ui| {
-                                    for value in [
-                                        AutoCorrectSensitivity::Conservative,
-                                        AutoCorrectSensitivity::Balanced,
-                                        AutoCorrectSensitivity::Aggressive,
-                                    ] {
-                                        ui.selectable_value(
-                                            &mut self.config.auto_correct_sensitivity,
-                                            value,
-                                            sensitivity_label(value),
-                                        );
-                                    }
-                                });
-                            ui.end_row();
-
-                            ui.label("Minimum word length");
-                            ui.add(
-                                egui::DragValue::new(
-                                    &mut self.config.auto_correct_min_word_length,
-                                )
-                                .range(2..=32),
-                            );
-                            ui.end_row();
-
-                            ui.label("Delay after Space");
-                            ui.horizontal(|ui| {
-                                ui.add(
-                                    egui::DragValue::new(
-                                        &mut self.config.auto_correct_delay_ms,
-                                    )
-                                    .range(10..=250),
-                                );
-                                ui.label("ms");
-                            });
-                            ui.end_row();
-                        });
-                    ui.label("Never auto-correct these words (one per line or comma-separated)");
-                    ui.add(
-                        egui::TextEdit::multiline(&mut self.exceptions)
-                            .desired_rows(4)
-                            .desired_width(f32::INFINITY),
-                    );
-                });
-
                 ui.add_space(12.0);
-                section_heading(
-                    ui,
-                    "Shortcuts and gesture",
-                    "Manual correction stays available whether automation is enabled or not.",
-                );
-                egui::Grid::new("shortcuts-grid")
-                    .num_columns(2)
-                    .spacing([16.0, 8.0])
-                    .show(ui, |ui| {
-                        ui.label("Convert selection");
-                        ui.add_sized(
-                            [300.0, 28.0],
-                            egui::TextEdit::singleline(&mut self.config.hotkey),
-                        );
-                        ui.end_row();
-
-                        ui.label("Fix previous word");
-                        ui.add_sized(
-                            [300.0, 28.0],
-                            egui::TextEdit::singleline(&mut self.config.last_word_hotkey),
-                        );
-                        ui.end_row();
-
-                        ui.label("Modifier gesture");
-                        egui::ComboBox::from_id_salt("modifier-gesture")
-                            .selected_text(gesture_label(self.config.modifier_gesture))
-                            .show_ui(ui, |ui| {
-                                for value in [
-                                    ModifierGesture::Disabled,
-                                    ModifierGesture::DoubleControl,
-                                    ModifierGesture::DoubleShift,
-                                    ModifierGesture::DoubleControlShift,
-                                ] {
-                                    ui.selectable_value(
-                                        &mut self.config.modifier_gesture,
-                                        value,
-                                        gesture_label(value),
-                                    );
-                                }
-                            });
-                        ui.end_row();
-
-                        ui.label("Gesture action");
-                        egui::ComboBox::from_id_salt("gesture-action")
-                            .selected_text(gesture_action_label(
-                                self.config.modifier_gesture_action,
-                            ))
-                            .show_ui(ui, |ui| {
-                                for value in [GestureAction::PreviousWord, GestureAction::Selection]
-                                {
-                                    ui.selectable_value(
-                                        &mut self.config.modifier_gesture_action,
-                                        value,
-                                        gesture_action_label(value),
-                                    );
-                                }
-                            });
-                        ui.end_row();
-
-                        ui.label("Gesture timeout");
-                        ui.horizontal(|ui| {
-                            ui.add(
-                                egui::DragValue::new(
-                                    &mut self.config.modifier_gesture_timeout_ms,
-                                )
-                                .range(150..=2_000),
-                            );
-                            ui.label("ms");
-                        });
-                        ui.end_row();
-                    });
-
-                ui.add_space(12.0);
-                section_heading(
-                    ui,
-                    "Behavior",
-                    "Choose how converted text, the active layout, and clipboard are handled.",
-                );
-                egui::Grid::new("behavior-grid")
-                    .num_columns(2)
-                    .spacing([16.0, 8.0])
-                    .show(ui, |ui| {
-                        ui.label("Conversion direction");
-                        egui::ComboBox::from_id_salt("direction")
-                            .selected_text(direction_label(self.config.direction))
-                            .show_ui(ui, |ui| {
-                                for value in [
-                                    Direction::Smart,
-                                    Direction::EnglishToUkrainian,
-                                    Direction::UkrainianToEnglish,
-                                ] {
-                                    ui.selectable_value(
-                                        &mut self.config.direction,
-                                        value,
-                                        direction_label(value),
-                                    );
-                                }
-                            });
-                        ui.end_row();
-                    });
-                ui.checkbox(
-                    &mut self.config.switch_layout,
-                    "Switch the OS layout to match converted text",
-                );
-                ui.checkbox(
-                    &mut self.config.restore_clipboard,
-                    "Restore clipboard contents after conversion",
-                );
-                ui.checkbox(&mut self.launch_at_login, "Launch Upyr at login");
-
-                ui.collapsing("Advanced timing", |ui| {
-                    egui::Grid::new("timing-grid")
-                        .num_columns(3)
-                        .spacing([16.0, 8.0])
-                        .show(ui, |ui| {
-                            timing_row(ui, "Copy delay", &mut self.config.copy_delay_ms, 10, 2_000);
-                            timing_row(ui, "Paste delay", &mut self.config.paste_delay_ms, 0, 2_000);
-                            timing_row(
-                                ui,
-                                "Clipboard restore delay",
-                                &mut self.config.restore_delay_ms,
-                                0,
-                                5_000,
-                            );
-                        });
-                });
-
-                ui.add_space(12.0);
-                if let Some((success, message)) = &self.status {
-                    ui.colored_label(
-                        if *success {
-                            egui::Color32::from_rgb(45, 145, 75)
-                        } else {
-                            egui::Color32::from_rgb(190, 55, 55)
-                        },
-                        message,
-                    );
-                    ui.add_space(6.0);
+                if self.search.trim().is_empty() {
+                    match self.tab {
+                        SettingsTab::General => self.draw_general(ui),
+                        SettingsTab::Automatic => self.draw_automatic(ui),
+                        SettingsTab::Shortcuts => self.draw_shortcuts(ui),
+                        SettingsTab::Feedback => self.draw_feedback(ui),
+                        SettingsTab::Advanced => self.draw_advanced(ui),
+                    }
+                } else {
+                    self.draw_search_results(ui);
                 }
-                ui.horizontal(|ui| {
-                    if ui
-                        .add(
-                            egui::Button::new(egui::RichText::new("Save settings").strong())
-                                .fill(egui::Color32::from_rgb(37, 105, 177)),
-                        )
-                        .clicked()
-                    {
-                        self.save();
-                    }
-                    if ui.button("Reset to defaults").clicked() {
-                        self.reset();
-                    }
-                    if ui.button("Close").clicked() {
-                        context.send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-                });
-                ui.add_space(8.0);
+                ui.add_space(16.0);
             });
         });
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn section_heading(ui: &mut egui::Ui, title: &str, description: &str) {
     ui.label(egui::RichText::new(title).size(18.0).strong());
     ui.label(egui::RichText::new(description).weak());
     ui.add_space(2.0);
 }
 
+#[cfg(not(target_os = "macos"))]
 fn timing_row(ui: &mut egui::Ui, label: &str, value: &mut u64, min: u64, max: u64) {
     ui.label(label);
     ui.add(egui::DragValue::new(value).range(min..=max));
     ui.label("ms");
     ui.end_row();
+}
+
+#[cfg(not(target_os = "macos"))]
+fn hotkey_modifiers(modifiers: egui::Modifiers) -> Modifiers {
+    let mut result = Modifiers::empty();
+    if modifiers.shift {
+        result |= Modifiers::SHIFT;
+    }
+    if modifiers.ctrl {
+        result |= Modifiers::CONTROL;
+    }
+    if modifiers.alt {
+        result |= Modifiers::ALT;
+    }
+    if modifiers.mac_cmd {
+        result |= Modifiers::SUPER;
+    }
+    result
+}
+
+#[cfg(not(target_os = "macos"))]
+#[allow(clippy::too_many_lines)]
+fn egui_key_to_code(key: egui::Key) -> Option<Code> {
+    Some(match key {
+        egui::Key::ArrowDown => Code::ArrowDown,
+        egui::Key::ArrowLeft => Code::ArrowLeft,
+        egui::Key::ArrowRight => Code::ArrowRight,
+        egui::Key::ArrowUp => Code::ArrowUp,
+        egui::Key::Escape => Code::Escape,
+        egui::Key::Tab => Code::Tab,
+        egui::Key::Backspace => Code::Backspace,
+        egui::Key::Enter => Code::Enter,
+        egui::Key::Space => Code::Space,
+        egui::Key::Insert => Code::Insert,
+        egui::Key::Delete => Code::Delete,
+        egui::Key::Home => Code::Home,
+        egui::Key::End => Code::End,
+        egui::Key::PageUp => Code::PageUp,
+        egui::Key::PageDown => Code::PageDown,
+        egui::Key::Comma => Code::Comma,
+        egui::Key::Backslash | egui::Key::Pipe => Code::Backslash,
+        egui::Key::Slash | egui::Key::Questionmark => Code::Slash,
+        egui::Key::OpenBracket | egui::Key::OpenCurlyBracket => Code::BracketLeft,
+        egui::Key::CloseBracket | egui::Key::CloseCurlyBracket => Code::BracketRight,
+        egui::Key::Backtick => Code::Backquote,
+        egui::Key::Minus => Code::Minus,
+        egui::Key::Period => Code::Period,
+        egui::Key::Plus | egui::Key::Equals => Code::Equal,
+        egui::Key::Colon | egui::Key::Semicolon => Code::Semicolon,
+        egui::Key::Quote => Code::Quote,
+        egui::Key::Num0 => Code::Digit0,
+        egui::Key::Num1 | egui::Key::Exclamationmark => Code::Digit1,
+        egui::Key::Num2 => Code::Digit2,
+        egui::Key::Num3 => Code::Digit3,
+        egui::Key::Num4 => Code::Digit4,
+        egui::Key::Num5 => Code::Digit5,
+        egui::Key::Num6 => Code::Digit6,
+        egui::Key::Num7 => Code::Digit7,
+        egui::Key::Num8 => Code::Digit8,
+        egui::Key::Num9 => Code::Digit9,
+        egui::Key::A => Code::KeyA,
+        egui::Key::B => Code::KeyB,
+        egui::Key::C => Code::KeyC,
+        egui::Key::D => Code::KeyD,
+        egui::Key::E => Code::KeyE,
+        egui::Key::F => Code::KeyF,
+        egui::Key::G => Code::KeyG,
+        egui::Key::H => Code::KeyH,
+        egui::Key::I => Code::KeyI,
+        egui::Key::J => Code::KeyJ,
+        egui::Key::K => Code::KeyK,
+        egui::Key::L => Code::KeyL,
+        egui::Key::M => Code::KeyM,
+        egui::Key::N => Code::KeyN,
+        egui::Key::O => Code::KeyO,
+        egui::Key::P => Code::KeyP,
+        egui::Key::Q => Code::KeyQ,
+        egui::Key::R => Code::KeyR,
+        egui::Key::S => Code::KeyS,
+        egui::Key::T => Code::KeyT,
+        egui::Key::U => Code::KeyU,
+        egui::Key::V => Code::KeyV,
+        egui::Key::W => Code::KeyW,
+        egui::Key::X => Code::KeyX,
+        egui::Key::Y => Code::KeyY,
+        egui::Key::Z => Code::KeyZ,
+        egui::Key::F1 => Code::F1,
+        egui::Key::F2 => Code::F2,
+        egui::Key::F3 => Code::F3,
+        egui::Key::F4 => Code::F4,
+        egui::Key::F5 => Code::F5,
+        egui::Key::F6 => Code::F6,
+        egui::Key::F7 => Code::F7,
+        egui::Key::F8 => Code::F8,
+        egui::Key::F9 => Code::F9,
+        egui::Key::F10 => Code::F10,
+        egui::Key::F11 => Code::F11,
+        egui::Key::F12 => Code::F12,
+        egui::Key::F13 => Code::F13,
+        egui::Key::F14 => Code::F14,
+        egui::Key::F15 => Code::F15,
+        egui::Key::F16 => Code::F16,
+        egui::Key::F17 => Code::F17,
+        egui::Key::F18 => Code::F18,
+        egui::Key::F19 => Code::F19,
+        egui::Key::F20 => Code::F20,
+        egui::Key::F21 => Code::F21,
+        egui::Key::F22 => Code::F22,
+        egui::Key::F23 => Code::F23,
+        egui::Key::F24 => Code::F24,
+        _ => return None,
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn shortcuts_equal(left: &str, right: &str) -> bool {
+    match (left.parse::<HotKey>(), right.parse::<HotKey>()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left.eq_ignore_ascii_case(right),
+    }
+}
+
+fn pretty_hotkey(value: &str) -> Option<String> {
+    let hotkey = value.parse::<HotKey>().ok()?;
+    let key = pretty_key(hotkey.key);
+    #[cfg(target_os = "macos")]
+    {
+        let mut result = String::new();
+        if hotkey.mods.contains(Modifiers::CONTROL) {
+            result.push('⌃');
+        }
+        if hotkey.mods.contains(Modifiers::ALT) {
+            result.push('⌥');
+        }
+        if hotkey.mods.contains(Modifiers::SHIFT) {
+            result.push('⇧');
+        }
+        if hotkey.mods.contains(Modifiers::SUPER) {
+            result.push('⌘');
+        }
+        result.push_str(&key);
+        Some(result)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let mut parts = Vec::new();
+        if hotkey.mods.contains(Modifiers::CONTROL) {
+            parts.push("Ctrl".to_owned());
+        }
+        if hotkey.mods.contains(Modifiers::ALT) {
+            parts.push("Alt".to_owned());
+        }
+        if hotkey.mods.contains(Modifiers::SHIFT) {
+            parts.push("Shift".to_owned());
+        }
+        if hotkey.mods.contains(Modifiers::SUPER) {
+            parts.push("Super".to_owned());
+        }
+        parts.push(key);
+        Some(parts.join(" + "))
+    }
+}
+
+fn pretty_key(code: Code) -> String {
+    match code {
+        Code::Space => "Space".to_owned(),
+        Code::Backspace => "⌫".to_owned(),
+        Code::Delete => "⌦".to_owned(),
+        Code::Enter => "↩".to_owned(),
+        Code::Tab => "⇥".to_owned(),
+        Code::Escape => "Esc".to_owned(),
+        Code::ArrowUp => "↑".to_owned(),
+        Code::ArrowDown => "↓".to_owned(),
+        Code::ArrowLeft => "←".to_owned(),
+        Code::ArrowRight => "→".to_owned(),
+        _ => {
+            let raw = code.to_string();
+            raw.strip_prefix("Key").unwrap_or(&raw).to_owned()
+        }
+    }
 }
 
 fn parse_exceptions(source: &str) -> Vec<String> {
@@ -467,6 +997,7 @@ fn sensitivity_label(value: AutoCorrectSensitivity) -> &'static str {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn gesture_label(value: ModifierGesture) -> &'static str {
     match value {
         ModifierGesture::Disabled => "Disabled",
@@ -476,6 +1007,7 @@ fn gesture_label(value: ModifierGesture) -> &'static str {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn gesture_action_label(value: GestureAction) -> &'static str {
     match value {
         GestureAction::PreviousWord => "Fix previous word",
@@ -483,6 +1015,7 @@ fn gesture_action_label(value: GestureAction) -> &'static str {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn direction_label(value: Direction) -> &'static str {
     match value {
         Direction::Smart => "Smart (detect script)",
@@ -500,6 +1033,18 @@ mod tests {
         assert_eq!(
             parse_exceptions("GitHub, codex\ngithub\n  Upyr "),
             vec!["GitHub", "codex", "Upyr"]
+        );
+    }
+
+    #[test]
+    fn hotkey_preview_uses_readable_platform_notation() {
+        #[cfg(target_os = "macos")]
+        assert_eq!(pretty_hotkey("Cmd+Alt+Space").as_deref(), Some("⌥⌘Space"));
+
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(
+            pretty_hotkey("Ctrl+Alt+Space").as_deref(),
+            Some("Ctrl + Alt + Space")
         );
     }
 }

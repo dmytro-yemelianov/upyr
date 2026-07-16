@@ -62,13 +62,16 @@ upyr settings
 Default configuration:
 
 ```toml
-config_version = 3
+config_version = 4
 hotkey = "CmdOrCtrl+Alt+Space"
 last_word_hotkey = "CmdOrCtrl+Alt+Backspace"
 direction = "smart"
 copy_delay_ms = 90
 paste_delay_ms = 40
 switch_layout = true
+show_layout_indicator = false
+layout_indicator_duration_ms = 900
+play_switch_sound = false
 auto_correct = false
 auto_correct_sensitivity = "conservative"
 auto_correct_min_word_length = 4
@@ -85,13 +88,17 @@ Set `UPYR_CONFIG` to use a different config path. Valid directions are `smart`, 
 
 The optional modifier-only trigger can be `double-control`, `double-shift`, or `double-control-shift`; its action can be `previous-word` or `selection`. It is deliberately `disabled` by default, which means Upyr does not poll global keyboard state. When enabled, Upyr immediately reduces each sample to modifier flags plus an “other key pressed” bit; it does not retain or log key identities. Any ordinary key or unrelated modifier cancels the gesture. Enabling it requires Accessibility permission on macOS and an active X11 display on Linux.
 
-Automatic correction is also deliberately disabled by default. Its sensitivity can be `conservative`, `balanced`, or `aggressive`; conservative mode only changes a word when the converted result is in Upyr's embedded dictionary and the typed source is not. Add project names, abbreviations, or other intentional strings to `auto_correct_exceptions`. The settings window validates and writes this configuration, and a running Upyr process reloads it automatically.
+Automatic correction is also deliberately disabled by default. Its sensitivity can be `conservative`, `balanced`, or `aggressive`. Upyr combines exact dictionary matches with a tiny character 2–4-gram language model trained once from its embedded English and Ukrainian word lists. It keeps only a short, in-memory prefix from the current input boundary and converts that prefix when the target language becomes substantially more likely; navigation, layout changes, known source-language words, technical punctuation, and the 256-character limit reset the context. Add project names, abbreviations, or other intentional strings to `auto_correct_exceptions`. The settings window validates and writes this configuration, and a running Upyr process reloads it automatically.
+
+Settings are organized into General, Automatic, Shortcuts, Feedback, and Advanced tabs. Parameter search jumps directly to the matching tab. Shortcut fields are press-to-record controls: they capture physical keys, require a modifier, render readable platform symbols, reject duplicate assignments, and offer an individual reset. macOS uses AppKit controls throughout the settings companion; Windows and Linux keep the same tab/search model in the cross-platform frontend.
+
+Optional switch feedback is disabled by default. `show_layout_indicator` briefly displays the target language flag next to the pointer for `layout_indicator_duration_ms`, and `play_switch_sound` adds a local system sound. Feedback runs only after Upyr confirms a real OS input-source change. The overlay uses AppKit on macOS, a non-activating Win32 window on Windows, and a GTK popup on Linux/X11. Linux sound playback uses `canberra-gtk-play` when available.
 
 ## Platform notes
 
 ### macOS
 
-Grant Accessibility access to the terminal running Upyr, or to the packaged **Upyr** app, in **System Settings → Privacy & Security → Accessibility**. macOS needs this permission to observe opt-in word boundaries and to send Copy and Paste. After granting access, restart Upyr or choose **Save settings** again so the background monitor retries initialization.
+Grant Accessibility access to the terminal running Upyr, or to the packaged **Upyr** app, in **System Settings → Privacy & Security → Accessibility**. macOS needs this permission to observe opt-in word boundaries and to send Copy and Paste. Upyr checks the current trust state before initializing input monitors: an existing grant is accepted silently, while a missing permission is requested at most once per process. When access changes from denied to granted, Upyr detects the transition and offers to restart itself once. You can also choose **Save settings** so the background monitor retries initialization without a restart.
 
 After a successful conversion, Upyr selects the matching installed English or Ukrainian input source. Set `switch_layout = false` to leave the active input source unchanged. Upyr derives the character mapping—including Shift and Option layers—from the installed `ABC`/`U.S.` and Ukrainian input sources, then falls back to its built-in map if native translation is unavailable. Temporary conversion text is tagged with the standard concealed pasteboard hint, and Copy detection uses the native pasteboard change counter instead of placing a sentinel string on the clipboard. When restoration is enabled, Upyr snapshots and restores every readable macOS pasteboard item and format rather than reducing rich clipboard content to plain text.
 
@@ -114,7 +121,8 @@ Under X11, Upyr reads and locks the active XKB group after discovering configure
 - Cross-platform global hotkey and layout-independent physical Copy/Paste shortcuts
 - A second shortcut that fixes the previous word without manually selecting it
 - Opt-in automatic correction after Space with conservative, balanced, and aggressive confidence levels
-- A native settings window for automatic correction, shortcuts, gestures, behavior, timing, exceptions, and launch-at-login
+- Searchable, tabbed settings with native AppKit controls on macOS and press-to-record physical hotkey selectors with conflict detection
+- Optional language-flag overlays next to the pointer and subtle switch sounds after confirmed layout changes
 - Clipboard restoration for native rich formats, HTML, file lists, text, and images, plus guarded Copy detection that prevents accidental conversion when nothing is selected
 - Full readable pasteboard-format restoration on macOS
 - Native macOS, Windows, and Linux/X11 input-source detection and switching after conversion
@@ -122,7 +130,7 @@ Under X11, Upyr reads and locks the active XKB group after discovering configure
 - Cross-platform single-instance enforcement so duplicate listeners cannot compete for hotkeys
 - User-level launch-at-login controls through the tray or `upyr autostart`
 - An opt-in double-Control, double-Shift, or double-Control+Shift trigger with no polling while disabled
-- Versioned configuration with in-memory migration through schema version 3
+- Versioned configuration with in-memory migration through schema version 4
 - Configurable timing for applications with slow clipboard handling
 - Native menu-bar/system-tray controls for conversion, pause, configuration, and quit
 - Unit, deterministic property-style, and CLI integration tests plus CI builds for macOS, Windows, and Linux

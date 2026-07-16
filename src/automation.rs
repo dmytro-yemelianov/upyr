@@ -22,6 +22,7 @@ pub enum SelectionOutcome {
     Converted {
         direction: Direction,
         characters: usize,
+        layout_switched: Option<SystemLayout>,
     },
     NoSelection,
     NoConvertibleText,
@@ -77,7 +78,10 @@ fn convert_selection_if_matches(
         }
     };
 
-    if expected_source.is_some_and(|expected| selected.trim() != expected) {
+    if expected_source
+        .is_some_and(|expected| selected != expected && selected.trim() != expected.trim())
+    {
+        let _ = enigo.key(Key::RightArrow, KeyDirection::Click);
         restore(&mut clipboard, saved)?;
         return Ok(SelectionOutcome::TextMismatch);
     }
@@ -99,13 +103,15 @@ fn convert_selection_if_matches(
         return Err(error).context("could not send the paste shortcut");
     }
 
-    if config.switch_layout {
-        follow_converted_layout(conversion.direction);
-    }
+    let layout_switched = config
+        .switch_layout
+        .then(|| follow_converted_layout(conversion.direction))
+        .flatten();
 
     let outcome = SelectionOutcome::Converted {
         direction: conversion.direction,
         characters: selected.chars().count(),
+        layout_switched,
     };
 
     if config.restore_clipboard {
@@ -146,11 +152,11 @@ fn read_copied_text(clipboard: &mut Clipboard, probe: &CopyProbe) -> Option<Stri
     }
 }
 
-fn follow_converted_layout(direction: Direction) {
+fn follow_converted_layout(direction: Direction) -> Option<SystemLayout> {
     let target = match direction {
         Direction::EnglishToUkrainian => SystemLayout::Ukrainian,
         Direction::UkrainianToEnglish => SystemLayout::English,
-        Direction::Smart => return,
+        Direction::Smart => return None,
     };
 
     match crate::system_layout::switch_to(target) {
@@ -158,18 +164,25 @@ fn follow_converted_layout(direction: Direction) {
             debug!(
                 ?target,
                 source_id, "followed converted text with its OS layout"
-            )
+            );
+            Some(target)
         }
         Ok(SwitchOutcome::AlreadyActive { source_id }) => {
-            debug!(?target, source_id, "target OS layout was already active")
+            debug!(?target, source_id, "target OS layout was already active");
+            None
         }
         Ok(SwitchOutcome::TargetUnavailable) => {
-            warn!(?target, "target OS layout is not installed")
+            warn!(?target, "target OS layout is not installed");
+            None
         }
         Ok(SwitchOutcome::Unsupported) => {
-            debug!("active OS layout switching is not implemented on this platform yet")
+            debug!("active OS layout switching is not implemented on this platform yet");
+            None
         }
-        Err(error) => warn!(%error, ?target, "could not switch the active OS layout"),
+        Err(error) => {
+            warn!(%error, ?target, "could not switch the active OS layout");
+            None
+        }
     }
 }
 
@@ -191,6 +204,24 @@ pub fn convert_previous_word_if_matches(
     select_previous_word(&mut enigo)?;
     thread::sleep(Duration::from_millis(30));
     convert_selection_if_matches(config, expected_source)
+}
+
+/// Selects an exact in-memory prefix immediately before the caret and converts
+/// it only when the copied text still matches. Used by contextual automatic
+/// correction after the user types a word boundary.
+pub fn convert_previous_input_if_matches(
+    config: &Config,
+    expected_source: &str,
+) -> Result<SelectionOutcome> {
+    if expected_source.is_empty() {
+        return Ok(SelectionOutcome::NoSelection);
+    }
+    let mut enigo = Enigo::new(&Settings::default()).context(
+        "could not connect to desktop input; check Accessibility permissions or DISPLAY",
+    )?;
+    select_previous_characters(&mut enigo, expected_source.chars().count())?;
+    thread::sleep(Duration::from_millis(30));
+    convert_selection_if_matches(config, Some(expected_source))
 }
 
 fn select_previous_word(enigo: &mut Enigo) -> Result<()> {
@@ -215,6 +246,21 @@ fn select_previous_word(enigo: &mut Enigo) -> Result<()> {
     shift_release.context("failed to release Shift after word selection")?;
     modifier_release.context("failed to release word-selection modifier")?;
     Ok(())
+}
+
+fn select_previous_characters(enigo: &mut Enigo, characters: usize) -> Result<()> {
+    enigo
+        .key(Key::Shift, KeyDirection::Press)
+        .context("failed to press Shift for prefix selection")?;
+    for _ in 0..characters {
+        if let Err(error) = enigo.key(Key::LeftArrow, KeyDirection::Click) {
+            let _ = enigo.key(Key::Shift, KeyDirection::Release);
+            return Err(error).context("failed to extend prefix selection");
+        }
+    }
+    enigo
+        .key(Key::Shift, KeyDirection::Release)
+        .context("failed to release Shift after prefix selection")
 }
 
 fn snapshot(clipboard: &mut Clipboard) -> SavedClipboard {

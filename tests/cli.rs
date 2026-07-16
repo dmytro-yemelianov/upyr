@@ -53,7 +53,7 @@ fn init_and_doctor_report_current_configuration() {
     assert!(initialized.status.success());
 
     let source = fs::read_to_string(&config).expect("read initialized config");
-    assert!(source.contains("config_version = 3"));
+    assert!(source.contains("config_version = 4"));
     assert!(source.contains("modifier_gesture = \"disabled\""));
 
     let doctor = upyr()
@@ -63,7 +63,7 @@ fn init_and_doctor_report_current_configuration() {
         .expect("run doctor");
     assert!(doctor.status.success());
     let report = String::from_utf8(doctor.stdout).unwrap();
-    assert!(report.contains("Config schema: 3"));
+    assert!(report.contains("Config schema: 4"));
     assert!(report.contains("Modifier gesture: Disabled"));
 
     let _ = fs::remove_dir_all(config.parent().unwrap());

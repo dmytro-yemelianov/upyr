@@ -13,11 +13,13 @@ use winit::{
     window::WindowId,
 };
 
+#[cfg(target_os = "macos")]
+use crate::accessibility::{self, AccessibilityWatcher};
 use crate::{
-    auto_correct::{AutoKeyEvent, AutoWordTracker, evaluate},
+    auto_correct::{AutoDecision, AutoKeyEvent, AutoWordTracker, evaluate},
     auto_correct_monitor::AutoCorrectMonitor,
     automation::{
-        SelectionOutcome, convert_previous_word, convert_previous_word_if_matches,
+        SelectionOutcome, convert_previous_input_if_matches, convert_previous_word,
         convert_selection,
     },
     autostart,
@@ -35,6 +37,9 @@ enum AppEvent {
     ModifierGesture(GestureAction),
     AutoKey(AutoKeyEvent),
     ReloadConfiguration,
+    HideLayoutIndicator(u64),
+    #[cfg(target_os = "macos")]
+    AccessibilityGranted,
 }
 
 struct App {
@@ -50,6 +55,15 @@ struct App {
     tray: Option<Tray>,
     processing: bool,
     paused: bool,
+    feedback_generation: u64,
+    #[cfg(target_os = "macos")]
+    accessibility_watcher: Option<AccessibilityWatcher>,
+    #[cfg(target_os = "macos")]
+    accessibility_blocked: bool,
+    #[cfg(target_os = "macos")]
+    restart_prompt_scheduled: bool,
+    #[cfg(target_os = "macos")]
+    restart_prompt_shown: bool,
 }
 
 pub fn run(config: Config) -> Result<()> {
@@ -96,7 +110,9 @@ pub fn run(config: Config) -> Result<()> {
             error!(%error, "failed to forward a tray menu event");
         }
     }));
-    let gesture = create_gesture_monitor(&config, &event_proxy)?;
+    #[cfg(target_os = "macos")]
+    let accessibility_blocked = !accessibility::is_trusted();
+    let gesture = create_gesture_monitor_or_log(&config, &event_proxy);
     let auto_monitor = create_auto_monitor_or_log(&config, &event_proxy);
     let watcher_proxy = event_proxy.clone();
     let config_watcher = ConfigWatcher::start(config_path()?, move || {
@@ -119,7 +135,18 @@ pub fn run(config: Config) -> Result<()> {
         tray: None,
         processing: false,
         paused: false,
+        feedback_generation: 0,
+        #[cfg(target_os = "macos")]
+        accessibility_watcher: None,
+        #[cfg(target_os = "macos")]
+        accessibility_blocked,
+        #[cfg(target_os = "macos")]
+        restart_prompt_scheduled: false,
+        #[cfg(target_os = "macos")]
+        restart_prompt_shown: false,
     };
+    #[cfg(target_os = "macos")]
+    app.refresh_accessibility_watcher();
     event_loop
         .run_app(&mut app)
         .context("desktop event loop failed")
@@ -141,6 +168,10 @@ fn create_auto_monitor_or_log(
     config: &Config,
     event_proxy: &EventLoopProxy<AppEvent>,
 ) -> Option<AutoCorrectMonitor> {
+    #[cfg(target_os = "macos")]
+    if config.auto_correct && !accessibility::is_trusted() {
+        return None;
+    }
     match create_auto_monitor(config, event_proxy) {
         Ok(monitor) => monitor,
         Err(error) => {
@@ -165,6 +196,25 @@ fn create_gesture_monitor(
             }
         },
     )
+}
+
+fn create_gesture_monitor_or_log(
+    config: &Config,
+    event_proxy: &EventLoopProxy<AppEvent>,
+) -> Option<ModifierGestureMonitor> {
+    #[cfg(target_os = "macos")]
+    if config.modifier_gesture != crate::config::ModifierGesture::Disabled
+        && !accessibility::is_trusted()
+    {
+        return None;
+    }
+    match create_gesture_monitor(config, event_proxy) {
+        Ok(monitor) => monitor,
+        Err(error) => {
+            error!(%error, "modifier gesture is unavailable; grant desktop input permission and reload the configuration");
+            None
+        }
+    }
 }
 
 fn acquire_single_instance() -> Result<SingleInstance> {
@@ -209,7 +259,11 @@ impl App {
             Ok(SelectionOutcome::Converted {
                 direction,
                 characters,
-            }) => info!(?direction, characters, "converted selection"),
+                layout_switched,
+            }) => {
+                info!(?direction, characters, "converted selection");
+                self.present_layout_feedback(layout_switched);
+            }
             Ok(SelectionOutcome::NoSelection) => {
                 debug!("copy produced no selection; clipboard was restored")
             }
@@ -230,7 +284,7 @@ impl App {
             return;
         }
 
-        if self.auto_tracker.is_empty() && AutoWordTracker::can_begin(event.key) {
+        if self.auto_tracker.needs_layout_check() && AutoWordTracker::can_begin(event.key) {
             let layout = match system_layout::current() {
                 Ok(Some(source)) => source.layout,
                 Ok(None) => None,
@@ -245,8 +299,13 @@ impl App {
         let Some(sample) = self.auto_tracker.observe(event) else {
             return;
         };
-        let Some(correction) = evaluate(&sample, &self.config) else {
-            return;
+        let correction = match evaluate(&sample, &self.config) {
+            AutoDecision::Correct(correction) => correction,
+            AutoDecision::Continue => return,
+            AutoDecision::Reset => {
+                self.auto_tracker.clear();
+                return;
+            }
         };
 
         self.processing = true;
@@ -257,15 +316,19 @@ impl App {
         let mut conversion_config = self.config.clone();
         conversion_config.direction = correction.direction;
         let result =
-            convert_previous_word_if_matches(&conversion_config, Some(&correction.expected_source));
+            convert_previous_input_if_matches(&conversion_config, &correction.expected_source);
         match result {
             Ok(SelectionOutcome::Converted {
                 direction,
                 characters,
-            }) => info!(
-                ?direction,
-                characters, "automatically corrected a recognized word"
-            ),
+                layout_switched,
+            }) => {
+                info!(
+                    ?direction,
+                    characters, "automatically corrected a recognized word"
+                );
+                self.present_layout_feedback(layout_switched);
+            }
             Ok(SelectionOutcome::TextMismatch) => {
                 debug!("automatic correction was skipped because the caret or text changed")
             }
@@ -277,13 +340,38 @@ impl App {
             }
             Err(error) => error!(%error, "automatic correction failed"),
         }
+        self.auto_tracker.clear();
         self.processing = false;
         self.set_auto_suspended(false);
     }
 
+    fn present_layout_feedback(&mut self, layout: Option<system_layout::SystemLayout>) {
+        let Some(layout) = layout else {
+            return;
+        };
+        if !crate::feedback::layout_switched(layout, &self.config) {
+            return;
+        }
+
+        self.feedback_generation = self.feedback_generation.wrapping_add(1);
+        let generation = self.feedback_generation;
+        let delay = std::time::Duration::from_millis(self.config.layout_indicator_duration_ms);
+        let proxy = self.event_proxy.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(delay);
+            if let Err(error) = proxy.send_event(AppEvent::HideLayoutIndicator(generation)) {
+                debug!(%error, "could not schedule layout indicator dismissal");
+            }
+        });
+    }
+
     fn toggle_paused(&mut self) -> Result<()> {
         if self.paused {
-            let gesture = create_gesture_monitor(&self.config, &self.event_proxy)?;
+            #[cfg(target_os = "macos")]
+            {
+                self.accessibility_blocked = !accessibility::is_trusted();
+            }
+            let gesture = create_gesture_monitor_or_log(&self.config, &self.event_proxy);
             let auto_monitor = create_auto_monitor_or_log(&self.config, &self.event_proxy);
             self.manager
                 .register_all(&[self.hotkey, self.last_word_hotkey])
@@ -291,6 +379,10 @@ impl App {
             self.gesture = gesture;
             self.auto_monitor = auto_monitor;
         } else {
+            #[cfg(target_os = "macos")]
+            {
+                self.accessibility_blocked = false;
+            }
             self.manager
                 .unregister_all(&[self.hotkey, self.last_word_hotkey])
                 .context("failed to pause the global hotkeys")?;
@@ -299,6 +391,8 @@ impl App {
             self.auto_tracker.clear();
         }
         self.paused = !self.paused;
+        #[cfg(target_os = "macos")]
+        self.refresh_accessibility_watcher();
         self.update_tray()?;
         info!(paused = self.paused, "updated shortcut state");
         Ok(())
@@ -307,10 +401,12 @@ impl App {
     fn reload_configuration(&mut self) -> Result<()> {
         let new_config = Config::load()?;
         let (new_hotkey, new_last_word_hotkey) = parse_hotkeys(&new_config)?;
+        #[cfg(target_os = "macos")]
+        let new_accessibility_blocked = !self.paused && !accessibility::is_trusted();
         let new_gesture = if self.paused {
             None
         } else {
-            create_gesture_monitor(&new_config, &self.event_proxy)?
+            create_gesture_monitor_or_log(&new_config, &self.event_proxy)
         };
         let new_auto_monitor = if self.paused {
             None
@@ -341,6 +437,16 @@ impl App {
         self.gesture = new_gesture;
         self.auto_monitor = new_auto_monitor;
         self.auto_tracker.clear();
+        if !self.config.show_layout_indicator {
+            self.feedback_generation = self.feedback_generation.wrapping_add(1);
+            crate::feedback::hide_layout_indicator();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            self.accessibility_blocked = new_accessibility_blocked;
+        }
+        #[cfg(target_os = "macos")]
+        self.refresh_accessibility_watcher();
         self.update_tray()?;
         info!(hotkey = %self.config.hotkey, auto_correct = self.config.auto_correct, "reloaded configuration");
         Ok(())
@@ -396,6 +502,69 @@ impl App {
         );
         Ok(())
     }
+
+    #[cfg(target_os = "macos")]
+    fn refresh_accessibility_watcher(&mut self) {
+        if self.paused || !self.accessibility_blocked {
+            self.accessibility_watcher = None;
+            return;
+        }
+        if accessibility::request_once_if_needed() || accessibility::is_trusted() {
+            self.accessibility_watcher = None;
+            self.schedule_restart_prompt();
+            return;
+        }
+        if self.accessibility_watcher.is_some() {
+            return;
+        }
+
+        let proxy = self.event_proxy.clone();
+        match AccessibilityWatcher::start(move || {
+            if let Err(error) = proxy.send_event(AppEvent::AccessibilityGranted) {
+                error!(%error, "failed to report granted Accessibility permission");
+            }
+        }) {
+            Ok(watcher) => {
+                self.accessibility_watcher = Some(watcher);
+                info!("waiting for Accessibility permission");
+            }
+            Err(error) => error!(%error, "could not watch Accessibility permission"),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn schedule_restart_prompt(&mut self) {
+        if self.restart_prompt_scheduled || self.restart_prompt_shown {
+            return;
+        }
+        self.restart_prompt_scheduled = true;
+        if let Err(error) = self.event_proxy.send_event(AppEvent::AccessibilityGranted) {
+            self.restart_prompt_scheduled = false;
+            error!(%error, "failed to schedule the Accessibility restart prompt");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn handle_accessibility_granted(&mut self, event_loop: &ActiveEventLoop) {
+        self.accessibility_watcher = None;
+        self.restart_prompt_scheduled = true;
+        if self.restart_prompt_shown || !accessibility::is_trusted() {
+            return;
+        }
+        if !self.accessibility_blocked {
+            info!("Accessibility permission is active and monitors are initialized");
+            return;
+        }
+
+        self.restart_prompt_shown = true;
+        info!("Accessibility permission was granted; offering to restart Upyr");
+        if accessibility::prompt_for_restart() {
+            match accessibility::schedule_relaunch() {
+                Ok(()) => event_loop.exit(),
+                Err(error) => error!(%error, "could not restart Upyr"),
+            }
+        }
+    }
 }
 
 impl ApplicationHandler<AppEvent> for App {
@@ -447,8 +616,14 @@ impl ApplicationHandler<AppEvent> for App {
                     error!(%error, "could not reload the changed configuration");
                 }
             }
+            AppEvent::HideLayoutIndicator(generation) if generation == self.feedback_generation => {
+                crate::feedback::hide_layout_indicator();
+            }
+            #[cfg(target_os = "macos")]
+            AppEvent::AccessibilityGranted => self.handle_accessibility_granted(event_loop),
             AppEvent::ModifierGesture(_) => {}
             AppEvent::HotKey(_) => {}
+            AppEvent::HideLayoutIndicator(_) => {}
         }
     }
 

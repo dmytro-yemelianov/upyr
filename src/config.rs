@@ -2,11 +2,12 @@ use std::{env, fs, path::PathBuf};
 
 use anyhow::{Context, Result, bail};
 use directories::ProjectDirs;
+use global_hotkey::hotkey::HotKey;
 use serde::{Deserialize, Serialize};
 
 use crate::layout::Direction;
 
-pub const CURRENT_CONFIG_VERSION: u32 = 3;
+pub const CURRENT_CONFIG_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -46,7 +47,13 @@ pub struct Config {
     pub paste_delay_ms: u64,
     /// Follow a successful conversion by selecting the target OS input source.
     pub switch_layout: bool,
-    /// Correct a confidently recognized word after the user presses Space.
+    /// Briefly show the target language next to the pointer after Upyr changes
+    /// the active OS input source.
+    pub show_layout_indicator: bool,
+    pub layout_indicator_duration_ms: u64,
+    /// Play a short local system sound after Upyr changes the active OS input source.
+    pub play_switch_sound: bool,
+    /// Correct confidently recognized wrong-layout text after Space.
     /// Disabled means no ordinary typing is monitored.
     pub auto_correct: bool,
     pub auto_correct_sensitivity: AutoCorrectSensitivity,
@@ -72,6 +79,9 @@ impl Default for Config {
             copy_delay_ms: 90,
             paste_delay_ms: 40,
             switch_layout: true,
+            show_layout_indicator: false,
+            layout_indicator_duration_ms: 900,
+            play_switch_sound: false,
             auto_correct: false,
             auto_correct_sensitivity: AutoCorrectSensitivity::Conservative,
             auto_correct_min_word_length: 4,
@@ -138,6 +148,17 @@ impl Config {
         if self.hotkey.eq_ignore_ascii_case(&self.last_word_hotkey) {
             bail!("hotkey and last_word_hotkey must be different");
         }
+        let hotkey: HotKey = self
+            .hotkey
+            .parse()
+            .with_context(|| format!("invalid hotkey {:?}", self.hotkey))?;
+        let last_word_hotkey: HotKey = self
+            .last_word_hotkey
+            .parse()
+            .with_context(|| format!("invalid last_word_hotkey {:?}", self.last_word_hotkey))?;
+        if hotkey == last_word_hotkey {
+            bail!("hotkey and last_word_hotkey resolve to the same shortcut");
+        }
         if !(10..=2_000).contains(&self.copy_delay_ms) {
             bail!("copy_delay_ms must be between 10 and 2000");
         }
@@ -146,6 +167,9 @@ impl Config {
         }
         if self.restore_delay_ms > 5_000 {
             bail!("restore_delay_ms must be at most 5000");
+        }
+        if !(250..=3_000).contains(&self.layout_indicator_duration_ms) {
+            bail!("layout_indicator_duration_ms must be between 250 and 3000");
         }
         if !(150..=2_000).contains(&self.modifier_gesture_timeout_ms) {
             bail!("modifier_gesture_timeout_ms must be between 150 and 2000");
@@ -235,6 +259,22 @@ fn migrate(value: &mut toml::Value) -> Result<()> {
         table
             .entry("auto_correct_exceptions".to_owned())
             .or_insert_with(|| toml::Value::Array(Vec::new()));
+        table.insert("config_version".to_owned(), toml::Value::Integer(3));
+        version = 3;
+    }
+
+    // Version 4 adds optional local layout-change feedback. Both channels stay
+    // disabled during migration so upgrading never introduces new UI or sound.
+    if version == 3 {
+        table
+            .entry("show_layout_indicator".to_owned())
+            .or_insert(toml::Value::Boolean(false));
+        table
+            .entry("layout_indicator_duration_ms".to_owned())
+            .or_insert(toml::Value::Integer(900));
+        table
+            .entry("play_switch_sound".to_owned())
+            .or_insert(toml::Value::Boolean(false));
         table.insert(
             "config_version".to_owned(),
             toml::Value::Integer(i64::from(CURRENT_CONFIG_VERSION)),
@@ -270,6 +310,8 @@ mod tests {
         assert_eq!(decoded.last_word_hotkey, config.last_word_hotkey);
         assert_eq!(decoded.direction, Direction::Smart);
         assert!(decoded.switch_layout);
+        assert!(!decoded.show_layout_indicator);
+        assert!(!decoded.play_switch_sound);
         assert!(!decoded.auto_correct);
         assert_eq!(decoded.modifier_gesture, ModifierGesture::Disabled);
     }
@@ -282,6 +324,19 @@ mod tests {
         };
 
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_shortcut_aliases_that_resolve_to_the_same_keys() {
+        let config = Config {
+            hotkey: "Ctrl+Alt+Space".to_owned(),
+            last_word_hotkey: "Control+Option+Space".to_owned(),
+            ..Config::default()
+        };
+
+        let error = config.validate().unwrap_err().to_string();
+
+        assert!(error.contains("resolve to the same shortcut"));
     }
 
     #[test]
@@ -367,5 +422,38 @@ restore_delay_ms = 250
         assert_eq!(config.auto_correct_min_word_length, 4);
         assert_eq!(config.auto_correct_delay_ms, 35);
         assert!(config.auto_correct_exceptions.is_empty());
+        assert!(!config.show_layout_indicator);
+        assert_eq!(config.layout_indicator_duration_ms, 900);
+        assert!(!config.play_switch_sound);
+    }
+
+    #[test]
+    fn migrates_v3_configuration_with_feedback_disabled() {
+        let source = r#"
+config_version = 3
+hotkey = "CmdOrCtrl+Alt+Space"
+last_word_hotkey = "CmdOrCtrl+Alt+Backspace"
+direction = "smart"
+copy_delay_ms = 90
+paste_delay_ms = 40
+switch_layout = true
+auto_correct = false
+auto_correct_sensitivity = "conservative"
+auto_correct_min_word_length = 4
+auto_correct_delay_ms = 35
+auto_correct_exceptions = []
+modifier_gesture = "disabled"
+modifier_gesture_action = "previous-word"
+modifier_gesture_timeout_ms = 500
+restore_clipboard = true
+restore_delay_ms = 250
+"#;
+
+        let config = Config::decode(source).unwrap();
+
+        assert_eq!(config.config_version, CURRENT_CONFIG_VERSION);
+        assert!(!config.show_layout_indicator);
+        assert_eq!(config.layout_indicator_duration_ms, 900);
+        assert!(!config.play_switch_sound);
     }
 }
