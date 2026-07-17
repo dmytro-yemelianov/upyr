@@ -5,7 +5,12 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from tools.check_privacy import pre_rendered_audio_files, sensitive_log_field, validate_csp
+from tools.check_privacy import (
+    WEB_CODE_PATTERNS,
+    pre_rendered_audio_files,
+    sensitive_log_field,
+    validate_csp,
+)
 
 
 VALID_POLICY = (
@@ -60,6 +65,17 @@ class BundledAudioTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             missing = Path(directory) / "missing"
             self.assertEqual(pre_rendered_audio_files((missing,)), [])
+
+
+class BrowserPrivacyApiTests(unittest.TestCase):
+    def test_rejects_microphone_capture_apis(self) -> None:
+        pattern = WEB_CODE_PATTERNS["microphone capture API"]
+        self.assertIsNotNone(pattern.search("navigator.mediaDevices.getUserMedia({ audio: true })"))
+        self.assertIsNotNone(pattern.search("new MediaRecorder(stream)"))
+
+    def test_rejects_webrtc_even_with_connect_src_none(self) -> None:
+        pattern = WEB_CODE_PATTERNS["WebRTC API"]
+        self.assertIsNotNone(pattern.search("new RTCPeerConnection()"))
 
 
 if __name__ == "__main__":
