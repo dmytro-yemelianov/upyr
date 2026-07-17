@@ -81,15 +81,17 @@ jobs:
     timeout-minutes: 15
     runs-on: ubuntu-latest
     permissions:
-      checks: write
       contents: read
-      issues: write
     steps:
       - name: Check out source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Audit locked Rust dependencies
-        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          toolchain: 1.95.0
+      - name: Install pinned RustSec auditor
+        run: cargo install cargo-audit --version 0.22.1 --locked
+      - name: Audit locked Rust dependencies
+        run: cargo audit

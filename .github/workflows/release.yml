@@ -52,10 +52,10 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Run workspace tests
         run: cargo test --workspace --all-targets --locked
+      - name: Install pinned RustSec auditor
+        run: cargo install cargo-audit --version 0.22.1 --locked
       - name: Audit locked Rust dependencies
-        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo audit
 
   macos:
     name: Package macOS
