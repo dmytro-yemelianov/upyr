@@ -38,7 +38,7 @@ use crate::{
 mod macos;
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
-const PROJECT_WEBSITE_URL: &str = "https://dmytro-yemelianov.github.io/upyr/";
+const PROJECT_WEBSITE_URL: &str = "https://upyr.org";
 const REPOSITORY_URL: &str = "https://github.com/dmytro-yemelianov/upyr";
 const PRIVACY_SUMMARY: &str = "Local-only by design: no accounts, analytics, telemetry, ads, or text uploads. Typed text and clipboard contents stay on this device.";
 const IMPLEMENTATION_SUMMARY: &str = "Upyr is written in Rust. It maps physical English and Ukrainian keys, then uses a bundled compact character n-gram model to score language candidates locally; no cloud inference is involved.";

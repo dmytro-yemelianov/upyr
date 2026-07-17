@@ -2573,3 +2573,90 @@ code {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* Releases page */
+
+.releases-page h1 {
+  margin: 0;
+  font-size: clamp(2.3rem, 4.5vw, 3.6rem);
+  font-weight: 720;
+  letter-spacing: -0.052em;
+  line-height: 1.06;
+}
+
+.releases-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.release-card {
+  padding: 28px 31px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015));
+}
+
+.release-card-unreleased {
+  border-style: dashed;
+  background: transparent;
+}
+
+.release-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.release-heading h2 {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.release-heading time {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.release-tagline {
+  margin: 6px 0 0;
+  color: var(--muted-strong);
+}
+
+.release-section {
+  margin-top: 18px;
+}
+
+.release-section h3 {
+  margin: 0 0 8px;
+  color: var(--muted-strong);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.release-section ul {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted-strong);
+  line-height: 1.65;
+}
+
+.release-section li + li {
+  margin-top: 6px;
+}
+
+.release-section code {
+  padding: 0.1em 0.4em;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.9em;
+}
+
+.release-actions {
+  margin-top: 20px;
+}

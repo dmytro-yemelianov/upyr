@@ -1,7 +1,9 @@
 /target/
 /dist/
 /.cache/
+/.wrangler/
 /site/wasm/
+/site/releases.html
 __pycache__/
 *.log
 .DS_Store
