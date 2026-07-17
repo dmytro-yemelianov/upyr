@@ -51,12 +51,13 @@ enum CopyProbe {
 
 /// Copies the current selection, converts it, and pastes it back into the active app.
 pub fn convert_selection(config: &Config) -> Result<SelectionOutcome> {
-    convert_selection_if_matches(config, None)
+    convert_selection_if_matches(config, None, None)
 }
 
 fn convert_selection_if_matches(
     config: &Config,
     expected_source: Option<&str>,
+    on_text_committed: Option<&mut dyn FnMut()>,
 ) -> Result<SelectionOutcome> {
     let mut enigo = Enigo::new(&Settings::default()).context(
         "could not connect to desktop input; check Accessibility permissions or DISPLAY",
@@ -107,19 +108,31 @@ fn convert_selection_if_matches(
         .switch_layout
         .then(|| follow_converted_layout(conversion.direction))
         .flatten();
-
     let outcome = SelectionOutcome::Converted {
         direction: conversion.direction,
         characters: selected.chars().count(),
         layout_switched,
     };
 
-    if config.restore_clipboard {
-        thread::sleep(Duration::from_millis(config.restore_delay_ms));
-        restore(&mut clipboard, saved)?;
-    }
+    finish_after_text_commit(on_text_committed, || {
+        if config.restore_clipboard {
+            thread::sleep(Duration::from_millis(config.restore_delay_ms));
+            restore(&mut clipboard, saved)?;
+        }
+        Ok(())
+    })?;
 
     Ok(outcome)
+}
+
+fn finish_after_text_commit(
+    on_text_committed: Option<&mut dyn FnMut()>,
+    post_commit: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    if let Some(on_text_committed) = on_text_committed {
+        on_text_committed();
+    }
+    post_commit()
 }
 
 fn convert_with_installed_mapping(text: &str, direction: Direction) -> crate::layout::Conversion {
@@ -203,7 +216,7 @@ pub fn convert_previous_word_if_matches(
     )?;
     select_previous_word(&mut enigo)?;
     thread::sleep(Duration::from_millis(30));
-    convert_selection_if_matches(config, expected_source)
+    convert_selection_if_matches(config, expected_source, None)
 }
 
 /// Selects an exact in-memory prefix immediately before the caret and converts
@@ -212,6 +225,7 @@ pub fn convert_previous_word_if_matches(
 pub fn convert_previous_input_if_matches(
     config: &Config,
     expected_source: &str,
+    on_text_committed: &mut dyn FnMut(),
 ) -> Result<SelectionOutcome> {
     if expected_source.is_empty() {
         return Ok(SelectionOutcome::NoSelection);
@@ -221,7 +235,7 @@ pub fn convert_previous_input_if_matches(
     )?;
     select_previous_characters(&mut enigo, expected_source.chars().count())?;
     thread::sleep(Duration::from_millis(30));
-    convert_selection_if_matches(config, Some(expected_source))
+    convert_selection_if_matches(config, Some(expected_source), Some(on_text_committed))
 }
 
 fn select_previous_word(enigo: &mut Enigo) -> Result<()> {
@@ -367,4 +381,25 @@ mod physical_keycode {
     // X11 keycodes for the physical C and V keys (evdev code + 8).
     pub const COPY: u16 = 54;
     pub const PASTE: u16 = 55;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+
+    use super::*;
+
+    #[test]
+    fn input_monitor_resumes_before_clipboard_post_commit_work() {
+        let order = RefCell::new(Vec::new());
+        let mut on_text_committed = || order.borrow_mut().push("monitor");
+
+        finish_after_text_commit(Some(&mut on_text_committed), || {
+            order.borrow_mut().push("clipboard");
+            Ok(())
+        })
+        .expect("post-commit work");
+
+        assert_eq!(*order.borrow(), ["monitor", "clipboard"]);
+    }
 }

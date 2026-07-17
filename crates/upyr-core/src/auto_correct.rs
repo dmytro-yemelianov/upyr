@@ -1116,15 +1116,18 @@ mod tests {
 
     #[test]
     fn recognizes_mistyped_proper_names_in_both_directions() {
-        for (physical, layout, expected) in [
-            ("Jkmuf", InputLayout::English, "Ольга"),
-            ("Olha", InputLayout::Ukrainian, "Olha"),
+        for (physical, layout, expected_source, expected_replacement) in [
+            ("Jkmuf", InputLayout::English, "Jkmuf", "Ольга"),
+            ("Gjlsz", InputLayout::English, "Gjlsz", "Подія"),
+            ("Hj,jnf", InputLayout::English, "Hj,jnf", "Робота"),
+            ("Olha", InputLayout::Ukrainian, "Щдрф", "Olha"),
         ] {
             let correction = correction(evaluate(
                 &sample(physical, layout),
                 &AutoCorrectPolicy::default(),
             ));
-            assert_eq!(correction.replacement, expected);
+            assert_eq!(correction.expected_source, expected_source);
+            assert_eq!(correction.replacement, expected_replacement);
         }
     }
 

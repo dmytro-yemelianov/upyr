@@ -159,4 +159,59 @@ mod tests {
             assert_eq!(policy.exceptions, ["ServiceNow"]);
         }
     }
+
+    #[test]
+    fn tracker_keeps_the_capital_first_key_in_reported_ukrainian_words() {
+        fn event(key: Keycode, shifted: bool) -> AutoKeyEvent {
+            AutoKeyEvent { key, shifted }
+        }
+
+        for (events, expected_source, expected_replacement) in [
+            (
+                vec![
+                    event(Keycode::LShift, false),
+                    event(Keycode::G, true),
+                    event(Keycode::J, false),
+                    event(Keycode::L, false),
+                    event(Keycode::S, false),
+                    event(Keycode::Z, false),
+                    event(Keycode::Space, false),
+                ],
+                "Gjlsz ",
+                "Подія ",
+            ),
+            (
+                vec![
+                    event(Keycode::LShift, false),
+                    event(Keycode::H, true),
+                    event(Keycode::J, false),
+                    event(Keycode::Comma, false),
+                    event(Keycode::J, false),
+                    event(Keycode::N, false),
+                    event(Keycode::F, false),
+                    event(Keycode::Space, false),
+                ],
+                "Hj,jnf ",
+                "Робота ",
+            ),
+        ] {
+            let mut tracker = AutoWordTracker::default();
+            let mut decision = AutoDecision::Continue;
+            for event in events {
+                if tracker.needs_layout_check() && AutoWordTracker::can_begin(event.key) {
+                    tracker.set_source_layout(Some(SystemLayout::English));
+                }
+                if let Some(sample) = tracker.observe(event) {
+                    decision =
+                        upyr_core::evaluate(&sample, &correction_policy(&Config::default()), None);
+                }
+            }
+
+            let AutoDecision::Correct(correction) = decision else {
+                panic!("expected title-case correction, got {decision:?}");
+            };
+            assert_eq!(correction.expected_source, expected_source);
+            assert_eq!(correction.replacement, expected_replacement);
+        }
+    }
 }

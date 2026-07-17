@@ -369,8 +369,22 @@ impl App {
         self.set_auto_suspended(true);
         let mut conversion_config = self.config.clone();
         conversion_config.direction = correction.direction;
-        let result =
-            convert_previous_input_if_matches(&conversion_config, &correction.expected_source);
+        let result = {
+            let auto_monitor = self.auto_monitor.as_ref();
+            let mut on_text_committed = || {
+                if let Some(monitor) = auto_monitor {
+                    // Paste and layout switching are complete. Resume before
+                    // the trailing clipboard-restore delay so the first key of
+                    // the next word cannot disappear from the tracker.
+                    monitor.set_suspended(false);
+                }
+            };
+            convert_previous_input_if_matches(
+                &conversion_config,
+                &correction.expected_source,
+                &mut on_text_committed,
+            )
+        };
         match result {
             Ok(SelectionOutcome::Converted {
                 direction,

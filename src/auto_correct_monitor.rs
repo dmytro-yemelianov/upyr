@@ -1,7 +1,8 @@
 use std::{
+    collections::VecDeque,
     sync::{
         Arc, Mutex, OnceLock,
-        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
+        atomic::{AtomicU8, AtomicU64, Ordering},
         mpsc,
     },
     thread,
@@ -15,7 +16,7 @@ use device_query::{DeviceQuery, DeviceState};
 use rdev::{EventType, Key};
 use tracing::error;
 
-use crate::auto_correct::AutoKeyEvent;
+use crate::auto_correct::{AutoKeyEvent, AutoWordTracker};
 
 const START_TIMEOUT: Duration = Duration::from_millis(250);
 const START_POLL_INTERVAL: Duration = Duration::from_millis(2);
@@ -23,12 +24,21 @@ const LISTENER_IDLE: u8 = 0;
 const LISTENER_STARTING: u8 = 1;
 const LISTENER_RUNNING: u8 = 2;
 const LISTENER_FAILED: u8 = 3;
+const MISSING_LEFT_CONTROL: u8 = 1 << 0;
+const MISSING_RIGHT_CONTROL: u8 = 1 << 1;
+const MISSING_LEFT_OPTION: u8 = 1 << 2;
+const MISSING_RIGHT_OPTION: u8 = 1 << 3;
+const MISSING_LEFT_META: u8 = 1 << 4;
+const MISSING_RIGHT_META: u8 = 1 << 5;
+const MAX_DEFERRED_TEXT_EVENTS: usize = 128;
 
 type KeyCallback = Box<dyn FnMut(AutoKeyEvent) + Send + 'static>;
 
 struct Subscription {
     id: u64,
-    suspended: Arc<AtomicBool>,
+    suspended: bool,
+    deferred_text_events: VecDeque<AutoKeyEvent>,
+    deferred_overflowed: bool,
     on_key_down: KeyCallback,
 }
 
@@ -54,6 +64,8 @@ static LISTENER_STATE: OnceLock<Arc<ListenerState>> = OnceLock::new();
 struct CaptureState {
     left_shift: bool,
     right_shift: bool,
+    shift_release_pending: bool,
+    snapshot_missing_chords: u8,
     left_control: bool,
     right_control: bool,
     left_option: bool,
@@ -69,6 +81,8 @@ impl CaptureState {
         Self {
             left_shift: keys.contains(&Keycode::LShift),
             right_shift: keys.contains(&Keycode::RShift),
+            shift_release_pending: false,
+            snapshot_missing_chords: 0,
             left_control: keys.contains(&Keycode::LControl),
             right_control: keys.contains(&Keycode::RControl),
             left_option: keys.contains(&Keycode::LAlt) || keys.contains(&Keycode::LOption),
@@ -80,26 +94,84 @@ impl CaptureState {
     }
 
     #[cfg(any(target_os = "macos", test))]
-    fn synchronize_momentary_modifiers(&mut self, keys: &[Keycode]) {
+    fn synchronize_momentary_modifiers(&mut self, keys: &[Keycode], name: Option<&str>) {
+        let left_shift = keys.contains(&Keycode::LShift);
+        let right_shift = keys.contains(&Keycode::RShift);
+        if left_shift || right_shift {
+            self.left_shift = left_shift;
+            self.right_shift = right_shift;
+            self.shift_release_pending = false;
+        } else if rendered_character_is_lowercase(name) {
+            // A lowercase rendered letter proves that a previously reported
+            // Shift press is stale. Uppercase keeps the event-tap state: the
+            // device snapshot can lag a physically held Shift key.
+            self.left_shift = false;
+            self.right_shift = false;
+            self.shift_release_pending = false;
+        }
+
+        self.snapshot_missing_chords = 0;
+        reconcile_chord_modifier(
+            &mut self.left_control,
+            keys.contains(&Keycode::LControl),
+            &mut self.snapshot_missing_chords,
+            MISSING_LEFT_CONTROL,
+        );
+        reconcile_chord_modifier(
+            &mut self.right_control,
+            keys.contains(&Keycode::RControl),
+            &mut self.snapshot_missing_chords,
+            MISSING_RIGHT_CONTROL,
+        );
+        reconcile_chord_modifier(
+            &mut self.left_option,
+            keys.contains(&Keycode::LAlt) || keys.contains(&Keycode::LOption),
+            &mut self.snapshot_missing_chords,
+            MISSING_LEFT_OPTION,
+        );
+        reconcile_chord_modifier(
+            &mut self.right_option,
+            keys.contains(&Keycode::RAlt) || keys.contains(&Keycode::ROption),
+            &mut self.snapshot_missing_chords,
+            MISSING_RIGHT_OPTION,
+        );
+        reconcile_chord_modifier(
+            &mut self.left_meta,
+            keys.contains(&Keycode::Command) || keys.contains(&Keycode::LMeta),
+            &mut self.snapshot_missing_chords,
+            MISSING_LEFT_META,
+        );
+        reconcile_chord_modifier(
+            &mut self.right_meta,
+            keys.contains(&Keycode::RCommand) || keys.contains(&Keycode::RMeta),
+            &mut self.snapshot_missing_chords,
+            MISSING_RIGHT_META,
+        );
+    }
+
+    #[cfg(any(target_os = "macos", test))]
+    fn reconcile_shift_release(&mut self, keys: &[Keycode]) {
+        // Enigo and the user can hold the same logical Shift at once. When
+        // Enigo releases its synthetic press, Quartz still emits a release
+        // transition even though the physical key remains down. Trust the
+        // hardware snapshot after the release so the user's next capital is
+        // not mistaken for Caps Lock.
         self.left_shift = keys.contains(&Keycode::LShift);
         self.right_shift = keys.contains(&Keycode::RShift);
-        self.left_control = keys.contains(&Keycode::LControl);
-        self.right_control = keys.contains(&Keycode::RControl);
-        self.left_option = keys.contains(&Keycode::LAlt) || keys.contains(&Keycode::LOption);
-        self.right_option = keys.contains(&Keycode::RAlt) || keys.contains(&Keycode::ROption);
-        self.left_meta = keys.contains(&Keycode::Command) || keys.contains(&Keycode::LMeta);
-        self.right_meta = keys.contains(&Keycode::RCommand) || keys.contains(&Keycode::RMeta);
+        self.shift_release_pending = !self.left_shift && !self.right_shift;
     }
 
     fn observe(&mut self, event_type: EventType, name: Option<&str>) -> Option<AutoKeyEvent> {
         match event_type {
             EventType::KeyPress(Key::ShiftLeft) => {
                 self.left_shift = true;
-                None
+                self.shift_release_pending = false;
+                Some(reset_event(Keycode::LShift))
             }
             EventType::KeyPress(Key::ShiftRight) => {
                 self.right_shift = true;
-                None
+                self.shift_release_pending = false;
+                Some(reset_event(Keycode::RShift))
             }
             EventType::KeyRelease(Key::ShiftLeft) => {
                 self.left_shift = false;
@@ -190,10 +262,15 @@ impl CaptureState {
 
     fn capture_key(&mut self, key: Key, name: Option<&str>) -> Option<AutoKeyEvent> {
         if self.chord_modifier_active() {
+            self.shift_release_pending = false;
+            self.clear_snapshot_missing_chords();
             return None;
         }
 
-        let shifted = self.left_shift || self.right_shift;
+        let shifted = self.left_shift
+            || self.right_shift
+            || (self.shift_release_pending && rendered_character_is_uppercase(name));
+        self.shift_release_pending = false;
         if let Some(caps_lock) = infer_caps_lock(name, shifted) {
             let newly_detected = caps_lock && !self.caps_lock;
             self.caps_lock = caps_lock;
@@ -219,9 +296,34 @@ impl CaptureState {
             || self.right_meta
     }
 
+    fn clear_snapshot_missing_chords(&mut self) {
+        if self.snapshot_missing_chords & MISSING_LEFT_CONTROL != 0 {
+            self.left_control = false;
+        }
+        if self.snapshot_missing_chords & MISSING_RIGHT_CONTROL != 0 {
+            self.right_control = false;
+        }
+        if self.snapshot_missing_chords & MISSING_LEFT_OPTION != 0 {
+            self.left_option = false;
+        }
+        if self.snapshot_missing_chords & MISSING_RIGHT_OPTION != 0 {
+            self.right_option = false;
+        }
+        if self.snapshot_missing_chords & MISSING_LEFT_META != 0 {
+            self.left_meta = false;
+        }
+        if self.snapshot_missing_chords & MISSING_RIGHT_META != 0 {
+            self.right_meta = false;
+        }
+        self.snapshot_missing_chords = 0;
+    }
+
     #[cfg(any(target_os = "macos", test))]
     fn momentary_modifier_active(&self) -> bool {
-        self.left_shift || self.right_shift || self.chord_modifier_active()
+        self.left_shift
+            || self.right_shift
+            || self.shift_release_pending
+            || self.chord_modifier_active()
     }
 }
 
@@ -244,6 +346,32 @@ fn infer_caps_lock(name: Option<&str>, shifted: bool) -> Option<bool> {
         Some(shifted)
     } else {
         None
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn rendered_character_is_lowercase(name: Option<&str>) -> bool {
+    let Some(name) = name else {
+        return false;
+    };
+    let mut characters = name.chars();
+    characters.next().is_some_and(char::is_lowercase) && characters.next().is_none()
+}
+
+fn rendered_character_is_uppercase(name: Option<&str>) -> bool {
+    let Some(name) = name else {
+        return false;
+    };
+    let mut characters = name.chars();
+    characters.next().is_some_and(char::is_uppercase) && characters.next().is_none()
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn reconcile_chord_modifier(current: &mut bool, present: bool, missing: &mut u8, bit: u8) {
+    if present {
+        *current = true;
+    } else if *current {
+        *missing |= bit;
     }
 }
 
@@ -282,7 +410,6 @@ fn is_ordinary_key_press(event_type: EventType) -> bool {
 pub struct AutoCorrectMonitor {
     state: Arc<ListenerState>,
     subscription_id: u64,
-    suspended: Arc<AtomicBool>,
 }
 
 impl AutoCorrectMonitor {
@@ -302,10 +429,11 @@ impl AutoCorrectMonitor {
         ensure_listener(&state)?;
 
         let subscription_id = state.next_subscription.fetch_add(1, Ordering::Relaxed);
-        let suspended = Arc::new(AtomicBool::new(false));
         let subscription = Subscription {
             id: subscription_id,
-            suspended: Arc::clone(&suspended),
+            suspended: false,
+            deferred_text_events: VecDeque::new(),
+            deferred_overflowed: false,
             on_key_down: Box::new(on_key_down),
         };
         *state
@@ -317,12 +445,37 @@ impl AutoCorrectMonitor {
         Ok(Some(Self {
             state,
             subscription_id,
-            suspended,
         }))
     }
 
     pub fn set_suspended(&self, suspended: bool) {
-        self.suspended.store(suspended, Ordering::Relaxed);
+        let Ok(mut subscription) = self.state.subscription.lock() else {
+            return;
+        };
+        let Some(subscription) = subscription
+            .as_mut()
+            .filter(|current| current.id == self.subscription_id)
+        else {
+            return;
+        };
+
+        if suspended {
+            subscription.deferred_text_events.clear();
+            subscription.deferred_overflowed = false;
+            subscription.suspended = true;
+            return;
+        }
+
+        subscription.suspended = false;
+        if subscription.deferred_overflowed {
+            subscription.deferred_text_events.clear();
+            subscription.deferred_overflowed = false;
+            (subscription.on_key_down)(reset_event(Keycode::Escape));
+            return;
+        }
+        while let Some(event) = subscription.deferred_text_events.pop_front() {
+            (subscription.on_key_down)(event);
+        }
     }
 }
 
@@ -393,11 +546,20 @@ fn spawn_listener(state: &Arc<ListenerState>) -> Result<()> {
                     // press when the key predated its event tap. Reconcile only
                     // while a modifier appears active, keeping normal typing on
                     // the zero-query fast path.
-                    capture_state.synchronize_momentary_modifiers(&device.get_keys());
+                    capture_state
+                        .synchronize_momentary_modifiers(&device.get_keys(), event.name.as_deref());
                 }
-                if let Some(event) = capture_state.observe(event.event_type, event.name.as_deref())
+                let captured = capture_state.observe(event.event_type, event.name.as_deref());
+                #[cfg(target_os = "macos")]
+                if matches!(
+                    event.event_type,
+                    EventType::KeyRelease(Key::ShiftLeft | Key::ShiftRight)
+                ) && let Some(device) = device_state.as_ref()
                 {
-                    dispatch_key(&callback_state, event);
+                    capture_state.reconcile_shift_release(&device.get_keys());
+                }
+                if let Some(captured) = captured {
+                    dispatch_key(&callback_state, captured);
                 }
             });
 
@@ -449,9 +611,20 @@ fn dispatch_key(state: &ListenerState, event: AutoKeyEvent) {
     let Some(subscription) = subscription.as_mut() else {
         return;
     };
-    if !subscription.suspended.load(Ordering::Relaxed) {
-        (subscription.on_key_down)(event);
+    if subscription.suspended {
+        if AutoWordTracker::can_begin(event.key)
+            || matches!(event.key, Keycode::Space | Keycode::Backspace)
+        {
+            if subscription.deferred_text_events.len() < MAX_DEFERRED_TEXT_EVENTS {
+                subscription.deferred_text_events.push_back(event);
+            } else {
+                subscription.deferred_text_events.clear();
+                subscription.deferred_overflowed = true;
+            }
+        }
+        return;
     }
+    (subscription.on_key_down)(event);
 }
 
 fn map_key(key: Key) -> Option<Keycode> {
@@ -568,6 +741,32 @@ fn map_key(key: Key) -> Option<Keycode> {
 mod tests {
     use super::*;
 
+    fn test_monitor() -> (AutoCorrectMonitor, Arc<Mutex<Vec<AutoKeyEvent>>>) {
+        let state = Arc::new(ListenerState::default());
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let callback_events = Arc::clone(&received);
+        let subscription_id = 1;
+        *state.subscription.lock().expect("test listener lock") = Some(Subscription {
+            id: subscription_id,
+            suspended: false,
+            deferred_text_events: VecDeque::new(),
+            deferred_overflowed: false,
+            on_key_down: Box::new(move |event| {
+                callback_events
+                    .lock()
+                    .expect("test callback lock")
+                    .push(event);
+            }),
+        });
+        (
+            AutoCorrectMonitor {
+                state,
+                subscription_id,
+            },
+            received,
+        )
+    }
+
     #[test]
     fn maps_physical_letters_and_ukrainian_punctuation_positions() {
         assert_eq!(map_key(Key::KeyG), Some(Keycode::G));
@@ -579,6 +778,160 @@ mod tests {
     fn ignores_keys_that_cannot_affect_typed_text() {
         assert_eq!(map_key(Key::PrintScreen), None);
         assert_eq!(map_key(Key::Unknown(9000)), None);
+    }
+
+    #[test]
+    fn deferred_user_text_survives_later_synthetic_resets() {
+        let (monitor, received) = test_monitor();
+        monitor.set_suspended(true);
+
+        dispatch_key(&monitor.state, reset_event(Keycode::LShift));
+        dispatch_key(
+            &monitor.state,
+            AutoKeyEvent {
+                key: Keycode::H,
+                shifted: true,
+            },
+        );
+        // Paste emits a later Command reset. It must not erase the genuine H.
+        dispatch_key(&monitor.state, reset_event(Keycode::LMeta));
+
+        assert!(received.lock().expect("received lock").is_empty());
+        monitor.set_suspended(false);
+
+        assert_eq!(
+            *received.lock().expect("received lock"),
+            [AutoKeyEvent {
+                key: Keycode::H,
+                shifted: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn deferred_capital_stays_at_the_front_of_the_next_autocorrected_word() {
+        use crate::{auto_correct::AutoDecision, system_layout::SystemLayout};
+
+        for (first, suffix, expected_source, expected_replacement) in [
+            (
+                Keycode::G,
+                &[
+                    Keycode::J,
+                    Keycode::L,
+                    Keycode::S,
+                    Keycode::Z,
+                    Keycode::Space,
+                ][..],
+                "Gjlsz ",
+                "Подія ",
+            ),
+            (
+                Keycode::H,
+                &[
+                    Keycode::J,
+                    Keycode::Comma,
+                    Keycode::J,
+                    Keycode::N,
+                    Keycode::F,
+                    Keycode::Space,
+                ][..],
+                "Hj,jnf ",
+                "Робота ",
+            ),
+        ] {
+            let (monitor, received) = test_monitor();
+            monitor.set_suspended(true);
+            dispatch_key(&monitor.state, reset_event(Keycode::LShift));
+            dispatch_key(
+                &monitor.state,
+                AutoKeyEvent {
+                    key: first,
+                    shifted: true,
+                },
+            );
+            assert!(received.lock().expect("received lock").is_empty());
+
+            monitor.set_suspended(false);
+            for &key in suffix {
+                dispatch_key(
+                    &monitor.state,
+                    AutoKeyEvent {
+                        key,
+                        shifted: false,
+                    },
+                );
+            }
+            // Resuming an already active subscription is idempotent.
+            monitor.set_suspended(false);
+
+            let events = received.lock().expect("received lock").clone();
+            assert_eq!(events.first().map(|event| event.key), Some(first));
+            assert_eq!(events.iter().filter(|event| event.key == first).count(), 1);
+
+            let mut tracker = AutoWordTracker::default();
+            let mut decision = AutoDecision::Continue;
+            for event in events {
+                if tracker.needs_layout_check() && AutoWordTracker::can_begin(event.key) {
+                    tracker.set_source_layout(Some(SystemLayout::English));
+                }
+                if let Some(sample) = tracker.observe(event) {
+                    decision = upyr_core::evaluate(
+                        &sample,
+                        &upyr_core::AutoCorrectPolicy::default(),
+                        None,
+                    );
+                }
+            }
+
+            let AutoDecision::Correct(correction) = decision else {
+                panic!("expected correction after deferred capital, got {decision:?}");
+            };
+            assert_eq!(correction.expected_source, expected_source);
+            assert_eq!(correction.replacement, expected_replacement);
+        }
+    }
+
+    #[test]
+    fn capital_on_either_side_of_the_resume_handoff_is_delivered_once() {
+        for arrives_before_resume in [true, false] {
+            let (monitor, received) = test_monitor();
+            let capital = AutoKeyEvent {
+                key: Keycode::H,
+                shifted: true,
+            };
+            monitor.set_suspended(true);
+            if arrives_before_resume {
+                dispatch_key(&monitor.state, capital);
+            }
+            monitor.set_suspended(false);
+            if !arrives_before_resume {
+                dispatch_key(&monitor.state, capital);
+            }
+            monitor.set_suspended(false);
+
+            assert_eq!(*received.lock().expect("received lock"), [capital]);
+        }
+    }
+
+    #[test]
+    fn deferred_overflow_replays_only_a_tracker_reset() {
+        let (monitor, received) = test_monitor();
+        monitor.set_suspended(true);
+        for _ in 0..=MAX_DEFERRED_TEXT_EVENTS {
+            dispatch_key(
+                &monitor.state,
+                AutoKeyEvent {
+                    key: Keycode::H,
+                    shifted: false,
+                },
+            );
+        }
+        monitor.set_suspended(false);
+
+        assert_eq!(
+            *received.lock().expect("received lock"),
+            [reset_event(Keycode::Escape)]
+        );
     }
 
     #[test]
@@ -642,17 +995,122 @@ mod tests {
 
     #[test]
     fn live_modifier_resync_recovers_from_a_stale_release_event() {
-        let mut state = CaptureState::from_pressed_keys(&[
-            Keycode::LShift,
-            Keycode::LControl,
-            Keycode::LOption,
-            Keycode::Command,
-        ]);
+        let mut state = CaptureState::from_pressed_keys(&[Keycode::LShift]);
         assert!(state.momentary_modifier_active());
 
-        state.synchronize_momentary_modifiers(&[]);
+        state.synchronize_momentary_modifiers(&[], Some("a"));
 
         assert!(!state.momentary_modifier_active());
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
+            Some(AutoKeyEvent {
+                key: Keycode::A,
+                shifted: false,
+            })
+        );
+    }
+
+    #[test]
+    fn transient_shift_snapshot_does_not_drop_the_uppercase_key() {
+        let mut state = CaptureState::default();
+
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::ShiftLeft), None),
+            Some(reset_event(Keycode::LShift))
+        );
+        // device_query can briefly lag the event tap and omit a still-held
+        // Shift key. The rendered uppercase character is the tie-breaker.
+        state.synchronize_momentary_modifiers(&[], Some("H"));
+
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyH), Some("H")),
+            Some(AutoKeyEvent {
+                key: Keycode::H,
+                shifted: true,
+            })
+        );
+        state.synchronize_momentary_modifiers(&[], Some("O"));
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyO), Some("O")),
+            Some(AutoKeyEvent {
+                key: Keycode::O,
+                shifted: true,
+            })
+        );
+    }
+
+    #[test]
+    fn physical_shift_survives_an_overlapping_synthetic_release() {
+        let mut state = CaptureState::default();
+
+        state.observe(EventType::KeyPress(Key::ShiftLeft), None);
+        state.observe(EventType::KeyRelease(Key::ShiftLeft), None);
+        state.reconcile_shift_release(&[Keycode::LShift]);
+
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyG), Some("G")),
+            Some(AutoKeyEvent {
+                key: Keycode::G,
+                shifted: true,
+            })
+        );
+    }
+
+    #[test]
+    fn uppercase_resolves_an_empty_snapshot_after_synthetic_shift_release() {
+        let mut state = CaptureState::default();
+
+        state.observe(EventType::KeyPress(Key::ShiftLeft), None);
+        state.observe(EventType::KeyRelease(Key::ShiftLeft), None);
+        state.reconcile_shift_release(&[]);
+        assert!(state.momentary_modifier_active());
+
+        // A second empty snapshot can still lag the physically held key. The
+        // rendered uppercase character resolves this one-key ambiguity.
+        state.synchronize_momentary_modifiers(&[], Some("H"));
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyH), Some("H")),
+            Some(AutoKeyEvent {
+                key: Keycode::H,
+                shifted: true,
+            })
+        );
+        assert!(!state.shift_release_pending);
+    }
+
+    #[test]
+    fn lowercase_clears_an_uncertain_shift_release() {
+        let mut state = CaptureState::default();
+
+        state.observe(EventType::KeyPress(Key::ShiftLeft), None);
+        state.observe(EventType::KeyRelease(Key::ShiftLeft), None);
+        state.reconcile_shift_release(&[]);
+        state.synchronize_momentary_modifiers(&[], Some("h"));
+
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyH), Some("h")),
+            Some(AutoKeyEvent {
+                key: Keycode::H,
+                shifted: false,
+            })
+        );
+        assert!(!state.shift_release_pending);
+    }
+
+    #[test]
+    fn transient_meta_snapshot_never_turns_a_shortcut_into_typed_text() {
+        let mut state = CaptureState::default();
+
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::MetaLeft), None),
+            Some(reset_event(Keycode::LMeta))
+        );
+        state.synchronize_momentary_modifiers(&[], Some("c"));
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyC), Some("c")),
+            None
+        );
+        assert!(!state.chord_modifier_active());
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
             Some(AutoKeyEvent {
@@ -704,7 +1162,10 @@ mod tests {
     fn shift_is_preserved_without_becoming_a_blocker() {
         let mut state = CaptureState::default();
 
-        state.observe(EventType::KeyPress(Key::ShiftLeft), None);
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::ShiftLeft), None),
+            Some(reset_event(Keycode::LShift))
+        );
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("A")),
             Some(AutoKeyEvent {
