@@ -42,6 +42,7 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-targets --locked
 cargo audit
 python3 tools/check_privacy.py
+python3 tools/check_site_content.py
 python3 tools/check_version_sync.py
 python3 tools/check_codebase_graph.py
 ```

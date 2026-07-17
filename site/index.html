@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="no-js">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -34,6 +34,7 @@
         </a>
         <nav class="nav" aria-label="Main navigation" data-i18n-aria="navLabel">
           <a href="#why" data-i18n="navWhy">Why Upyr</a>
+          <a href="#experience" data-i18n="navExperience">Tour</a>
           <a href="#how" data-i18n="navHow">How it works</a>
           <a href="#privacy" data-i18n="navPrivacy">Privacy</a>
           <a href="#platforms" data-i18n="navPlatforms">Platforms</a>
@@ -153,7 +154,96 @@
         </div>
       </section>
 
-      <section class="section section-panel" id="how">
+      <section class="section section-panel showcase-section" id="experience">
+        <div class="shell">
+          <div class="section-intro section-intro-wide">
+            <p class="kicker" data-i18n="experienceKicker">See it. Hear it.</p>
+            <h2 data-i18n="experienceTitle">Native controls, with feedback you can tune.</h2>
+            <p data-i18n="experienceLead">Searchable macOS settings keep automation, shortcuts, language flags, and every sound event understandable and optional.</p>
+          </div>
+
+          <div class="experience-grid">
+            <figure class="settings-preview">
+              <a class="settings-image-frame" href="assets/upyr-settings-feedback.webp" aria-label="Open the full-size Upyr Settings screenshot" data-i18n-aria="settingsScreenshotLinkLabel">
+                <img
+                  src="assets/upyr-settings-feedback.webp"
+                  width="1440"
+                  height="1360"
+                  loading="lazy"
+                  decoding="async"
+                  alt="Upyr Settings on macOS showing language indicator and sound feedback controls"
+                  data-i18n-alt="settingsScreenshotAlt"
+                >
+                <span class="settings-expand"><span data-i18n="settingsExpand">Open full size</span><span aria-hidden="true">↗</span></span>
+              </a>
+              <figcaption>
+                <span data-i18n="settingsCaption">Native AppKit settings on macOS</span>
+                <small data-i18n="settingsCaptionDetail">Searchable tabs, per-event controls, previews, and one clear Save action.</small>
+              </figcaption>
+            </figure>
+
+            <div class="sound-lab" aria-labelledby="sound-lab-title">
+              <div class="sound-lab-heading">
+                <div>
+                  <p class="sound-local-label"><span aria-hidden="true">●</span><span data-i18n="soundLocalLabel">Generated live</span></p>
+                  <h3 id="sound-lab-title" data-i18n="soundTitle">Try the sound packs</h3>
+                </div>
+                <div class="sound-volume-control">
+                  <label for="sound-preview-volume" data-i18n="soundVolume">Preview volume</label>
+                  <div>
+                    <input id="sound-preview-volume" type="range" min="0" max="100" step="1" value="35">
+                    <output for="sound-preview-volume">35%</output>
+                  </div>
+                </div>
+              </div>
+              <p class="sound-intro" data-i18n="soundLead">Short browser-generated previews inspired by the app’s local Rust synthesizer.</p>
+
+              <div class="sound-pack-list">
+                <article class="sound-pack-card">
+                  <div>
+                    <h4 id="sound-original-title">Original</h4>
+                    <p id="sound-original-description" data-i18n="soundOriginalCopy">A soft, restrained conversion chime.</p>
+                  </div>
+                  <button class="sound-preview-button" type="button" data-sound-preview="original" aria-labelledby="sound-original-title sound-original-play" aria-describedby="sound-original-description sound-preview-status">
+                    <span class="sound-preview-icon" aria-hidden="true">▶</span>
+                    <span id="sound-original-play" data-i18n="soundPlay">Play sample</span>
+                    <span class="sound-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+                  </button>
+                </article>
+                <article class="sound-pack-card">
+                  <div>
+                    <h4 id="sound-arcade-title">Arcade</h4>
+                    <p id="sound-arcade-description" data-i18n="soundArcadeCopy">A bright, short retro confirmation.</p>
+                  </div>
+                  <button class="sound-preview-button" type="button" data-sound-preview="arcade" aria-labelledby="sound-arcade-title sound-arcade-play" aria-describedby="sound-arcade-description sound-preview-status">
+                    <span class="sound-preview-icon" aria-hidden="true">▶</span>
+                    <span id="sound-arcade-play" data-i18n="soundPlay">Play sample</span>
+                    <span class="sound-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+                  </button>
+                </article>
+                <article class="sound-pack-card">
+                  <div>
+                    <h4 id="sound-anime-title">Anime Reactions</h4>
+                    <p id="sound-anime-description" data-i18n="soundAnimeCopy">A synthesized vowel reaction for Enter—no voice recording.</p>
+                  </div>
+                  <button class="sound-preview-button" type="button" data-sound-preview="anime" aria-labelledby="sound-anime-title sound-anime-play" aria-describedby="sound-anime-description sound-preview-status">
+                    <span class="sound-preview-icon" aria-hidden="true">▶</span>
+                    <span id="sound-anime-play" data-i18n="soundPlay">Play sample</span>
+                    <span class="sound-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+                  </button>
+                </article>
+              </div>
+
+              <div class="sound-lab-footer">
+                <p id="sound-preview-status" role="status" aria-live="polite" aria-atomic="true" data-i18n="soundReady">Ready · nothing plays automatically</p>
+                <p data-i18n="soundPrivacy">Generated locally in your browser. No audio files, microphone, network, or tracking.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="how">
         <div class="shell">
           <div class="section-intro section-intro-wide">
             <p class="kicker" data-i18n="howKicker">Under the hood</p>
@@ -194,13 +284,80 @@
                 <span data-i18n="modelEval">Read the frozen evaluation</span><span aria-hidden="true">→</span>
               </a>
             </div>
-            <div class="model-visual" aria-label="Signed n-gram record examples" data-i18n-aria="modelVisualLabel">
-              <div class="model-axis"><span>EN −127</span><span>0</span><span>+127 УК</span></div>
-              <div class="gram-row gram-en"><code>^th</code><span><i></i></span><strong>−96</strong></div>
-              <div class="gram-row gram-uk"><code>при</code><span><i></i></span><strong>+104</strong></div>
-              <div class="gram-row gram-en"><code>ing$</code><span><i></i></span><strong>−121</strong></div>
-              <div class="gram-row gram-uk"><code>ість</code><span><i></i></span><strong>+117</strong></div>
-              <div class="packed-record"><span data-i18n="packedKey">16-byte key</span><span data-i18n="signedByte">signed byte</span></div>
+            <div class="ngram-demo" data-ngram-demo aria-labelledby="ngram-demo-title">
+              <div class="ngram-demo-heading">
+                <div>
+                  <span class="ngram-live-label" data-i18n="ngramLiveLabel">LOCAL TRACE</span>
+                  <h4 id="ngram-demo-title" data-i18n="ngramDemoTitle">Follow one correction</h4>
+                </div>
+                <button class="ngram-replay" type="button" data-ngram-replay aria-label="Replay trace" data-i18n-aria="ngramReplayLabel">
+                  <span aria-hidden="true">↻</span><span data-i18n="ngramReplay">Replay trace</span>
+                </button>
+              </div>
+
+              <div class="ngram-progress" aria-label="N-gram trace steps" data-i18n-aria="ngramStepsLabel">
+                <button class="is-active" type="button" data-ngram-jump="0" aria-current="step" aria-label="Step 1: map the physical keys" data-i18n-aria="ngramStep1Label">01</button>
+                <button type="button" data-ngram-jump="1" aria-label="Step 2: extract overlapping grams" data-i18n-aria="ngramStep2Label">02</button>
+                <button type="button" data-ngram-jump="2" aria-label="Step 3: compare local evidence" data-i18n-aria="ngramStep3Label">03</button>
+                <button type="button" data-ngram-jump="3" aria-label="Step 4: make the guarded decision" data-i18n-aria="ngramStep4Label">04</button>
+              </div>
+
+              <ol class="ngram-phases">
+                <li class="ngram-phase is-active" data-ngram-phase="0">
+                  <div class="ngram-phase-label"><span>01</span><strong data-i18n="ngramMapTitle">Map the physical keys</strong></div>
+                  <p data-i18n="ngramMapCopy">The same six key positions produce a candidate on the Ukrainian layout.</p>
+                  <div class="key-pair-row" aria-label="g maps to п, h to р, b to и, d to в, s to і, n to т" data-i18n-aria="ngramKeyPairsLabel">
+                    <span><code>g</code><i>→</i><code>п</code></span>
+                    <span><code>h</code><i>→</i><code>р</code></span>
+                    <span><code>b</code><i>→</i><code>и</code></span>
+                    <span><code>d</code><i>→</i><code>в</code></span>
+                    <span><code>s</code><i>→</i><code>і</code></span>
+                    <span><code>n</code><i>→</i><code>т</code></span>
+                  </div>
+                  <div class="ngram-conversion"><code>ghbdsn</code><span>→</span><code lang="uk">привіт</code></div>
+                </li>
+
+                <li class="ngram-phase" data-ngram-phase="1">
+                  <div class="ngram-phase-label"><span>02</span><strong data-i18n="ngramSplitTitle">Extract overlapping grams</strong></div>
+                  <p data-i18n="ngramSplitCopy">Add word boundaries and inspect every 2–5-character window. Longer grams receive more weight.</p>
+                  <div class="ngram-boundary"><code lang="uk">^привіт$</code><span data-i18n="ngramCount">22 overlapping grams</span></div>
+                  <div class="ngram-token-rows" aria-label="Overlapping n-grams from length two through five" data-i18n-aria="ngramTokensLabel">
+                    <div><b>n2</b><span><code>^п</code><code>пр</code><code>ри</code><code>ив</code><code>ві</code><code>іт</code><code>т$</code></span></div>
+                    <div><b>n3</b><span><code>^пр</code><code>при</code><code>рив</code><code>иві</code><code>віт</code><code>іт$</code></span></div>
+                    <div><b>n4</b><span><code>^при</code><code>прив</code><code>риві</code><code>ивіт</code><code>віт$</code></span></div>
+                    <div><b>n5</b><span><code>^прив</code><code>приві</code><code>ривіт</code><code>ивіт$</code></span></div>
+                  </div>
+                </li>
+
+                <li class="ngram-phase" data-ngram-phase="2">
+                  <div class="ngram-phase-label"><span>03</span><strong data-i18n="ngramCompareTitle">Compare local evidence</strong></div>
+                  <p data-i18n="ngramCompareCopy">Packed signed records are found with binary search; longer grams are weighted before the sum is normalized.</p>
+                  <div class="signed-records" aria-label="Sample signed n-gram records" data-i18n-aria="ngramRecordsLabel">
+                    <span class="record-en"><code>^g</code><b>−112</b></span>
+                    <span class="record-en"><code>ghb</code><b>−83</b></span>
+                    <span class="record-en"><code>sn$</code><b>−63</b></span>
+                    <span class="record-uk"><code>^п</code><b>+127</b></span>
+                    <span class="record-uk"><code>при</code><b>+116</b></span>
+                    <span class="record-uk"><code>ивіт$</code><b>+43</b></span>
+                  </div>
+                  <div class="coverage-chart">
+                    <div><span><code>ghbdsn</code><small>EN · 0.209</small></span><i><b class="coverage-en"></b></i></div>
+                    <div><span><code>привіт</code><small>УК · 0.704</small></span><i><b class="coverage-uk"></b></i></div>
+                  </div>
+                  <div class="coverage-note"><span data-i18n="ngramCoverageLabel">Model coverage · not probability</span><strong>+0.495</strong></div>
+                </li>
+
+                <li class="ngram-phase" data-ngram-phase="3">
+                  <div class="ngram-phase-label"><span>04</span><strong data-i18n="ngramDecideTitle">Make the guarded decision</strong></div>
+                  <p data-i18n="ngramDecideCopy">“привіт” is known; “ghbdsn” is not. The model agrees, and the policy permits correction.</p>
+                  <div class="decision-evidence">
+                    <span><code>ghbdsn</code><small data-i18n="ngramUnknown">unknown</small></span>
+                    <span><code>привіт</code><small data-i18n="ngramKnown">known word</small></span>
+                  </div>
+                  <div class="ngram-final-decision"><span aria-hidden="true">✓</span><strong data-i18n="ngramCorrect">CORRECT</strong><code>привіт</code></div>
+                </li>
+              </ol>
+              <p class="ngram-announcer sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
             </div>
           </div>
         </div>

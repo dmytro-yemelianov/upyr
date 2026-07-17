@@ -71,6 +71,10 @@ WEB_CODE_PATTERNS = {
     "sendBeacon": re.compile(r"\bsendBeacon\s*\("),
     "WebSocket": re.compile(r"\bWebSocket\s*\("),
     "EventSource": re.compile(r"\bEventSource\s*\("),
+    "microphone capture API": re.compile(
+        r"\b(?:getUserMedia|MediaRecorder|mediaDevices)\b", re.IGNORECASE
+    ),
+    "WebRTC API": re.compile(r"\b(?:RTCPeerConnection|webkitRTCPeerConnection)\b"),
     "analytics loader": re.compile(
         r"\b(?:gtag|posthog\.init|mixpanel\.init|analytics\.track)\s*\(", re.IGNORECASE
     ),

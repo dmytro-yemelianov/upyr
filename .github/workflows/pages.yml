@@ -7,6 +7,11 @@ on:
     paths:
       - "site/**"
       - "tools/check_privacy.py"
+      - "tools/check_site_content.py"
+      - "tools/test_check_site_content.py"
+      - "crates/upyr-core/src/auto_correct.rs"
+      - "crates/upyr-core/assets/dictionaries/*.txt"
+      - "crates/upyr-core/assets/models/language.ngm"
       - ".github/workflows/pages.yml"
   pull_request:
     branches:
@@ -14,6 +19,11 @@ on:
     paths:
       - "site/**"
       - "tools/check_privacy.py"
+      - "tools/check_site_content.py"
+      - "tools/test_check_site_content.py"
+      - "crates/upyr-core/src/auto_correct.rs"
+      - "crates/upyr-core/assets/dictionaries/*.txt"
+      - "crates/upyr-core/assets/models/language.ngm"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -40,6 +50,12 @@ jobs:
         run: test -s site/index.html
       - name: Verify release version synchronization
         run: python3 tools/check_version_sync.py
+      - name: Verify site script syntax
+        run: node --check site/app.js
+      - name: Verify bilingual product tour and model trace
+        run: python3 tools/check_site_content.py
+      - name: Test site-content contract
+        run: python3 -m unittest tools.test_check_site_content
       - name: Verify non-tracking site resources
         run: python3 tools/check_privacy.py
       - name: Configure Pages
