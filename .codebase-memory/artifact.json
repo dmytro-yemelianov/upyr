@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "2535be923264d8dc33efad190fdde96361d02e0e",
-    "indexed_at": "2026-07-17T15:16:39Z",
+    "commit": "65ac1025299d2733a50d1153964fc5e53bd9277e",
+    "indexed_at": "2026-07-17T15:20:24Z",
     "project": "upyr-procedural",
     "nodes": 1661,
-    "edges": 6194,
+    "edges": 6195,
     "original_size": 7208960,
-    "compressed_size": 1487831,
+    "compressed_size": 1487655,
     "compression_level": 3
 }
