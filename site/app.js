@@ -543,6 +543,7 @@
 
   function setTracePhase(index) {
     for (const [phaseIndex, phase] of ngramPhases.entries()) {
+      phase.hidden = !reducedMotion.matches && phaseIndex !== index;
       phase.classList.toggle("is-active", phaseIndex === index);
       phase.classList.toggle("is-complete", phaseIndex < index);
     }
@@ -618,6 +619,7 @@
   }
 
   if (ngramDemo) {
+    setTracePhase(0);
     if (reducedMotion.matches) {
       startTrace(false);
     } else if ("IntersectionObserver" in window) {

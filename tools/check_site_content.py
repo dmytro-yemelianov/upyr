@@ -170,32 +170,61 @@ def check_ngram_trace(html: str, app: str, css: str) -> None:
         fail(f"site copy does not match the model's {formatted_size} MiB size")
 
     samples = {
-        "^g": -112,
-        "ghb": -83,
-        "sn$": -63,
-        "^п": 127,
-        "при": 116,
-        "ивіт$": 43,
+        "^g": (-112, "record-en"),
+        "ghb": (-83, "record-en"),
+        "sn$": (-63, "record-en"),
+        "^п": (127, "record-uk"),
+        "при": (116, "record-uk"),
+        "ивіт$": (43, "record-uk"),
     }
-    for gram, expected in samples.items():
+    for gram, (expected, language_class) in samples.items():
         actual = model.lookup(gram)
         if actual != expected:
             fail(f"model record {gram!r} is {actual}; the site expects {expected}")
         signed = f"+{actual}" if actual > 0 else f"−{abs(actual)}"
-        if signed not in html:
-            fail(f"site trace is missing the current signed value {gram!r} {signed}")
+        record_pattern = re.compile(
+            rf'<span\s+class="{language_class}">\s*<code>{re.escape(gram)}</code>'
+            rf"\s*<b>{re.escape(signed)}</b>\s*</span>"
+        )
+        if not record_pattern.search(html):
+            fail(
+                f"site trace does not bind {gram!r} to {signed} in {language_class}"
+            )
 
     english, english_grams = model.coverage("en", "ghbdsn")
     ukrainian, ukrainian_grams = model.coverage("uk", "привіт")
     advantage = ukrainian - english
     if (english_grams, ukrainian_grams) != (22, 22):
         fail(f"trace gram counts changed to {english_grams} and {ukrainian_grams}")
-    for value in (english, ukrainian, advantage):
-        if f"{value:.3f}" not in html:
-            fail(f"site trace is missing current model value {value:.3f}")
-    for coverage in (english, ukrainian):
-        if f"{coverage * 100:.1f}%" not in css:
-            fail(f"site trace bar is missing current model width {coverage * 100:.1f}%")
+    coverages = (
+        ("ghbdsn", "EN", english, "coverage-en"),
+        ("привіт", "УК", ukrainian, "coverage-uk"),
+    )
+    for word, label, coverage, selector in coverages:
+        value = f"{coverage:.3f}"
+        row_pattern = re.compile(
+            rf"<div>\s*<span>\s*<code>{re.escape(word)}</code>"
+            rf"\s*<small>{label}\s*·\s*{re.escape(value)}</small>\s*</span>"
+            rf'\s*<i>\s*<b\s+class="{selector}"></b>\s*</i>\s*</div>'
+        )
+        if not row_pattern.search(html):
+            fail(
+                f"site trace does not bind {word!r}, {label}, {value}, and {selector}"
+            )
+        width = f"{coverage * 100:.1f}%"
+        bar_pattern = re.compile(
+            rf"\.{selector}\s*\{{[^}}]*\bwidth:\s*{re.escape(width)}\s*;",
+            re.DOTALL,
+        )
+        if not bar_pattern.search(css):
+            fail(f"site trace does not bind {selector} to model width {width}")
+
+    advantage_pattern = re.compile(
+        rf'class="coverage-note"[^>]*>.*?<strong>\+{advantage:.3f}</strong>',
+        re.DOTALL,
+    )
+    if not advantage_pattern.search(html):
+        fail(f"site trace is missing the bound model advantage +{advantage:.3f}")
 
     english_words = set(ENGLISH_DICTIONARY_PATH.read_text(encoding="utf-8").splitlines())
     ukrainian_words = set(UKRAINIAN_DICTIONARY_PATH.read_text(encoding="utf-8").splitlines())

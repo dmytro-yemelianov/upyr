@@ -43,6 +43,7 @@ cargo test --workspace --all-targets --locked
 cargo audit
 python3 tools/check_privacy.py
 python3 tools/check_site_content.py
+python3 -m unittest tools.test_check_site_content tools.test_check_privacy
 python3 tools/check_version_sync.py
 python3 tools/check_codebase_graph.py
 ```

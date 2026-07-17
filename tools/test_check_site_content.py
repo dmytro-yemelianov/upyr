@@ -4,10 +4,14 @@
 import unittest
 
 from tools.check_site_content import (
+    APP_PATH,
+    CSS_PATH,
+    HTML_PATH,
     MODEL_PATH,
     SCREENSHOT_PATH,
     SettingsImageParser,
     SignedNgramModel,
+    check_ngram_trace,
     ukrainian_translations,
     webp_dimensions,
 )
@@ -58,6 +62,33 @@ class SignedModelContractTests(unittest.TestCase):
         self.assertEqual((english_grams, ukrainian_grams), (22, 22))
         self.assertAlmostEqual(english, 0.2088189, places=6)
         self.assertAlmostEqual(ukrainian, 0.7042520, places=6)
+
+    def test_rejects_scores_swapped_between_grams(self) -> None:
+        html = HTML_PATH.read_text(encoding="utf-8")
+        swapped = html.replace(
+            "<code>^g</code><b>−112</b>", "<code>^g</code><b>−83</b>"
+        )
+        swapped = swapped.replace(
+            "<code>ghb</code><b>−83</b>", "<code>ghb</code><b>−112</b>"
+        )
+        with self.assertRaises(SystemExit):
+            check_ngram_trace(
+                swapped,
+                APP_PATH.read_text(encoding="utf-8"),
+                CSS_PATH.read_text(encoding="utf-8"),
+            )
+
+    def test_rejects_widths_swapped_between_language_bars(self) -> None:
+        css = CSS_PATH.read_text(encoding="utf-8")
+        swapped = css.replace("width: 20.9%;", "width: SWAP;")
+        swapped = swapped.replace("width: 70.4%;", "width: 20.9%;")
+        swapped = swapped.replace("width: SWAP;", "width: 70.4%;")
+        with self.assertRaises(SystemExit):
+            check_ngram_trace(
+                HTML_PATH.read_text(encoding="utf-8"),
+                APP_PATH.read_text(encoding="utf-8"),
+                swapped,
+            )
 
 
 if __name__ == "__main__":

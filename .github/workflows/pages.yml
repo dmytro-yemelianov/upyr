@@ -9,6 +9,7 @@ on:
       - "tools/check_privacy.py"
       - "tools/check_site_content.py"
       - "tools/test_check_site_content.py"
+      - "tools/test_check_privacy.py"
       - "crates/upyr-core/src/auto_correct.rs"
       - "crates/upyr-core/assets/dictionaries/*.txt"
       - "crates/upyr-core/assets/models/language.ngm"
@@ -21,6 +22,7 @@ on:
       - "tools/check_privacy.py"
       - "tools/check_site_content.py"
       - "tools/test_check_site_content.py"
+      - "tools/test_check_privacy.py"
       - "crates/upyr-core/src/auto_correct.rs"
       - "crates/upyr-core/assets/dictionaries/*.txt"
       - "crates/upyr-core/assets/models/language.ngm"
@@ -54,8 +56,8 @@ jobs:
         run: node --check site/app.js
       - name: Verify bilingual product tour and model trace
         run: python3 tools/check_site_content.py
-      - name: Test site-content contract
-        run: python3 -m unittest tools.test_check_site_content
+      - name: Test site contracts
+        run: python3 -m unittest tools.test_check_site_content tools.test_check_privacy
       - name: Verify non-tracking site resources
         run: python3 tools/check_privacy.py
       - name: Configure Pages
