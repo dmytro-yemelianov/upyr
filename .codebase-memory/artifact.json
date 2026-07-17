@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "91b4274c4297969c8bbd19ac8d18d2903449ba8f",
-    "indexed_at": "2026-07-17T11:53:38Z",
-    "project": "Users-dmytro-Documents-Witcher-S",
-    "nodes": 1789,
-    "edges": 6742,
-    "original_size": 8454144,
-    "compressed_size": 1601527,
+    "commit": "ee46d704adfa4553aedf1f1a67874ffd685d4f92",
+    "indexed_at": "2026-07-17T15:09:56Z",
+    "project": "upyr-procedural",
+    "nodes": 1659,
+    "edges": 6173,
+    "original_size": 7208960,
+    "compressed_size": 1481884,
     "compression_level": 3
 }
