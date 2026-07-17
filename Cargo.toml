@@ -1,3 +1,14 @@
+[workspace]
+members = [".", "crates/upyr-core", "crates/upyr-wasm"]
+default-members = ["."]
+resolver = "3"
+
+[workspace.dependencies]
+js-sys = "0.3.103"
+serde = { version = "1.0.228", features = ["derive"] }
+serde-wasm-bindgen = "0.6.5"
+wasm-bindgen = "0.2.126"
+
 [package]
 name = "upyr"
 version = "0.1.0"
@@ -6,6 +17,7 @@ rust-version = "1.85"
 description = "A privacy-first, cross-platform English-Ukrainian keyboard layout fixer"
 license = "MIT"
 readme = "README.md"
+default-run = "upyr"
 
 [[bin]]
 name = "upyr"
@@ -29,12 +41,13 @@ eframe = { version = "0.32.3", default-features = false, features = ["accesskit"
 enigo = "0.6.1"
 global-hotkey = "0.8.0"
 rdev = "0.5.3"
-serde = { version = "1.0.228", features = ["derive"] }
+serde.workspace = true
 single-instance = "0.3.3"
 toml = "1.1.3"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 tray-icon = { version = "0.24.1", default-features = false, features = ["gtk"] }
+upyr-core = { path = "crates/upyr-core" }
 winit = "0.30.12"
 
 [target.'cfg(target_os = "linux")'.dependencies]

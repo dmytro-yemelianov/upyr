@@ -4,4 +4,7 @@
 __pycache__/
 *.log
 .DS_Store
-.codebase-memory/
+.codebase-memory/*
+!.codebase-memory/.gitattributes
+!.codebase-memory/artifact.json
+!.codebase-memory/graph.db.zst

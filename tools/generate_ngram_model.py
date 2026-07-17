@@ -2,9 +2,9 @@
 """Build Upyr's compact EN/UK character n-gram language index.
 
 The downloaded corpus word-frequency tables are training input only. The output
-contains no words or sentences: each record is a packed 2-5 character n-gram
-key plus a signed confidence byte (negative for English, positive for
-Ukrainian).
+contains no word-frequency table or sentences: each record is a packed 2-5
+character n-gram key plus a signed confidence byte (negative for English,
+positive for Ukrainian). Short n-grams can coincide with complete short words.
 """
 
 from __future__ import annotations
@@ -24,24 +24,47 @@ HEADER = struct.Struct("<8sI")
 ENTRY_SIZE = 17
 MIN_NGRAM = 2
 MAX_NGRAM = 5
-MIN_STRENGTH = 24
 MAX_STRENGTH = 127
 GRAM_BUDGETS = {2: 2_048, 3: 8_192, 4: 16_384, 5: 24_576}
+DEFAULT_CORPUS_SIZE = "1M"
+DEFAULT_BUDGET_SCALE = 1.75
+DEFAULT_MIN_STRENGTH = 32
 
-SOURCES = {
+LANGUAGES = {
     "english": {
-        "url": "https://downloads.wortschatz-leipzig.de/corpora/eng_news_2023_100K.tar.gz",
-        "sha256": "8e65ed5b9c96687d293374335c14dfb9db4c150877bcc208a21bcb2f86b43484",
-        "archive": "eng_news_2023_100K.tar.gz",
         "alphabet": frozenset("abcdefghijklmnopqrstuvwxyz'"),
         "sign": -1,
     },
     "ukrainian": {
-        "url": "https://downloads.wortschatz-leipzig.de/corpora/ukr_news_2023_100K.tar.gz",
-        "sha256": "c66f1245ab624885354b5f19bc66aaab71977322136fe0d2835befca5688d7e4",
-        "archive": "ukr_news_2023_100K.tar.gz",
         "alphabet": frozenset("абвгґдеєжзиіїйклмнопрстуфхцчшщьюя'"),
         "sign": 1,
+    },
+}
+
+SOURCES = {
+    "100K": {
+        "english": {
+            "url": "https://downloads.wortschatz-leipzig.de/corpora/eng_news_2023_100K.tar.gz",
+            "sha256": "8e65ed5b9c96687d293374335c14dfb9db4c150877bcc208a21bcb2f86b43484",
+            "archive": "eng_news_2023_100K.tar.gz",
+        },
+        "ukrainian": {
+            "url": "https://downloads.wortschatz-leipzig.de/corpora/ukr_news_2023_100K.tar.gz",
+            "sha256": "c66f1245ab624885354b5f19bc66aaab71977322136fe0d2835befca5688d7e4",
+            "archive": "ukr_news_2023_100K.tar.gz",
+        },
+    },
+    "1M": {
+        "english": {
+            "url": "https://downloads.wortschatz-leipzig.de/corpora/eng_news_2023_1M.tar.gz",
+            "sha256": "c8a5a5e72897aa5e367b0319c1884831c02aaf29bf81342de31ca1b1cc8f3e4c",
+            "archive": "eng_news_2023_1M.tar.gz",
+        },
+        "ukrainian": {
+            "url": "https://downloads.wortschatz-leipzig.de/corpora/ukr_news_2023_1M.tar.gz",
+            "sha256": "0901bff8b3fdb3a8c657137754b4214b8ea6f241572d3ff9b2ae718487412383",
+            "archive": "ukr_news_2023_1M.tar.gz",
+        },
     },
 }
 
@@ -53,6 +76,30 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path(".cache/upyr-corpora"),
         help="download cache (default: .cache/upyr-corpora)",
+    )
+    parser.add_argument(
+        "--corpus-size",
+        choices=tuple(SOURCES),
+        default=DEFAULT_CORPUS_SIZE,
+        help=f"pinned Leipzig corpus size (default: {DEFAULT_CORPUS_SIZE})",
+    )
+    parser.add_argument(
+        "--budget-scale",
+        type=float,
+        default=DEFAULT_BUDGET_SCALE,
+        help=(
+            "multiply each retained n-gram budget "
+            f"(default: {DEFAULT_BUDGET_SCALE})"
+        ),
+    )
+    parser.add_argument(
+        "--min-strength",
+        type=int,
+        default=DEFAULT_MIN_STRENGTH,
+        help=(
+            "minimum retained n-gram strength "
+            f"(default: {DEFAULT_MIN_STRENGTH})"
+        ),
     )
     parser.add_argument(
         "--english-archive",
@@ -67,10 +114,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("src/models/language.ngm"),
-        help="generated packed model (default: src/models/language.ngm)",
+        default=Path("crates/upyr-core/assets/models/language.ngm"),
+        help="generated packed model (default: crates/upyr-core/assets/models/language.ngm)",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.budget_scale <= 0.0:
+        parser.error("--budget-scale must be greater than zero")
+    if not 1 <= args.min_strength <= MAX_STRENGTH:
+        parser.error(f"--min-strength must be between 1 and {MAX_STRENGTH}")
+    return args
 
 
 def sha256(path: Path) -> str:
@@ -81,8 +133,12 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def corpus_archive(language: str, supplied: Path | None, cache_dir: Path) -> Path:
-    source = SOURCES[language]
+def corpus_archive(
+    language: str,
+    source: dict[str, str],
+    supplied: Path | None,
+    cache_dir: Path,
+) -> Path:
     path = supplied or cache_dir / str(source["archive"])
     if not path.exists():
         if supplied:
@@ -157,12 +213,16 @@ def count_ngrams(archive: Path, alphabet: frozenset[str]):
     return counts, accepted_types, accepted_tokens
 
 
-def quantized_scores(counts: dict[int, dict[int, int]]) -> dict[int, int]:
+def quantized_scores(
+    counts: dict[int, dict[int, int]],
+    gram_budgets: dict[int, int],
+    min_strength: int,
+) -> dict[int, int]:
     scores: dict[int, int] = {}
     for size in range(MIN_NGRAM, MAX_NGRAM + 1):
         selected = sorted(
             counts[size].items(), key=lambda item: (-item[1], item[0])
-        )[: GRAM_BUDGETS[size]]
+        )[: gram_budgets[size]]
         if not selected:
             continue
         minimum = math.log1p(selected[-1][1])
@@ -170,14 +230,16 @@ def quantized_scores(counts: dict[int, dict[int, int]]) -> dict[int, int]:
         span = maximum - minimum
         for key, count in selected:
             position = 1.0 if span == 0.0 else (math.log1p(count) - minimum) / span
-            scores[key] = round(MIN_STRENGTH + position * (MAX_STRENGTH - MIN_STRENGTH))
+            scores[key] = round(
+                min_strength + position * (MAX_STRENGTH - min_strength)
+            )
     return scores
 
 
 def build_model(language_scores: dict[str, dict[int, int]]) -> list[tuple[int, int]]:
     signed: dict[int, int] = defaultdict(int)
     for language, scores in language_scores.items():
-        sign = int(SOURCES[language]["sign"])
+        sign = int(LANGUAGES[language]["sign"])
         for key, strength in scores.items():
             signed[key] += sign * strength
     return sorted(
@@ -206,11 +268,22 @@ def main() -> None:
         "ukrainian": args.ukrainian_archive,
     }
     scores: dict[str, dict[int, int]] = {}
+    sources = SOURCES[args.corpus_size]
+    gram_budgets = {
+        size: max(1, round(budget * args.budget_scale))
+        for size, budget in GRAM_BUDGETS.items()
+    }
     for language in ("english", "ukrainian"):
-        source = SOURCES[language]
-        archive = corpus_archive(language, supplied[language], args.cache_dir)
-        counts, word_types, word_tokens = count_ngrams(archive, source["alphabet"])
-        scores[language] = quantized_scores(counts)
+        source = sources[language]
+        archive = corpus_archive(
+            language, source, supplied[language], args.cache_dir
+        )
+        counts, word_types, word_tokens = count_ngrams(
+            archive, LANGUAGES[language]["alphabet"]
+        )
+        scores[language] = quantized_scores(
+            counts, gram_budgets, args.min_strength
+        )
         print(
             f"{language}: {word_types:,} accepted word types, "
             f"{word_tokens:,} tokens, {len(scores[language]):,} retained n-grams"

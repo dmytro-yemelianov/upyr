@@ -2,8 +2,9 @@ use super::*;
 
 struct SyntheticTyping {
     tracker: AutoWordTracker,
-    config: Config,
-    active_layout: SystemLayout,
+    policy: AutoCorrectPolicy,
+    switch_layout_after_correction: bool,
+    active_layout: InputLayout,
     buffer: String,
     corrections: Vec<AutoCorrection>,
     layout_switches: usize,
@@ -13,18 +14,16 @@ impl SyntheticTyping {
     fn new() -> Self {
         Self {
             tracker: AutoWordTracker::default(),
-            config: Config {
-                auto_correct: true,
-                ..Config::default()
-            },
-            active_layout: SystemLayout::English,
+            policy: AutoCorrectPolicy::default(),
+            switch_layout_after_correction: true,
+            active_layout: InputLayout::English,
             buffer: String::new(),
             corrections: Vec::new(),
             layout_switches: 0,
         }
     }
 
-    fn switch_layout(&mut self, layout: SystemLayout) {
+    fn switch_layout(&mut self, layout: InputLayout) {
         if self.active_layout != layout {
             self.active_layout = layout;
             self.layout_switches += 1;
@@ -34,13 +33,13 @@ impl SyntheticTyping {
     fn type_intended(
         &mut self,
         text: &str,
-        intended_layout: SystemLayout,
-        active_layout: SystemLayout,
+        intended_layout: InputLayout,
+        active_layout: InputLayout,
     ) {
         self.switch_layout(active_layout);
         let physical = match intended_layout {
-            SystemLayout::English => text.to_owned(),
-            SystemLayout::Ukrainian => convert(text, Direction::UkrainianToEnglish).text,
+            InputLayout::English => text.to_owned(),
+            InputLayout::Ukrainian => convert(text, Direction::UkrainianToEnglish).text,
         };
         self.type_physical(&physical);
     }
@@ -58,7 +57,7 @@ impl SyntheticTyping {
                 continue;
             };
 
-            match evaluate(&sample, &self.config) {
+            match evaluate(&sample, &self.policy, None) {
                 AutoDecision::Correct(correction) => {
                     assert!(
                         self.buffer.ends_with(&correction.expected_source),
@@ -68,10 +67,10 @@ impl SyntheticTyping {
                     );
                     let start = self.buffer.len() - correction.expected_source.len();
                     self.buffer.replace_range(start.., &correction.replacement);
-                    if self.config.switch_layout {
+                    if self.switch_layout_after_correction {
                         let target_layout = match correction.direction {
-                            Direction::EnglishToUkrainian => SystemLayout::Ukrainian,
-                            Direction::UkrainianToEnglish => SystemLayout::English,
+                            Direction::EnglishToUkrainian => InputLayout::Ukrainian,
+                            Direction::UkrainianToEnglish => InputLayout::English,
                             Direction::Smart => unreachable!("evaluated correction is directional"),
                         };
                         self.switch_layout(target_layout);
@@ -88,52 +87,40 @@ impl SyntheticTyping {
     }
 }
 
-fn visible_character(character: char, layout: SystemLayout) -> String {
+fn visible_character(character: char, layout: InputLayout) -> String {
     match layout {
-        SystemLayout::English => character.to_string(),
-        SystemLayout::Ukrainian => to_ukrainian(&character.to_string()),
+        InputLayout::English => character.to_string(),
+        InputLayout::Ukrainian => to_ukrainian(&character.to_string(), None),
     }
 }
 
-fn physical_event(character: char) -> AutoKeyEvent {
+fn physical_event(character: char) -> PhysicalKeyEvent {
     let (key, shifted) = match character {
-        'a'..='z' => (
-            character
-                .to_ascii_uppercase()
-                .to_string()
-                .parse()
-                .expect("ASCII letter has a keycode"),
-            false,
-        ),
-        'A'..='Z' => (
-            character
-                .to_string()
-                .parse()
-                .expect("ASCII letter has a keycode"),
-            true,
-        ),
-        ' ' => (Keycode::Space, false),
-        '`' => (Keycode::Grave, false),
-        '~' => (Keycode::Grave, true),
-        '[' => (Keycode::LeftBracket, false),
-        '{' => (Keycode::LeftBracket, true),
-        ']' => (Keycode::RightBracket, false),
-        '}' => (Keycode::RightBracket, true),
-        '\\' => (Keycode::BackSlash, false),
-        '|' => (Keycode::BackSlash, true),
-        ';' => (Keycode::Semicolon, false),
-        ':' => (Keycode::Semicolon, true),
-        '\'' => (Keycode::Apostrophe, false),
-        '"' => (Keycode::Apostrophe, true),
-        ',' => (Keycode::Comma, false),
-        '<' => (Keycode::Comma, true),
-        '.' => (Keycode::Dot, false),
-        '>' => (Keycode::Dot, true),
-        '/' => (Keycode::Slash, false),
-        '?' => (Keycode::Slash, true),
+        'a'..='z' | 'A'..='Z' => {
+            PhysicalKey::from_ascii_letter(character).expect("ASCII letter has a physical key")
+        }
+        ' ' => (PhysicalKey::Space, false),
+        '`' => (PhysicalKey::Backquote, false),
+        '~' => (PhysicalKey::Backquote, true),
+        '[' => (PhysicalKey::BracketLeft, false),
+        '{' => (PhysicalKey::BracketLeft, true),
+        ']' => (PhysicalKey::BracketRight, false),
+        '}' => (PhysicalKey::BracketRight, true),
+        '\\' => (PhysicalKey::Backslash, false),
+        '|' => (PhysicalKey::Backslash, true),
+        ';' => (PhysicalKey::Semicolon, false),
+        ':' => (PhysicalKey::Semicolon, true),
+        '\'' => (PhysicalKey::Quote, false),
+        '"' => (PhysicalKey::Quote, true),
+        ',' => (PhysicalKey::Comma, false),
+        '<' => (PhysicalKey::Comma, true),
+        '.' => (PhysicalKey::Period, false),
+        '>' => (PhysicalKey::Period, true),
+        '/' => (PhysicalKey::Slash, false),
+        '?' => (PhysicalKey::Slash, true),
         unsupported => panic!("unsupported synthetic physical character: {unsupported:?}"),
     };
-    let event = AutoKeyEvent { key, shifted };
+    let event = PhysicalKeyEvent { key, shifted };
     if character != ' ' {
         assert_eq!(
             physical_english_character(event.key, event.shifted),
@@ -151,8 +138,8 @@ fn synthetic_native_text_preserves_languages_product_names_and_punctuation() {
         "Українська клавіатура швидко перемикає розкладку, пунктуацію та великі літери. ";
 
     let mut typing = SyntheticTyping::new();
-    typing.type_intended(ENGLISH, SystemLayout::English, SystemLayout::English);
-    typing.type_intended(UKRAINIAN, SystemLayout::Ukrainian, SystemLayout::Ukrainian);
+    typing.type_intended(ENGLISH, InputLayout::English, InputLayout::English);
+    typing.type_intended(UKRAINIAN, InputLayout::Ukrainian, InputLayout::Ukrainian);
 
     assert_eq!(typing.buffer, format!("{ENGLISH}{UKRAINIAN}"));
     assert!(typing.corrections.is_empty());
@@ -166,8 +153,8 @@ fn synthetic_wrong_layout_text_corrects_both_directions_with_punctuation() {
         "FAANG companies prefer SaaS platforms; NASDAQ compares iPhone with ServiceNow. ";
 
     let mut typing = SyntheticTyping::new();
-    typing.type_intended(UKRAINIAN, SystemLayout::Ukrainian, SystemLayout::English);
-    typing.type_intended(ENGLISH, SystemLayout::English, SystemLayout::Ukrainian);
+    typing.type_intended(UKRAINIAN, InputLayout::Ukrainian, InputLayout::English);
+    typing.type_intended(ENGLISH, InputLayout::English, InputLayout::Ukrainian);
 
     assert_eq!(typing.buffer, format!("{UKRAINIAN}{ENGLISH}"));
     assert!(typing.corrections.len() >= 2);
@@ -177,13 +164,13 @@ fn synthetic_wrong_layout_text_corrects_both_directions_with_punctuation() {
 #[test]
 fn synthetic_mid_sentence_layout_switches_do_not_cross_contaminate_context() {
     let segments = [
-        ("ServiceNow ", SystemLayout::English),
-        ("перевіряє ", SystemLayout::Ukrainian),
-        ("NASDAQ, ", SystemLayout::English),
-        ("клавіатуру. ", SystemLayout::Ukrainian),
-        ("SaaS ", SystemLayout::English),
-        ("налаштування, ", SystemLayout::Ukrainian),
-        ("iPhone. ", SystemLayout::English),
+        ("ServiceNow ", InputLayout::English),
+        ("перевіряє ", InputLayout::Ukrainian),
+        ("NASDAQ, ", InputLayout::English),
+        ("клавіатуру. ", InputLayout::Ukrainian),
+        ("SaaS ", InputLayout::English),
+        ("налаштування, ", InputLayout::Ukrainian),
+        ("iPhone. ", InputLayout::English),
     ];
     let expected = segments.iter().map(|(text, _)| *text).collect::<String>();
 
@@ -207,7 +194,7 @@ fn synthetic_edge_identifiers_convert_only_when_wrong_layout_context_confirms_it
         "ServiceNow platform. ",
     ] {
         let mut typing = SyntheticTyping::new();
-        typing.type_intended(text, SystemLayout::English, SystemLayout::Ukrainian);
+        typing.type_intended(text, InputLayout::English, InputLayout::Ukrainian);
         assert_eq!(typing.buffer, text, "wrong-layout context failed: {text}");
         assert!(
             !typing.corrections.is_empty(),
@@ -220,73 +207,61 @@ fn synthetic_edge_identifiers_convert_only_when_wrong_layout_context_confirms_it
 fn synthetic_technical_prefixes_are_not_swept_into_later_ukrainian_corrections() {
     for technical in ["github.com ", "src/main.rs ", "https://example.com "] {
         let mut typing = SyntheticTyping::new();
-        typing.type_intended(technical, SystemLayout::English, SystemLayout::English);
-        typing.type_intended(
-            "перевіримо. ",
-            SystemLayout::Ukrainian,
-            SystemLayout::English,
-        );
+        typing.type_intended(technical, InputLayout::English, InputLayout::English);
+        typing.type_intended("перевіримо. ", InputLayout::Ukrainian, InputLayout::English);
         assert_eq!(typing.buffer, format!("{technical}перевіримо. "));
     }
 }
 
 #[test]
-fn synthetic_physical_punctuation_uses_the_active_os_mapping() {
+fn synthetic_physical_punctuation_uses_the_builtin_mapping() {
     const COMMON_PHYSICAL: &str = "[];',./{}:\"<>? ";
     const COMMON_UKRAINIAN: &str = "хїжєбю.ХЇЖЄБЮ, ";
     const ALL_PHYSICAL_PUNCTUATION: &str = "`~[]{}\\|;:'\",<.>/? ";
 
     let mut common = SyntheticTyping::new();
-    common.switch_layout(SystemLayout::Ukrainian);
+    common.switch_layout(InputLayout::Ukrainian);
     common.type_physical(COMMON_PHYSICAL);
     assert_eq!(common.buffer, COMMON_UKRAINIAN);
 
-    let expected = to_ukrainian(ALL_PHYSICAL_PUNCTUATION);
+    let expected = to_ukrainian(ALL_PHYSICAL_PUNCTUATION, None);
     let mut all = SyntheticTyping::new();
-    all.switch_layout(SystemLayout::Ukrainian);
+    all.switch_layout(InputLayout::Ukrainian);
     all.type_physical(ALL_PHYSICAL_PUNCTUATION);
     assert_eq!(all.buffer, expected);
 }
 
 #[test]
 fn deterministic_random_mix_exercises_layouts_languages_and_edge_contexts() {
-    const CASES: &[(&str, SystemLayout, SystemLayout)] = &[
-        ("FAANG, ", SystemLayout::English, SystemLayout::English),
-        ("SaaS. ", SystemLayout::English, SystemLayout::English),
-        ("NASDAQ: ", SystemLayout::English, SystemLayout::English),
-        ("iPhone; ", SystemLayout::English, SystemLayout::English),
-        ("ServiceNow? ", SystemLayout::English, SystemLayout::English),
+    const CASES: &[(&str, InputLayout, InputLayout)] = &[
+        ("FAANG, ", InputLayout::English, InputLayout::English),
+        ("SaaS. ", InputLayout::English, InputLayout::English),
+        ("NASDAQ: ", InputLayout::English, InputLayout::English),
+        ("iPhone; ", InputLayout::English, InputLayout::English),
+        ("ServiceNow? ", InputLayout::English, InputLayout::English),
         (
             "українська, ",
-            SystemLayout::Ukrainian,
-            SystemLayout::Ukrainian,
+            InputLayout::Ukrainian,
+            InputLayout::Ukrainian,
         ),
         (
             "клавіатура. ",
-            SystemLayout::Ukrainian,
-            SystemLayout::Ukrainian,
+            InputLayout::Ukrainian,
+            InputLayout::Ukrainian,
         ),
-        (
-            "перевіримо, ",
-            SystemLayout::Ukrainian,
-            SystemLayout::English,
-        ),
+        ("перевіримо, ", InputLayout::Ukrainian, InputLayout::English),
         (
             "налаштування. ",
-            SystemLayout::Ukrainian,
-            SystemLayout::English,
+            InputLayout::Ukrainian,
+            InputLayout::English,
         ),
-        ("keyboard, ", SystemLayout::English, SystemLayout::Ukrainian),
+        ("keyboard, ", InputLayout::English, InputLayout::Ukrainian),
         (
             "configuration. ",
-            SystemLayout::English,
-            SystemLayout::Ukrainian,
+            InputLayout::English,
+            InputLayout::Ukrainian,
         ),
-        (
-            "ServiceNow, ",
-            SystemLayout::English,
-            SystemLayout::Ukrainian,
-        ),
+        ("ServiceNow, ", InputLayout::English, InputLayout::Ukrainian),
     ];
 
     let mut seed = 0x5eed_f00du32;

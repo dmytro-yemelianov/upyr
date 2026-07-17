@@ -1,0 +1,24 @@
+[package]
+name = "upyr-wasm"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "WebAssembly bindings for the portable Upyr correction engine"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+js-sys.workspace = true
+serde.workspace = true
+serde-wasm-bindgen.workspace = true
+upyr-core = { path = "../upyr-core" }
+wasm-bindgen.workspace = true
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3.76"
+
+[build-dependencies]
+sha2 = "0.10.9"

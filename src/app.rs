@@ -27,7 +27,7 @@ use crate::{
     config_watcher::ConfigWatcher,
     modifier_gesture::ModifierGestureMonitor,
     settings, system_layout,
-    tray::{Tray, TrayAction},
+    tray::{TRAY_FLIP_FRAME_COUNT, TRAY_FLIP_FRAME_DELAY_MS, Tray, TrayAction},
 };
 
 #[derive(Debug)]
@@ -42,6 +42,10 @@ enum AppEvent {
     },
     ReloadConfiguration,
     HideLayoutIndicator(u64),
+    TrayFlipFrame {
+        generation: u64,
+        frame: u8,
+    },
     #[cfg(target_os = "macos")]
     AccessibilityGranted,
 }
@@ -61,6 +65,7 @@ struct App {
     paused: bool,
     auto_generation: u64,
     feedback_generation: u64,
+    tray_flip_generation: u64,
     #[cfg(target_os = "macos")]
     accessibility_watcher: Option<AccessibilityWatcher>,
     #[cfg(target_os = "macos")]
@@ -142,6 +147,7 @@ pub fn run(config: Config) -> Result<()> {
         paused: false,
         auto_generation: 0,
         feedback_generation: 0,
+        tray_flip_generation: 0,
         #[cfg(target_os = "macos")]
         accessibility_watcher: None,
         #[cfg(target_os = "macos")]
@@ -389,6 +395,8 @@ impl App {
     }
 
     fn present_layout_feedback(&mut self, layout: Option<system_layout::SystemLayout>) {
+        self.start_tray_flip();
+
         let Some(layout) = layout else {
             return;
         };
@@ -404,6 +412,31 @@ impl App {
             std::thread::sleep(delay);
             if let Err(error) = proxy.send_event(AppEvent::HideLayoutIndicator(generation)) {
                 debug!(%error, "could not schedule layout indicator dismissal");
+            }
+        });
+    }
+
+    fn start_tray_flip(&mut self) {
+        let Some(tray) = &self.tray else {
+            return;
+        };
+
+        self.tray_flip_generation = self.tray_flip_generation.wrapping_add(1);
+        let generation = self.tray_flip_generation;
+        if let Err(error) = tray.set_flip_frame(1) {
+            debug!(%error, "could not start tray icon flip");
+            return;
+        }
+
+        let proxy = self.event_proxy.clone();
+        std::thread::spawn(move || {
+            for frame in 2..=TRAY_FLIP_FRAME_COUNT {
+                std::thread::sleep(std::time::Duration::from_millis(TRAY_FLIP_FRAME_DELAY_MS));
+                if let Err(error) = proxy.send_event(AppEvent::TrayFlipFrame { generation, frame })
+                {
+                    debug!(%error, "could not schedule tray icon flip frame");
+                    break;
+                }
             }
         });
     }
@@ -653,10 +686,20 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::HideLayoutIndicator(generation) if generation == self.feedback_generation => {
                 crate::feedback::hide_layout_indicator();
             }
+            AppEvent::TrayFlipFrame { generation, frame }
+                if generation == self.tray_flip_generation =>
+            {
+                if let Some(tray) = &self.tray
+                    && let Err(error) = tray.set_flip_frame(frame)
+                {
+                    debug!(%error, "could not advance tray icon flip");
+                }
+            }
             #[cfg(target_os = "macos")]
             AppEvent::AccessibilityGranted => self.handle_accessibility_granted(event_loop),
             AppEvent::ModifierGesture(_) => {}
             AppEvent::HideLayoutIndicator(_) => {}
+            AppEvent::TrayFlipFrame { .. } => {}
         }
     }
 

@@ -1,11 +1,7 @@
 use anyhow::Result;
 
 /// The input-source families supported by Upyr's initial mapping.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SystemLayout {
-    English,
-    Ukrainian,
-}
+pub use upyr_core::InputLayout as SystemLayout;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveInputSource {

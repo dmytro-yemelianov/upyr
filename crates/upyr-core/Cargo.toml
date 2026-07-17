@@ -1,0 +1,11 @@
+[package]
+name = "upyr-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Portable English-Ukrainian layout conversion and correction engine for Upyr"
+license = "MIT"
+publish = false
+
+[dependencies]
+serde.workspace = true

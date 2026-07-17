@@ -14,7 +14,7 @@ Automatic correction is opt-in. When enabled, Upyr can recognize a confidently m
 
 Upyr also adds a **U** icon to the macOS menu bar or system tray. Its menu can convert text, pause/resume Upyr, open the native settings window, reload the configuration, or quit the app.
 
-For example, `ghbdsn` becomes `привіт`, and `руддщ` becomes `hello`. Processing stays on the device. Upyr has no network or telemetry code.
+For example, `ghbdsn` becomes `привіт`, and `руддщ` becomes `hello`. Processing stays on the device. The desktop and WASM runtimes have no network or telemetry code; corpus-generation tools download pinned public datasets only when invoked explicitly.
 
 For a faster no-selection workflow, place the caret immediately after a mistyped word and press `CmdOrCtrl+Alt+Backspace`. Upyr selects the previous word and fixes it in place.
 
@@ -25,6 +25,14 @@ Install the current stable Rust toolchain, then:
 ```sh
 cargo build --release
 ./target/release/upyr
+```
+
+On Ubuntu/Debian, install the desktop build dependencies first:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev \
+  libwayland-dev libgtk-3-dev libayatana-appindicator3-dev
 ```
 
 On Windows, run `target\release\upyr-background.exe` for the tray application without a console window, or use `target\release\upyr.exe` for CLI commands and foreground diagnostics.
@@ -38,6 +46,27 @@ printf 'руддщ' | cargo run -- convert --direction smart
 ./target/release/upyr doctor
 ./target/release/upyr settings
 ```
+
+The shared engine also has a headless WebAssembly binding (no DOM adapter or npm
+release yet):
+
+```sh
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.126 --locked
+cargo check -p upyr-core -p upyr-wasm --all-targets \
+  --target wasm32-unknown-unknown --locked
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+  cargo test -p upyr-wasm --target wasm32-unknown-unknown --locked
+cargo build --release -p upyr-wasm --target wasm32-unknown-unknown --locked
+wasm-bindgen --target nodejs --out-dir target/upyr-wasm-node \
+  target/wasm32-unknown-unknown/release/upyr_wasm.wasm
+node tools/smoke_wasm_node.cjs target/upyr-wasm-node/upyr_wasm.js
+# Requires the `brotli` command (`brew install brotli` or `apt install brotli`).
+python3 tools/check_wasm_size.py
+```
+
+See [`crates/upyr-wasm/README.md`](crates/upyr-wasm/README.md) for the current
+`convertText`/`UpyrSession` contract and browser-host safety requirements.
 
 Tagged releases produce installable artifacts:
 
@@ -88,9 +117,11 @@ Set `UPYR_CONFIG` to use a different config path. Valid directions are `smart`, 
 
 The optional modifier-only trigger can be `double-control`, `double-shift`, or `double-control-shift`; its action can be `previous-word` or `selection`. It is deliberately `disabled` by default, which means Upyr does not poll global keyboard state. When enabled, Upyr immediately reduces each sample to modifier flags plus an “other key pressed” bit; it does not retain or log key identities. Any ordinary key or unrelated modifier cancels the gesture. Enabling it requires Accessibility permission on macOS and an active X11 display on Linux.
 
-Automatic correction is also deliberately disabled by default. Its sensitivity can be `conservative`, `balanced`, or `aggressive`. Upyr combines exact dictionary matches with a compact, frequency-weighted character 2–5-gram index generated from comparable 100,000-sentence English and Ukrainian news corpora. Training tokens are filtered by alphabet, split into character n-grams, and immediately tagged with an EN or UK confidence; no corpus words or sentences are embedded in the application. Upyr keeps only a short, in-memory prefix from the current input boundary and converts that prefix when the target language becomes substantially more likely; navigation, layout changes, known or confidently recognized source-language segments, technical punctuation, and the 256-character limit reset the context. Deliberate Latin identifiers such as `FAANG`, `SaaS`, `NASDAQ`, `iPhone`, and `ServiceNow`, plus recognizable URL/path tokens, also close the current source-language segment so a later foreign-layout word cannot sweep them into a correction. Automatic mode uses OS key-down hooks instead of periodic keyboard snapshots, so brief presses during fast typing are not lost. Add project names, abbreviations, or other intentional strings to `auto_correct_exceptions`. The settings window validates and writes this configuration, and a running Upyr process reloads it automatically.
+Automatic correction is also deliberately disabled by default. Its sensitivity can be `conservative`, `balanced`, or `aggressive`. Upyr combines exact dictionary matches with a compact, frequency-weighted character 2–5-gram index generated from comparable 1,000,000-sentence English and Ukrainian news corpora. Training tokens are filtered by alphabet, split into character n-grams, and immediately tagged with an EN or UK confidence; the application embeds no corpus word-frequency table or sentences, only packed n-gram evidence (which can naturally include complete short words). Pairwise policy keeps the source when both interpretations are plausible and applies physical-punctuation assistance only in the direction where those positions become Ukrainian letters. Upyr keeps only a short, in-memory prefix from the current input boundary and converts that prefix when the target language becomes substantially more likely; navigation, layout changes, known or confidently recognized source-language segments, technical punctuation, and the 256-character limit reset the context. Deliberate Latin identifiers such as `FAANG`, `SaaS`, `NASDAQ`, `iPhone`, and `ServiceNow`, plus recognizable URL/path tokens, also close the current source-language segment so a later foreign-layout word cannot sweep them into a correction. Automatic mode uses OS key-down hooks instead of periodic keyboard snapshots, so brief presses during fast typing are not lost. Add project names, abbreviations, or other intentional strings to `auto_correct_exceptions`. The settings window validates and writes this configuration, and a running Upyr process reloads it automatically.
 
-The committed language index can be reproduced with `python3 tools/generate_ngram_model.py`. The generator downloads pinned Leipzig Corpora Collection archives, verifies their SHA-256 checksums, filters mixed-script and malformed tokens, and writes the packed `src/models/language.ngm` artifact. The generated index currently contains about 100,000 language-tagged n-grams in roughly 1.6 MiB; full training archives stay outside the repository.
+The committed language index can be reproduced with `python3 tools/generate_ngram_model.py`. The generator downloads pinned Leipzig Corpora Collection archives, verifies their SHA-256 checksums, filters mixed-script and malformed tokens, and writes the packed `crates/upyr-core/assets/models/language.ngm` artifact. The generated index currently contains 173,964 language-tagged n-grams in roughly 2.8 MiB; full training archives stay outside the repository.
+
+Model and policy changes are measured against the frozen [signed N-gram v1 evaluation](docs/benchmarks/signed-ngram-v1.md). Its 191 materialized cases cover both directions, native text, technical identifiers, names, punctuation, short-word abstention, contextual phrases, and reported physical-key mappings without regenerating expected snapshots through production conversion code. An optional independently generated Wikipedia holdout adds 20,000 clean boundaries for false-correction screening.
 
 Settings are organized into General, Automatic, Shortcuts, Feedback, and Advanced tabs. Parameter search jumps directly to the matching tab. Shortcut fields are press-to-record controls: they capture physical keys, require a modifier, render readable platform symbols, reject duplicate assignments, and offer an individual reset. macOS uses AppKit controls throughout the settings companion; Windows and Linux keep the same tab/search model in the cross-platform frontend.
 
@@ -137,11 +168,13 @@ Under X11, Upyr reads and locks the active XKB group after discovering configure
 - Versioned configuration with in-memory migration through schema version 4
 - Configurable timing for applications with slow clipboard handling
 - Native menu-bar/system-tray controls for conversion, pause, configuration, and quit
+- A shared `upyr-core` decision engine plus a tested, DOM-independent WASM binding with generated TypeScript contracts
 - Unit, deterministic property-style, and CLI integration tests plus CI builds for macOS, Windows, and Linux
 - Universal macOS DMG/ZIP, Windows installer/ZIP, and Linux DEB/tar release packaging
 
 ## Roadmap
 
+- [TypeScript DOM facade, playground, and npm integration](docs/architecture/wasm-web-plan.md) on the implemented headless WASM binding, developed in parallel with the calibrated N-gram v2 scorer
 - Arbitrary Linux MIME-set restoration and Windows GDI-handle duplication beyond the current safe fallbacks
 - Production code-signing/notarization credentials for official releases
 - Per-application exclusions and editable custom dictionaries
