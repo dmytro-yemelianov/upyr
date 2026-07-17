@@ -13,8 +13,8 @@ use objc2::{
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSButton, NSColor,
     NSControlStateValueOff, NSControlStateValueOn, NSEvent, NSEventModifierFlags, NSFont,
-    NSPopUpButton, NSSearchField, NSTabView, NSTabViewItem, NSTextField, NSView, NSWindow,
-    NSWindowDelegate, NSWindowStyleMask,
+    NSPopUpButton, NSSearchField, NSSlider, NSTabView, NSTabViewItem, NSTextField, NSView,
+    NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_foundation::{
     NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
@@ -26,7 +26,7 @@ use super::{
 };
 use crate::{
     autostart,
-    config::{AutoCorrectSensitivity, Config, GestureAction, ModifierGesture},
+    config::{AutoCorrectSensitivity, Config, GestureAction, ModifierGesture, SoundEvent},
     layout::Direction,
 };
 
@@ -64,10 +64,45 @@ struct Controls {
     gesture_timeout: Retained<NSTextField>,
     show_indicator: Retained<NSButton>,
     indicator_duration: Retained<NSTextField>,
-    play_sound: Retained<NSButton>,
+    sounds_enabled: Retained<NSButton>,
+    sound_volume: Retained<NSSlider>,
+    sound_volume_label: Retained<NSTextField>,
+    sound_events: SoundEventControls,
     copy_delay: Retained<NSTextField>,
     paste_delay: Retained<NSTextField>,
     restore_delay: Retained<NSTextField>,
+}
+
+struct SoundEventControls {
+    auto_correct: Retained<NSButton>,
+    manual_conversion: Retained<NSButton>,
+    layout_switch: Retained<NSButton>,
+    pause: Retained<NSButton>,
+    resume: Retained<NSButton>,
+    error: Retained<NSButton>,
+}
+
+impl SoundEventControls {
+    fn button(&self, event: SoundEvent) -> &NSButton {
+        match event {
+            SoundEvent::AutoCorrect => &self.auto_correct,
+            SoundEvent::ManualConversion => &self.manual_conversion,
+            SoundEvent::LayoutSwitch => &self.layout_switch,
+            SoundEvent::Pause => &self.pause,
+            SoundEvent::Resume => &self.resume,
+            SoundEvent::Error => &self.error,
+        }
+    }
+}
+
+struct FeedbackControls {
+    page: Retained<NSView>,
+    show_indicator: Retained<NSButton>,
+    indicator_duration: Retained<NSTextField>,
+    sounds_enabled: Retained<NSButton>,
+    sound_volume: Retained<NSSlider>,
+    sound_volume_label: Retained<NSTextField>,
+    sound_events: SoundEventControls,
 }
 
 define_class!(
@@ -210,7 +245,6 @@ define_class!(
             let controls = self.controls();
             let preview = Config {
                 show_layout_indicator: is_checked(&controls.show_indicator),
-                play_switch_sound: is_checked(&controls.play_sound),
                 layout_indicator_duration_ms: parse_number(
                     &controls.indicator_duration,
                     "indicator duration",
@@ -220,8 +254,8 @@ define_class!(
                 .unwrap_or(900),
                 ..Config::default()
             };
-            if !preview.show_layout_indicator && !preview.play_switch_sound {
-                self.set_status(false, "Enable the language flag or switch sound to preview it.");
+            if !preview.show_layout_indicator {
+                self.set_status(false, "Enable the language flag to preview it.");
                 return;
             }
 
@@ -239,7 +273,42 @@ define_class!(
                     ];
                 }
             }
-            self.set_status(true, "Played the enabled feedback preview.");
+            self.set_status(true, "Previewed the language flag.");
+        }
+
+        #[unsafe(method(previewAutoCorrectSound:))]
+        fn preview_auto_correct_sound(&self, _sender: &AnyObject) {
+            self.preview_sound(SoundEvent::AutoCorrect);
+        }
+
+        #[unsafe(method(previewManualConversionSound:))]
+        fn preview_manual_conversion_sound(&self, _sender: &AnyObject) {
+            self.preview_sound(SoundEvent::ManualConversion);
+        }
+
+        #[unsafe(method(previewLayoutSwitchSound:))]
+        fn preview_layout_switch_sound(&self, _sender: &AnyObject) {
+            self.preview_sound(SoundEvent::LayoutSwitch);
+        }
+
+        #[unsafe(method(previewPauseSound:))]
+        fn preview_pause_sound(&self, _sender: &AnyObject) {
+            self.preview_sound(SoundEvent::Pause);
+        }
+
+        #[unsafe(method(previewResumeSound:))]
+        fn preview_resume_sound(&self, _sender: &AnyObject) {
+            self.preview_sound(SoundEvent::Resume);
+        }
+
+        #[unsafe(method(previewErrorSound:))]
+        fn preview_error_sound(&self, _sender: &AnyObject) {
+            self.preview_sound(SoundEvent::Error);
+        }
+
+        #[unsafe(method(soundVolumeChanged:))]
+        fn sound_volume_changed(&self, _sender: &AnyObject) {
+            self.refresh_sound_volume_label();
         }
 
         #[unsafe(method(hideFeedback:))]
@@ -251,6 +320,36 @@ define_class!(
 );
 
 impl NativeController {
+    fn preview_sound(&self, event: SoundEvent) {
+        let mut settings = self.ivars().config.borrow().sounds;
+        settings.enabled = true;
+        settings.set_event_selected(event, true);
+        settings.volume_percent = self.sound_volume_percent();
+        match crate::feedback::preview_sound(event, &settings) {
+            Ok(()) => self.set_status(true, &format!("Previewed {} sound.", event.label())),
+            Err(error) => self.set_status(
+                false,
+                &format!("Could not preview {} sound: {error:#}", event.label()),
+            ),
+        }
+    }
+
+    fn sound_volume_percent(&self) -> u8 {
+        self.controls()
+            .sound_volume
+            .doubleValue()
+            .round()
+            .clamp(0.0, 100.0) as u8
+    }
+
+    fn refresh_sound_volume_label(&self) {
+        let volume = self.sound_volume_percent();
+        self.controls()
+            .sound_volume
+            .setDoubleValue(f64::from(volume));
+        set_text(&self.controls().sound_volume_label, format!("{volume}%"));
+    }
+
     fn new(
         config: Config,
         autostart_status: autostart::AutostartStatus,
@@ -336,8 +435,15 @@ impl NativeController {
             gesture_timeout,
         ) = make_shortcuts_page(self, mtm);
         add_tab(&tabs, "Shortcuts", &shortcuts, mtm);
-        let (feedback, show_indicator, indicator_duration, play_sound) =
-            make_feedback_page(self, mtm);
+        let FeedbackControls {
+            page: feedback,
+            show_indicator,
+            indicator_duration,
+            sounds_enabled,
+            sound_volume,
+            sound_volume_label,
+            sound_events,
+        } = make_feedback_page(self, mtm);
         add_tab(&tabs, "Feedback", &feedback, mtm);
         let (advanced, copy_delay, paste_delay, restore_delay) = make_advanced_page(mtm);
         add_tab(&tabs, "Advanced", &advanced, mtm);
@@ -394,7 +500,10 @@ impl NativeController {
                 gesture_timeout,
                 show_indicator,
                 indicator_duration,
-                play_sound,
+                sounds_enabled,
+                sound_volume,
+                sound_volume_label,
+                sound_events,
                 copy_delay,
                 paste_delay,
                 restore_delay,
@@ -458,7 +567,13 @@ impl NativeController {
             250,
             3_000,
         )?;
-        config.play_switch_sound = is_checked(&controls.play_sound);
+        config.sounds.enabled = is_checked(&controls.sounds_enabled);
+        config.sounds.volume_percent = self.sound_volume_percent();
+        for event in SoundEvent::ALL {
+            config
+                .sounds
+                .set_event_selected(event, is_checked(controls.sound_events.button(event)));
+        }
         config.copy_delay_ms = parse_number(&controls.copy_delay, "copy delay", 10, 2_000)?;
         config.paste_delay_ms = parse_number(&controls.paste_delay, "paste delay", 0, 2_000)?;
         config.restore_delay_ms =
@@ -521,7 +636,17 @@ impl NativeController {
             &controls.indicator_duration,
             config.layout_indicator_duration_ms,
         );
-        set_checked(&controls.play_sound, config.play_switch_sound);
+        set_checked(&controls.sounds_enabled, config.sounds.enabled);
+        controls
+            .sound_volume
+            .setDoubleValue(f64::from(config.sounds.volume_percent));
+        self.refresh_sound_volume_label();
+        for event in SoundEvent::ALL {
+            set_checked(
+                controls.sound_events.button(event),
+                config.sounds.event_selected(event),
+            );
+        }
         set_text(&controls.copy_delay, config.copy_delay_ms);
         set_text(&controls.paste_delay, config.paste_delay_ms);
         set_text(&controls.restore_delay, config.restore_delay_ms);
@@ -943,48 +1068,109 @@ fn make_shortcuts_page(
     (page, selection, previous, gesture, action, timeout)
 }
 
-fn make_feedback_page(
-    controller: &NativeController,
-    mtm: MainThreadMarker,
-) -> (
-    Retained<NSView>,
-    Retained<NSButton>,
-    Retained<NSTextField>,
-    Retained<NSButton>,
-) {
+fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> FeedbackControls {
     let page = page(mtm);
     page_header(
         &page,
         "Feedback",
-        "Optional confirmation after a real OS input-source change.",
+        "Optional visual and sound confirmation for Upyr actions.",
         mtm,
     );
     let indicator = checkbox(
         "Show a temporary language flag next to the pointer",
-        rect(24.0, 334.0, 470.0, 26.0),
+        rect(24.0, 342.0, 470.0, 26.0),
         mtm,
     );
     page.addSubview(&indicator);
-    let duration = numeric_row(&page, "Indicator duration (ms)", 282.0, mtm);
-    let sound = checkbox(
-        "Play a subtle sound when the layout changes",
-        rect(24.0, 224.0, 470.0, 26.0),
-        mtm,
-    );
-    page.addSubview(&sound);
-    page.addSubview(&label(
-        "The flag and sound stay off when the target layout is already active.",
-        rect(28.0, 164.0, 590.0, 24.0),
-        mtm,
-    ));
     page.addSubview(&action_button(
-        "Preview Feedback",
-        rect(24.0, 112.0, 150.0, 32.0),
+        "Preview Flag",
+        rect(532.0, 339.0, 112.0, 30.0),
         controller,
         sel!(previewFeedback:),
         mtm,
     ));
-    (page, indicator, duration, sound)
+    page.addSubview(&label(
+        "Indicator duration (ms)",
+        rect(48.0, 308.0, 190.0, 24.0),
+        mtm,
+    ));
+    let duration = text_field("", rect(252.0, 305.0, 116.0, 26.0), mtm);
+    page.addSubview(&duration);
+
+    let sounds_enabled = checkbox("Enable event sounds", rect(24.0, 267.0, 250.0, 26.0), mtm);
+    page.addSubview(&sounds_enabled);
+    page.addSubview(&label("Volume", rect(280.0, 269.0, 58.0, 24.0), mtm));
+    let sound_volume = unsafe {
+        NSSlider::sliderWithValue_minValue_maxValue_target_action(
+            65.0,
+            0.0,
+            100.0,
+            Some(controller),
+            Some(sel!(soundVolumeChanged:)),
+            mtm,
+        )
+    };
+    sound_volume.setFrame(rect(342.0, 264.0, 230.0, 30.0));
+    sound_volume.setContinuous(true);
+    sound_volume.setNumberOfTickMarks(5);
+    sound_volume.setAllowsTickMarkValuesOnly(false);
+    sound_volume.setAltIncrementValue(5.0);
+    sound_volume.setToolTip(Some(&NSString::from_str("Sound volume, 0 to 100 percent")));
+    page.addSubview(&sound_volume);
+    let sound_volume_label = label("65%", rect(584.0, 269.0, 60.0, 24.0), mtm);
+    page.addSubview(&sound_volume_label);
+
+    let auto_correct = sound_event_row(&page, SoundEvent::AutoCorrect, 229.0, controller, mtm);
+    let manual_conversion =
+        sound_event_row(&page, SoundEvent::ManualConversion, 195.0, controller, mtm);
+    let layout_switch = sound_event_row(&page, SoundEvent::LayoutSwitch, 161.0, controller, mtm);
+    let pause = sound_event_row(&page, SoundEvent::Pause, 127.0, controller, mtm);
+    let resume = sound_event_row(&page, SoundEvent::Resume, 93.0, controller, mtm);
+    let error = sound_event_row(&page, SoundEvent::Error, 59.0, controller, mtm);
+
+    FeedbackControls {
+        page,
+        show_indicator: indicator,
+        indicator_duration: duration,
+        sounds_enabled,
+        sound_volume,
+        sound_volume_label,
+        sound_events: SoundEventControls {
+            auto_correct,
+            manual_conversion,
+            layout_switch,
+            pause,
+            resume,
+            error,
+        },
+    }
+}
+
+fn sound_event_row(
+    page: &NSView,
+    event: SoundEvent,
+    y: f64,
+    controller: &NativeController,
+    mtm: MainThreadMarker,
+) -> Retained<NSButton> {
+    let enabled = checkbox(event.label(), rect(42.0, y, 360.0, 26.0), mtm);
+    page.addSubview(&enabled);
+    let preview_action = match event {
+        SoundEvent::AutoCorrect => sel!(previewAutoCorrectSound:),
+        SoundEvent::ManualConversion => sel!(previewManualConversionSound:),
+        SoundEvent::LayoutSwitch => sel!(previewLayoutSwitchSound:),
+        SoundEvent::Pause => sel!(previewPauseSound:),
+        SoundEvent::Resume => sel!(previewResumeSound:),
+        SoundEvent::Error => sel!(previewErrorSound:),
+    };
+    page.addSubview(&action_button(
+        "Preview",
+        rect(532.0, y - 2.0, 112.0, 30.0),
+        controller,
+        preview_action,
+        mtm,
+    ));
+    enabled
 }
 
 fn make_advanced_page(

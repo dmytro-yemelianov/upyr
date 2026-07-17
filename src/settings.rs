@@ -17,7 +17,7 @@ use crate::{
 };
 #[cfg(not(target_os = "macos"))]
 use crate::{
-    config::{GestureAction, ModifierGesture},
+    config::{GestureAction, ModifierGesture, SoundEvent},
     layout::Direction,
 };
 
@@ -321,8 +321,18 @@ const SEARCH_PARAMETERS: &[SearchParameter] = &[
     },
     SearchParameter {
         tab: SettingsTab::Feedback,
-        label: "Switch sound",
-        terms: "audio effect feedback",
+        label: "Sound feedback",
+        terms: "audio effects enable disable",
+    },
+    SearchParameter {
+        tab: SettingsTab::Feedback,
+        label: "Sound volume",
+        terms: "audio loud quiet percent preview",
+    },
+    SearchParameter {
+        tab: SettingsTab::Feedback,
+        label: "Event sounds",
+        terms: "automatic correction manual conversion layout switch pause resume error preview",
     },
     SearchParameter {
         tab: SettingsTab::Advanced,
@@ -731,7 +741,7 @@ impl SettingsApp {
     fn draw_feedback(&mut self, ui: &mut egui::Ui) {
         section_heading(
             ui,
-            "Feedback",
+            "Visual feedback",
             "Optional confirmation after Upyr changes the active input source.",
         );
         ui.checkbox(
@@ -748,13 +758,47 @@ impl SettingsApp {
                 ui.label("ms");
             });
         });
-        ui.checkbox(
-            &mut self.config.play_switch_sound,
-            "Play a subtle sound when the layout changes",
+        ui.add_space(18.0);
+        section_heading(
+            ui,
+            "Sound feedback",
+            "Choose which Upyr actions play a subtle confirmation sound.",
         );
+        ui.checkbox(&mut self.config.sounds.enabled, "Enable sound feedback");
+        ui.horizontal(|ui| {
+            ui.label("Volume");
+            ui.add(egui::Slider::new(&mut self.config.sounds.volume_percent, 0..=100).suffix("%"));
+        });
+        ui.add_space(8.0);
+        egui::Grid::new("sound-feedback-grid")
+            .num_columns(2)
+            .spacing([20.0, 8.0])
+            .show(ui, |ui| {
+                for event in SoundEvent::ALL {
+                    let mut selected = self.config.sounds.event_selected(event);
+                    if ui.checkbox(&mut selected, event.label()).changed() {
+                        self.config.sounds.set_event_selected(event, selected);
+                    }
+                    if ui.button("Preview").clicked() {
+                        let mut preview_settings = self.config.sounds;
+                        preview_settings.enabled = true;
+                        preview_settings.set_event_selected(event, true);
+                        self.status = Some(
+                            match crate::feedback::preview_sound(event, &preview_settings) {
+                                Ok(()) => (true, format!("Previewed {} sound.", event.label())),
+                                Err(error) => (
+                                    false,
+                                    format!("Could not preview {} sound: {error:#}", event.label()),
+                                ),
+                            },
+                        );
+                    }
+                    ui.end_row();
+                }
+            });
         ui.add_space(10.0);
         ui.small(
-            "Feedback runs only after a real English ↔ Ukrainian OS layout change. It does not fire when the target layout was already active.",
+            "Preview buttons work even while sound feedback or an individual event is disabled.",
         );
     }
 

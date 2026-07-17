@@ -1,11 +1,45 @@
-use crate::{config::Config, system_layout::SystemLayout};
+mod sound;
 
-/// Presents the enabled local feedback channels for a confirmed OS input-source
-/// change. Returns whether a temporary visual indicator was shown.
-pub fn layout_switched(layout: SystemLayout, config: &Config) -> bool {
-    if config.play_switch_sound {
-        platform::play_sound();
+use anyhow::{Result, bail};
+use tracing::debug;
+
+use crate::{
+    config::{Config, SoundEvent, SoundSettings},
+    system_layout::SystemLayout,
+};
+
+/// Plays a sound directly from the settings preview UI.
+///
+/// Preview callers opt into the event on a temporary settings value, so this
+/// uses the same master switch, event switch, and volume rules as live events.
+pub fn preview_sound(event: SoundEvent, settings: &SoundSettings) -> Result<()> {
+    if !settings.event_enabled(event) {
+        bail!("{} sound is disabled or its volume is zero", event.label());
     }
+    sound::play(event, settings.volume_percent)
+}
+
+/// Plays the configured cue for an application event.
+///
+/// Returns `true` only when playback was enabled and successfully started. A
+/// caller can use this to choose a single fallback cue without double-playing.
+pub fn play_sound_event(event: SoundEvent, config: &Config) -> bool {
+    if !config.sounds.event_enabled(event) {
+        return false;
+    }
+
+    match sound::play(event, config.sounds.volume_percent) {
+        Ok(()) => true,
+        Err(error) => {
+            debug!(?event, %error, "sound feedback unavailable");
+            false
+        }
+    }
+}
+
+/// Shows the enabled visual feedback for a confirmed OS input-source change.
+/// Sound dispatch stays separate so each action can produce at most one cue.
+pub fn layout_switched(layout: SystemLayout, config: &Config) -> bool {
     config.show_layout_indicator && platform::show_indicator(layout)
 }
 
@@ -28,7 +62,7 @@ mod platform {
 
     use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
     use objc2_app_kit::{
-        NSBackingStoreType, NSColor, NSEvent, NSFont, NSPanel, NSSound, NSStatusWindowLevel,
+        NSBackingStoreType, NSColor, NSEvent, NSFont, NSPanel, NSStatusWindowLevel,
         NSTextAlignment, NSTextField, NSWindowCollectionBehavior, NSWindowStyleMask,
     };
     use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
@@ -42,14 +76,6 @@ mod platform {
 
     thread_local! {
         static INDICATOR: RefCell<Option<Indicator>> = const { RefCell::new(None) };
-    }
-
-    pub fn play_sound() {
-        let sound_name = NSString::from_str("Tink");
-        if let Some(sound) = NSSound::soundNamed(&sound_name) {
-            sound.setVolume(0.35);
-            sound.play();
-        }
     }
 
     pub fn show_indicator(layout: SystemLayout) -> bool {
@@ -141,12 +167,6 @@ mod platform {
         static INDICATOR: Cell<HWND> = const { Cell::new(ptr::null_mut()) };
     }
 
-    pub fn play_sound() {
-        unsafe {
-            windows_sys::Win32::System::Diagnostics::Debug::MessageBeep(0);
-        }
-    }
-
     pub fn show_indicator(layout: SystemLayout) -> bool {
         let text = wide(indicator_text(layout));
         let class = wide("STATIC");
@@ -220,7 +240,7 @@ mod platform {
 
 #[cfg(target_os = "linux")]
 mod platform {
-    use std::{cell::RefCell, process::Command, process::Stdio};
+    use std::cell::RefCell;
 
     use device_query::{DeviceQuery, DeviceState};
     use gtk::prelude::*;
@@ -234,21 +254,6 @@ mod platform {
 
     thread_local! {
         static INDICATOR: RefCell<Option<Indicator>> = const { RefCell::new(None) };
-    }
-
-    pub fn play_sound() {
-        let mut command = Command::new("canberra-gtk-play");
-        command
-            .args([
-                "--id",
-                "audio-volume-change",
-                "--description",
-                "Upyr layout switch",
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        let _ = command.spawn();
     }
 
     pub fn show_indicator(layout: SystemLayout) -> bool {
@@ -297,7 +302,6 @@ mod platform {
 mod platform {
     use super::SystemLayout;
 
-    pub fn play_sound() {}
     pub fn show_indicator(_layout: SystemLayout) -> bool {
         false
     }

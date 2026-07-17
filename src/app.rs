@@ -23,7 +23,7 @@ use crate::{
         convert_selection,
     },
     autostart,
-    config::{Config, GestureAction, config_path},
+    config::{Config, GestureAction, SoundEvent, config_path},
     config_watcher::ConfigWatcher,
     modifier_gesture::ModifierGestureMonitor,
     settings, system_layout,
@@ -274,18 +274,24 @@ impl App {
                 layout_switched,
             }) => {
                 info!(?direction, characters, "converted selection");
-                self.present_layout_feedback(layout_switched);
+                self.present_action_feedback(layout_switched, SoundEvent::ManualConversion);
             }
             Ok(SelectionOutcome::NoSelection) => {
-                debug!("copy produced no selection; clipboard was restored")
+                debug!("copy produced no selection; clipboard was restored");
+                self.play_error_sound();
             }
             Ok(SelectionOutcome::NoConvertibleText) => {
-                debug!("selection did not contain characters from the active layouts")
+                debug!("selection did not contain characters from the active layouts");
+                self.play_error_sound();
             }
             Ok(SelectionOutcome::TextMismatch) => {
-                debug!("selected text no longer matched the observed word")
+                debug!("selected text no longer matched the observed word");
+                self.play_error_sound();
             }
-            Err(error) => error!(%error, "selection conversion failed"),
+            Err(error) => {
+                error!(%error, "selection conversion failed");
+                self.play_error_sound();
+            }
         }
         self.processing = false;
         self.set_auto_suspended(false);
@@ -375,7 +381,7 @@ impl App {
                     ?direction,
                     characters, "automatically corrected a recognized word"
                 );
-                self.present_layout_feedback(layout_switched);
+                self.present_action_feedback(layout_switched, SoundEvent::AutoCorrect);
             }
             Ok(SelectionOutcome::TextMismatch) => {
                 debug!("automatic correction was skipped because the caret or text changed")
@@ -386,7 +392,10 @@ impl App {
             Ok(SelectionOutcome::NoConvertibleText) => {
                 debug!("automatic correction found no convertible text")
             }
-            Err(error) => error!(%error, "automatic correction failed"),
+            Err(error) => {
+                error!(%error, "automatic correction failed");
+                self.play_error_sound();
+            }
         }
         self.auto_tracker.clear();
         self.auto_generation = self.auto_generation.wrapping_add(1);
@@ -394,8 +403,20 @@ impl App {
         self.set_auto_suspended(false);
     }
 
-    fn present_layout_feedback(&mut self, layout: Option<system_layout::SystemLayout>) {
+    fn present_action_feedback(
+        &mut self,
+        layout: Option<system_layout::SystemLayout>,
+        event: SoundEvent,
+    ) {
         self.start_tray_flip();
+
+        // One action produces at most one cue. The layout sound is a fallback
+        // for v4 users whose migration intentionally enables only that event.
+        if self.config.sounds.event_enabled(event) {
+            crate::feedback::play_sound_event(event, &self.config);
+        } else if layout.is_some() {
+            crate::feedback::play_sound_event(SoundEvent::LayoutSwitch, &self.config);
+        }
 
         let Some(layout) = layout else {
             return;
@@ -414,6 +435,10 @@ impl App {
                 debug!(%error, "could not schedule layout indicator dismissal");
             }
         });
+    }
+
+    fn play_error_sound(&self) {
+        crate::feedback::play_sound_event(SoundEvent::Error, &self.config);
     }
 
     fn start_tray_flip(&mut self) {
@@ -470,6 +495,14 @@ impl App {
         #[cfg(target_os = "macos")]
         self.refresh_accessibility_watcher();
         self.update_tray()?;
+        crate::feedback::play_sound_event(
+            if self.paused {
+                SoundEvent::Pause
+            } else {
+                SoundEvent::Resume
+            },
+            &self.config,
+        );
         info!(paused = self.paused, "updated shortcut state");
         Ok(())
     }
@@ -559,6 +592,7 @@ impl App {
 
         if let Err(error) = result {
             error!(%error, "tray action failed");
+            self.play_error_sound();
             let _ = self.update_tray();
         }
     }

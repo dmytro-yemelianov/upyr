@@ -99,7 +99,7 @@ upyr settings
 Default configuration:
 
 ```toml
-config_version = 4
+config_version = 5
 hotkey = "CmdOrCtrl+Alt+Space"
 last_word_hotkey = "CmdOrCtrl+Alt+Backspace"
 direction = "smart"
@@ -108,7 +108,6 @@ paste_delay_ms = 40
 switch_layout = true
 show_layout_indicator = false
 layout_indicator_duration_ms = 900
-play_switch_sound = false
 auto_correct = false
 auto_correct_sensitivity = "conservative"
 auto_correct_min_word_length = 4
@@ -119,6 +118,16 @@ modifier_gesture_action = "previous-word"
 modifier_gesture_timeout_ms = 500
 restore_clipboard = true
 restore_delay_ms = 250
+
+[sounds]
+enabled = false
+volume_percent = 65
+auto_correct = true
+manual_conversion = true
+layout_switch = true
+pause = true
+resume = true
+error = true
 ```
 
 Set `UPYR_CONFIG` to use a different config path. Valid directions are `smart`, `english-to-ukrainian`, and `ukrainian-to-english`. Hotkey modifier names include `CmdOrCtrl`, `Cmd`, `Ctrl`, `Alt`, and `Shift`.
@@ -133,7 +142,7 @@ Model and policy changes are measured against the frozen [signed N-gram v1 evalu
 
 Settings are organized into General, Automatic, Shortcuts, Feedback, and Advanced tabs. Parameter search jumps directly to the matching tab. Shortcut fields are press-to-record controls: they capture physical keys, require a modifier, render readable platform symbols, reject duplicate assignments, and offer an individual reset. macOS uses AppKit controls throughout the settings companion; Windows and Linux keep the same tab/search model in the cross-platform frontend.
 
-Optional switch feedback is disabled by default. `show_layout_indicator` briefly displays the target language flag next to the pointer for `layout_indicator_duration_ms`, and `play_switch_sound` adds a local system sound. Feedback runs only after Upyr confirms a real OS input-source change. The overlay uses AppKit on macOS, a non-activating Win32 window on Windows, and a GTK popup on Linux/X11. Linux sound playback uses `canberra-gtk-play` when available.
+Optional feedback is disabled by default. `show_layout_indicator` briefly displays the target language flag next to the pointer for `layout_indicator_duration_ms`. The `[sounds]` section provides a master switch, 0–100% volume, and separate cues for automatic correction, manual conversion, layout switching, pause, resume, and errors. Each cue is a bundled 220–320 ms local sound; Upyr makes no network request during playback. Settings can preview every cue even while sound feedback is disabled. The overlay uses AppKit on macOS, a non-activating Win32 window on Windows, and a GTK popup on Linux/X11.
 
 When testing locally on macOS, the packaging script embeds stable designated requirements in its ad-hoc signatures. Accessibility approval therefore survives normal Upyr rebuilds even without a Developer ID certificate. The background app also ignores global shortcuts while Settings is open, allowing an existing shortcut to be recorded without running its action.
 
@@ -165,7 +174,7 @@ Under X11, Upyr reads and locks the active XKB group after discovering configure
 - A second shortcut that fixes the previous word without manually selecting it
 - Opt-in automatic correction after Space with conservative, balanced, and aggressive confidence levels
 - Searchable, tabbed settings with native AppKit controls on macOS and press-to-record physical hotkey selectors with conflict detection
-- Optional language-flag overlays next to the pointer and subtle switch sounds after confirmed layout changes
+- Optional language-flag overlays plus distinct, volume-controlled sounds for correction, conversion, layout, pause/resume, and error events
 - Clipboard restoration for native rich formats, HTML, file lists, text, and images, plus guarded Copy detection that prevents accidental conversion when nothing is selected
 - Full readable pasteboard-format restoration on macOS
 - Native macOS, Windows, and Linux/X11 input-source detection and switching after conversion
@@ -173,7 +182,7 @@ Under X11, Upyr reads and locks the active XKB group after discovering configure
 - Cross-platform single-instance enforcement so duplicate listeners cannot compete for hotkeys
 - User-level launch-at-login controls through the tray or `upyr autostart`
 - An opt-in double-Control, double-Shift, or double-Control+Shift trigger with no polling while disabled
-- Versioned configuration with in-memory migration through schema version 4
+- Versioned configuration with in-memory migration through schema version 5
 - Configurable timing for applications with slow clipboard handling
 - Native menu-bar/system-tray controls for conversion, pause, configuration, and quit
 - A shared `upyr-core` decision engine plus a tested, DOM-independent WASM binding with generated TypeScript contracts

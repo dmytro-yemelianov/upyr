@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::layout::Direction;
 
-pub const CURRENT_CONFIG_VERSION: u32 = 4;
+pub const CURRENT_CONFIG_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -33,6 +33,96 @@ pub enum GestureAction {
     Selection,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SoundEvent {
+    AutoCorrect,
+    ManualConversion,
+    LayoutSwitch,
+    Pause,
+    Resume,
+    Error,
+}
+
+impl SoundEvent {
+    pub const ALL: [Self; 6] = [
+        Self::AutoCorrect,
+        Self::ManualConversion,
+        Self::LayoutSwitch,
+        Self::Pause,
+        Self::Resume,
+        Self::Error,
+    ];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::AutoCorrect => "Automatic correction",
+            Self::ManualConversion => "Manual conversion",
+            Self::LayoutSwitch => "Layout switch",
+            Self::Pause => "Pause",
+            Self::Resume => "Resume",
+            Self::Error => "Error",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SoundSettings {
+    /// Master switch for all event sounds.
+    pub enabled: bool,
+    /// Playback volume as a user-facing percentage.
+    pub volume_percent: u8,
+    pub auto_correct: bool,
+    pub manual_conversion: bool,
+    pub layout_switch: bool,
+    pub pause: bool,
+    pub resume: bool,
+    pub error: bool,
+}
+
+impl Default for SoundSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            volume_percent: 65,
+            auto_correct: true,
+            manual_conversion: true,
+            layout_switch: true,
+            pause: true,
+            resume: true,
+            error: true,
+        }
+    }
+}
+
+impl SoundSettings {
+    pub const fn event_selected(&self, event: SoundEvent) -> bool {
+        match event {
+            SoundEvent::AutoCorrect => self.auto_correct,
+            SoundEvent::ManualConversion => self.manual_conversion,
+            SoundEvent::LayoutSwitch => self.layout_switch,
+            SoundEvent::Pause => self.pause,
+            SoundEvent::Resume => self.resume,
+            SoundEvent::Error => self.error,
+        }
+    }
+
+    pub fn set_event_selected(&mut self, event: SoundEvent, selected: bool) {
+        match event {
+            SoundEvent::AutoCorrect => self.auto_correct = selected,
+            SoundEvent::ManualConversion => self.manual_conversion = selected,
+            SoundEvent::LayoutSwitch => self.layout_switch = selected,
+            SoundEvent::Pause => self.pause = selected,
+            SoundEvent::Resume => self.resume = selected,
+            SoundEvent::Error => self.error = selected,
+        }
+    }
+
+    pub const fn event_enabled(&self, event: SoundEvent) -> bool {
+        self.enabled && self.volume_percent > 0 && self.event_selected(event)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -51,8 +141,8 @@ pub struct Config {
     /// the active OS input source.
     pub show_layout_indicator: bool,
     pub layout_indicator_duration_ms: u64,
-    /// Play a short local system sound after Upyr changes the active OS input source.
-    pub play_switch_sound: bool,
+    /// Event-specific local sound feedback.
+    pub sounds: SoundSettings,
     /// Correct confidently recognized wrong-layout text after Space.
     /// Disabled means no ordinary typing is monitored.
     pub auto_correct: bool,
@@ -81,7 +171,7 @@ impl Default for Config {
             switch_layout: true,
             show_layout_indicator: false,
             layout_indicator_duration_ms: 900,
-            play_switch_sound: false,
+            sounds: SoundSettings::default(),
             auto_correct: false,
             auto_correct_sensitivity: AutoCorrectSensitivity::Conservative,
             auto_correct_min_word_length: 4,
@@ -170,6 +260,9 @@ impl Config {
         }
         if !(250..=3_000).contains(&self.layout_indicator_duration_ms) {
             bail!("layout_indicator_duration_ms must be between 250 and 3000");
+        }
+        if self.sounds.volume_percent > 100 {
+            bail!("sounds.volume_percent must be between 0 and 100");
         }
         if !(150..=2_000).contains(&self.modifier_gesture_timeout_ms) {
             bail!("modifier_gesture_timeout_ms must be between 150 and 2000");
@@ -275,6 +368,38 @@ fn migrate(value: &mut toml::Value) -> Result<()> {
         table
             .entry("play_switch_sound".to_owned())
             .or_insert(toml::Value::Boolean(false));
+        table.insert("config_version".to_owned(), toml::Value::Integer(4));
+        version = 4;
+    }
+
+    // Version 5 replaces the single layout-switch flag with a master volume
+    // and per-event controls. A previously enabled sound remains enabled only
+    // for layout switches so upgrading never introduces additional sounds.
+    if version == 4 {
+        let legacy_enabled = match table.remove("play_switch_sound") {
+            Some(toml::Value::Boolean(enabled)) => enabled,
+            Some(_) => bail!("play_switch_sound must be a boolean"),
+            None => false,
+        };
+        table.entry("sounds".to_owned()).or_insert_with(|| {
+            let enable_new_events = !legacy_enabled;
+            toml::Value::Table(toml::Table::from_iter([
+                ("enabled".to_owned(), toml::Value::Boolean(legacy_enabled)),
+                ("volume_percent".to_owned(), toml::Value::Integer(65)),
+                (
+                    "auto_correct".to_owned(),
+                    toml::Value::Boolean(enable_new_events),
+                ),
+                (
+                    "manual_conversion".to_owned(),
+                    toml::Value::Boolean(enable_new_events),
+                ),
+                ("layout_switch".to_owned(), toml::Value::Boolean(true)),
+                ("pause".to_owned(), toml::Value::Boolean(enable_new_events)),
+                ("resume".to_owned(), toml::Value::Boolean(enable_new_events)),
+                ("error".to_owned(), toml::Value::Boolean(enable_new_events)),
+            ]))
+        });
         table.insert(
             "config_version".to_owned(),
             toml::Value::Integer(i64::from(CURRENT_CONFIG_VERSION)),
@@ -311,7 +436,14 @@ mod tests {
         assert_eq!(decoded.direction, Direction::Smart);
         assert!(decoded.switch_layout);
         assert!(!decoded.show_layout_indicator);
-        assert!(!decoded.play_switch_sound);
+        assert!(!decoded.sounds.enabled);
+        assert_eq!(decoded.sounds.volume_percent, 65);
+        assert!(
+            SoundEvent::ALL
+                .into_iter()
+                .all(|event| !decoded.sounds.event_enabled(event))
+        );
+        assert!(!encoded.contains("play_switch_sound"));
         assert!(!decoded.auto_correct);
         assert_eq!(decoded.modifier_gesture, ModifierGesture::Disabled);
     }
@@ -320,6 +452,19 @@ mod tests {
     fn rejects_unreasonable_delays() {
         let config = Config {
             copy_delay_ms: 9,
+            ..Config::default()
+        };
+
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_sound_volume_over_one_hundred_percent() {
+        let config = Config {
+            sounds: SoundSettings {
+                volume_percent: 101,
+                ..SoundSettings::default()
+            },
             ..Config::default()
         };
 
@@ -424,7 +569,8 @@ restore_delay_ms = 250
         assert!(config.auto_correct_exceptions.is_empty());
         assert!(!config.show_layout_indicator);
         assert_eq!(config.layout_indicator_duration_ms, 900);
-        assert!(!config.play_switch_sound);
+        assert!(!config.sounds.enabled);
+        assert!(config.sounds.layout_switch);
     }
 
     #[test]
@@ -454,6 +600,48 @@ restore_delay_ms = 250
         assert_eq!(config.config_version, CURRENT_CONFIG_VERSION);
         assert!(!config.show_layout_indicator);
         assert_eq!(config.layout_indicator_duration_ms, 900);
-        assert!(!config.play_switch_sound);
+        assert!(!config.sounds.enabled);
+        assert!(config.sounds.auto_correct);
+        assert!(config.sounds.manual_conversion);
+        assert!(config.sounds.layout_switch);
+    }
+
+    #[test]
+    fn migrates_v4_layout_sound_without_enabling_new_event_sounds() {
+        let source = r#"
+config_version = 4
+hotkey = "CmdOrCtrl+Alt+Space"
+last_word_hotkey = "CmdOrCtrl+Alt+Backspace"
+direction = "smart"
+copy_delay_ms = 90
+paste_delay_ms = 40
+switch_layout = true
+show_layout_indicator = false
+layout_indicator_duration_ms = 900
+play_switch_sound = true
+auto_correct = false
+auto_correct_sensitivity = "conservative"
+auto_correct_min_word_length = 4
+auto_correct_delay_ms = 35
+auto_correct_exceptions = []
+modifier_gesture = "disabled"
+modifier_gesture_action = "previous-word"
+modifier_gesture_timeout_ms = 500
+restore_clipboard = true
+restore_delay_ms = 250
+"#;
+
+        let config = Config::decode(source).unwrap();
+
+        assert_eq!(config.config_version, CURRENT_CONFIG_VERSION);
+        assert!(config.sounds.enabled);
+        assert_eq!(config.sounds.volume_percent, 65);
+        assert!(config.sounds.layout_switch);
+        assert!(!config.sounds.auto_correct);
+        assert!(!config.sounds.manual_conversion);
+        assert!(!config.sounds.pause);
+        assert!(!config.sounds.resume);
+        assert!(!config.sounds.error);
+        assert!(config.sounds.event_enabled(SoundEvent::LayoutSwitch));
     }
 }
