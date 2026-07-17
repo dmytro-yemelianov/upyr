@@ -2,6 +2,7 @@ mod sound;
 
 use anyhow::{Result, bail};
 use tracing::debug;
+use upyr_audio::KeyCue;
 
 use crate::{
     config::{Config, SoundEvent, SoundSettings},
@@ -16,7 +17,16 @@ pub fn preview_sound(event: SoundEvent, settings: &SoundSettings) -> Result<()> 
     if !settings.event_enabled(event) {
         bail!("{} sound is disabled or its volume is zero", event.label());
     }
-    sound::play(event, settings.volume_percent)
+    sound::play_event(event, settings.pack, settings.volume_percent)
+}
+
+/// Previews the selected keyboard pack without requiring the live monitor to
+/// be enabled. Only the physical key category crosses this boundary.
+pub fn preview_key_sound(cue: KeyCue, settings: &SoundSettings) -> Result<()> {
+    if !settings.key_clicks_enabled() {
+        bail!("keyboard sounds are disabled or their volume is zero");
+    }
+    sound::play_key(cue, settings.pack, settings.volume_percent, true)
 }
 
 /// Plays the configured cue for an application event.
@@ -28,12 +38,31 @@ pub fn play_sound_event(event: SoundEvent, config: &Config) -> bool {
         return false;
     }
 
-    match sound::play(event, config.sounds.volume_percent) {
+    match sound::play_event(event, config.sounds.pack, config.sounds.volume_percent) {
         Ok(()) => true,
         Err(error) => {
             debug!(?event, %error, "sound feedback unavailable");
             false
         }
+    }
+}
+
+pub fn play_key_sound(cue: KeyCue, config: &Config) -> bool {
+    if !config.sounds.key_clicks_enabled() {
+        return false;
+    }
+    match sound::play_key(cue, config.sounds.pack, config.sounds.volume_percent, false) {
+        Ok(()) => true,
+        Err(error) => {
+            debug!(?cue, %error, "keyboard sound feedback unavailable");
+            false
+        }
+    }
+}
+
+pub fn prewarm_sound_pack(settings: &SoundSettings) {
+    if settings.key_clicks_enabled() {
+        sound::prewarm(settings.pack);
     }
 }
 

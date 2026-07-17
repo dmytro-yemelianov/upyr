@@ -16,7 +16,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNTIME_ROOTS = (ROOT / "src", ROOT / "crates" / "upyr-core" / "src", ROOT / "crates" / "upyr-wasm" / "src")
+RUNTIME_ROOTS = (
+    ROOT / "src",
+    ROOT / "crates" / "upyr-audio" / "src",
+    ROOT / "crates" / "upyr-core" / "src",
+    ROOT / "crates" / "upyr-wasm" / "src",
+)
 
 NETWORK_CRATES = {
     "awc",
@@ -62,7 +67,10 @@ EXTERNAL_CSS_RESOURCE = re.compile(
     re.IGNORECASE,
 )
 LOG_MACRO = re.compile(r"\b(?:trace|debug|info|warn|error)!\s*\(")
-SENSITIVE_LOG_FIELD = re.compile(r"(?<![A-Za-z0-9_])(?:text|word|source|replacement|prefix|token|clipboard)(?![A-Za-z0-9_])")
+SENSITIVE_LOG_FIELD = re.compile(
+    r"(?<![A-Za-z0-9_])(?:text|word|source|replacement|prefix|token|clipboard|key|keycode)(?![A-Za-z0-9_])",
+    re.IGNORECASE,
+)
 STRING_LITERAL = re.compile(r'"(?:\\.|[^"\\])*"')
 REQUIRED_CSP = {
     "default-src": ("'self'",),
@@ -118,6 +126,12 @@ def package_names() -> set[str]:
     return set(re.findall(r'^name = "([^"]+)"$', lock, flags=re.MULTILINE))
 
 
+def sensitive_log_field(body: str) -> str | None:
+    """Return a typed-data field referenced by a log macro body, if any."""
+    match = SENSITIVE_LOG_FIELD.search(STRING_LITERAL.sub("", body))
+    return match.group(0) if match else None
+
+
 def check_dependencies(errors: list[str]) -> None:
     forbidden = package_names() & (NETWORK_CRATES | TELEMETRY_CRATES)
     if forbidden:
@@ -146,11 +160,11 @@ def check_runtime_source(errors: list[str]) -> None:
                 if depth <= 0 and ");" in lines[end]:
                     break
                 end += 1
-            body = STRING_LITERAL.sub("", "\n".join(lines[index : end + 1]))
-            field = SENSITIVE_LOG_FIELD.search(body)
+            body = "\n".join(lines[index : end + 1])
+            field = sensitive_log_field(body)
             if field:
                 errors.append(
-                    f"{relative}:{index + 1}: logging a potentially typed-data field `{field.group(0)}`"
+                    f"{relative}:{index + 1}: logging a potentially typed-data field `{field}`"
                 )
             index = end + 1
 

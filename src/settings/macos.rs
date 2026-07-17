@@ -22,6 +22,7 @@ use objc2_app_kit::{
 use objc2_foundation::{
     NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
 };
+use upyr_audio::KeyCue;
 
 use super::{
     ACTIVATION_POLL_INTERVAL, APP_VERSION, ActivationInbox, IMPLEMENTATION_SUMMARY,
@@ -30,7 +31,9 @@ use super::{
 };
 use crate::{
     autostart,
-    config::{AutoCorrectSensitivity, Config, GestureAction, ModifierGesture, SoundEvent},
+    config::{
+        AutoCorrectSensitivity, Config, GestureAction, ModifierGesture, SoundEvent, SoundPack,
+    },
     layout::Direction,
 };
 
@@ -70,6 +73,8 @@ struct Controls {
     show_indicator: Retained<NSButton>,
     indicator_duration: Retained<NSTextField>,
     sounds_enabled: Retained<NSButton>,
+    sound_pack: Retained<NSPopUpButton>,
+    key_clicks: Retained<NSButton>,
     sound_volume: Retained<NSSlider>,
     sound_volume_label: Retained<NSTextField>,
     sound_events: SoundEventControls,
@@ -105,6 +110,8 @@ struct FeedbackControls {
     show_indicator: Retained<NSButton>,
     indicator_duration: Retained<NSTextField>,
     sounds_enabled: Retained<NSButton>,
+    sound_pack: Retained<NSPopUpButton>,
+    key_clicks: Retained<NSButton>,
     sound_volume: Retained<NSSlider>,
     sound_volume_label: Retained<NSTextField>,
     sound_events: SoundEventControls,
@@ -326,6 +333,16 @@ define_class!(
             self.preview_sound(SoundEvent::Error);
         }
 
+        #[unsafe(method(previewKeyboardClick:))]
+        fn preview_keyboard_click(&self, _sender: &AnyObject) {
+            self.preview_key_sound(KeyCue::Character, "typing click");
+        }
+
+        #[unsafe(method(previewControlReaction:))]
+        fn preview_control_reaction(&self, _sender: &AnyObject) {
+            self.preview_key_sound(KeyCue::Space, "control-key reaction");
+        }
+
         #[unsafe(method(soundVolumeChanged:))]
         fn sound_volume_changed(&self, _sender: &AnyObject) {
             self.refresh_sound_volume_label();
@@ -363,6 +380,7 @@ impl NativeController {
     fn preview_sound(&self, event: SoundEvent) {
         let mut settings = self.ivars().config.borrow().sounds;
         settings.enabled = true;
+        settings.pack = self.selected_sound_pack();
         settings.set_event_selected(event, true);
         settings.volume_percent = self.sound_volume_percent();
         match crate::feedback::preview_sound(event, &settings) {
@@ -371,6 +389,28 @@ impl NativeController {
                 false,
                 &format!("Could not preview {} sound: {error:#}", event.label()),
             ),
+        }
+    }
+
+    fn preview_key_sound(&self, cue: KeyCue, label: &str) {
+        let mut settings = self.ivars().config.borrow().sounds;
+        settings.enabled = true;
+        settings.key_clicks = true;
+        settings.pack = self.selected_sound_pack();
+        settings.volume_percent = self.sound_volume_percent();
+        match crate::feedback::preview_key_sound(cue, &settings) {
+            Ok(()) => self.set_status(true, &format!("Previewed {label}.")),
+            Err(error) => {
+                self.set_status(false, &format!("Could not preview {label}: {error:#}"));
+            }
+        }
+    }
+
+    fn selected_sound_pack(&self) -> SoundPack {
+        match self.controls().sound_pack.indexOfSelectedItem() {
+            1 => SoundPack::Arcade,
+            2 => SoundPack::Anime,
+            _ => SoundPack::Original,
         }
     }
 
@@ -503,6 +543,8 @@ impl NativeController {
             show_indicator,
             indicator_duration,
             sounds_enabled,
+            sound_pack,
+            key_clicks,
             sound_volume,
             sound_volume_label,
             sound_events,
@@ -566,6 +608,8 @@ impl NativeController {
                 show_indicator,
                 indicator_duration,
                 sounds_enabled,
+                sound_pack,
+                key_clicks,
                 sound_volume,
                 sound_volume_label,
                 sound_events,
@@ -634,6 +678,8 @@ impl NativeController {
         )?;
         config.sounds.enabled = is_checked(&controls.sounds_enabled);
         config.sounds.volume_percent = self.sound_volume_percent();
+        config.sounds.pack = self.selected_sound_pack();
+        config.sounds.key_clicks = is_checked(&controls.key_clicks);
         for event in SoundEvent::ALL {
             config
                 .sounds
@@ -702,6 +748,14 @@ impl NativeController {
             config.layout_indicator_duration_ms,
         );
         set_checked(&controls.sounds_enabled, config.sounds.enabled);
+        controls
+            .sound_pack
+            .selectItemAtIndex(match config.sounds.pack {
+                SoundPack::Original => 0,
+                SoundPack::Arcade => 1,
+                SoundPack::Anime => 2,
+            });
+        set_checked(&controls.key_clicks, config.sounds.key_clicks);
         controls
             .sound_volume
             .setDoubleValue(f64::from(config.sounds.volume_percent));
@@ -1172,9 +1226,23 @@ fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> F
     let duration = text_field("", rect(252.0, 305.0, 116.0, 26.0), mtm);
     page.addSubview(&duration);
 
-    let sounds_enabled = checkbox("Enable event sounds", rect(24.0, 267.0, 250.0, 26.0), mtm);
+    let sounds_enabled = checkbox("Enable sounds", rect(24.0, 267.0, 145.0, 26.0), mtm);
     page.addSubview(&sounds_enabled);
-    page.addSubview(&label("Volume", rect(280.0, 269.0, 58.0, 24.0), mtm));
+    page.addSubview(&label("Pack", rect(172.0, 269.0, 42.0, 24.0), mtm));
+    let sound_pack = popup(
+        &[
+            SoundPack::Original.label(),
+            SoundPack::Arcade.label(),
+            SoundPack::Anime.label(),
+        ],
+        rect(210.0, 264.0, 154.0, 28.0),
+        mtm,
+    );
+    sound_pack.setToolTip(Some(&NSString::from_str(
+        "Anime Reactions uses locally synthesized, nonverbal control-key sounds.",
+    )));
+    page.addSubview(&sound_pack);
+    page.addSubview(&label("Volume", rect(372.0, 269.0, 58.0, 24.0), mtm));
     let sound_volume = unsafe {
         NSSlider::sliderWithValue_minValue_maxValue_target_action(
             65.0,
@@ -1185,29 +1253,55 @@ fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> F
             mtm,
         )
     };
-    sound_volume.setFrame(rect(342.0, 264.0, 230.0, 30.0));
+    sound_volume.setFrame(rect(426.0, 264.0, 154.0, 30.0));
     sound_volume.setContinuous(true);
     sound_volume.setNumberOfTickMarks(5);
     sound_volume.setAllowsTickMarkValuesOnly(false);
     sound_volume.setAltIncrementValue(5.0);
     sound_volume.setToolTip(Some(&NSString::from_str("Sound volume, 0 to 100 percent")));
     page.addSubview(&sound_volume);
-    let sound_volume_label = label("65%", rect(584.0, 269.0, 60.0, 24.0), mtm);
+    let sound_volume_label = label("65%", rect(588.0, 269.0, 56.0, 24.0), mtm);
     page.addSubview(&sound_volume_label);
 
-    let auto_correct = sound_event_row(&page, SoundEvent::AutoCorrect, 229.0, controller, mtm);
+    let key_clicks = checkbox(
+        "Keyboard sounds (Anime adds control-key reactions)",
+        rect(42.0, 230.0, 366.0, 26.0),
+        mtm,
+    );
+    key_clicks.setToolTip(Some(&NSString::from_str(
+        "Opt-in physical-key categories only. Typed characters are never stored.",
+    )));
+    page.addSubview(&key_clicks);
+    page.addSubview(&action_button(
+        "Click",
+        rect(430.0, 228.0, 96.0, 30.0),
+        controller,
+        sel!(previewKeyboardClick:),
+        mtm,
+    ));
+    page.addSubview(&action_button(
+        "Control",
+        rect(536.0, 228.0, 108.0, 30.0),
+        controller,
+        sel!(previewControlReaction:),
+        mtm,
+    ));
+
+    let auto_correct = sound_event_row(&page, SoundEvent::AutoCorrect, 195.0, controller, mtm);
     let manual_conversion =
-        sound_event_row(&page, SoundEvent::ManualConversion, 195.0, controller, mtm);
-    let layout_switch = sound_event_row(&page, SoundEvent::LayoutSwitch, 161.0, controller, mtm);
-    let pause = sound_event_row(&page, SoundEvent::Pause, 127.0, controller, mtm);
-    let resume = sound_event_row(&page, SoundEvent::Resume, 93.0, controller, mtm);
-    let error = sound_event_row(&page, SoundEvent::Error, 59.0, controller, mtm);
+        sound_event_row(&page, SoundEvent::ManualConversion, 162.0, controller, mtm);
+    let layout_switch = sound_event_row(&page, SoundEvent::LayoutSwitch, 129.0, controller, mtm);
+    let pause = sound_event_row(&page, SoundEvent::Pause, 96.0, controller, mtm);
+    let resume = sound_event_row(&page, SoundEvent::Resume, 63.0, controller, mtm);
+    let error = sound_event_row(&page, SoundEvent::Error, 30.0, controller, mtm);
 
     FeedbackControls {
         page,
         show_indicator: indicator,
         indicator_duration: duration,
         sounds_enabled,
+        sound_pack,
+        key_clicks,
         sound_volume,
         sound_volume_label,
         sound_events: SoundEventControls {

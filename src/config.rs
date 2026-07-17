@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::layout::Direction;
 
-pub const CURRENT_CONFIG_VERSION: u32 = 5;
+pub const CURRENT_CONFIG_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -49,6 +49,34 @@ pub enum SoundEvent {
     Error,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SoundPack {
+    Original,
+    Arcade,
+    Anime,
+}
+
+impl SoundPack {
+    pub const ALL: [Self; 3] = [Self::Original, Self::Arcade, Self::Anime];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Original => "Upyr Original",
+            Self::Arcade => "Pocket Arcade",
+            Self::Anime => "Anime Reactions",
+        }
+    }
+
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::Original => "Soft local clicks with Upyr's original event cues.",
+            Self::Arcade => "Bright pfxr-style clicks and action sounds.",
+            Self::Anime => "Clicks for text keys and synthesized vocal reactions for control keys.",
+        }
+    }
+}
+
 impl SoundEvent {
     pub const ALL: [Self; 6] = [
         Self::AutoCorrect,
@@ -78,6 +106,10 @@ pub struct SoundSettings {
     pub enabled: bool,
     /// Playback volume as a user-facing percentage.
     pub volume_percent: u8,
+    /// Local procedural sound design selected for event and keyboard feedback.
+    pub pack: SoundPack,
+    /// Play low-latency, locally generated feedback for physical key presses.
+    pub key_clicks: bool,
     pub auto_correct: bool,
     pub manual_conversion: bool,
     pub layout_switch: bool,
@@ -91,6 +123,8 @@ impl Default for SoundSettings {
         Self {
             enabled: false,
             volume_percent: 65,
+            pack: SoundPack::Original,
+            key_clicks: false,
             auto_correct: true,
             manual_conversion: true,
             layout_switch: true,
@@ -126,6 +160,10 @@ impl SoundSettings {
 
     pub const fn event_enabled(&self, event: SoundEvent) -> bool {
         self.enabled && self.volume_percent > 0 && self.event_selected(event)
+    }
+
+    pub const fn key_clicks_enabled(&self) -> bool {
+        self.enabled && self.volume_percent > 0 && self.key_clicks
     }
 }
 
@@ -532,6 +570,32 @@ fn migrate(value: &mut toml::Value) -> Result<()> {
                 ("error".to_owned(), toml::Value::Boolean(enable_new_events)),
             ]))
         });
+        table.insert("config_version".to_owned(), toml::Value::Integer(5));
+        version = 5;
+    }
+
+    // Version 6 adds opt-in procedural keyboard feedback and a sound-pack
+    // selector. Existing installations keep the original event sounds and do
+    // not begin monitoring ordinary key presses unless the user enables it.
+    if version == 5 {
+        if !table.contains_key("sounds") {
+            table.insert(
+                "sounds".to_owned(),
+                toml::Value::try_from(SoundSettings::default())
+                    .context("could not build default sound settings")?,
+            );
+        }
+        let sounds = table
+            .get_mut("sounds")
+            .context("sounds was not available after migration")?
+            .as_table_mut()
+            .context("sounds must be a TOML table")?;
+        sounds
+            .entry("pack".to_owned())
+            .or_insert_with(|| toml::Value::String("original".to_owned()));
+        sounds
+            .entry("key_clicks".to_owned())
+            .or_insert(toml::Value::Boolean(false));
         table.insert(
             "config_version".to_owned(),
             toml::Value::Integer(i64::from(CURRENT_CONFIG_VERSION)),
@@ -570,6 +634,8 @@ mod tests {
         assert!(!decoded.show_layout_indicator);
         assert!(!decoded.sounds.enabled);
         assert_eq!(decoded.sounds.volume_percent, 65);
+        assert_eq!(decoded.sounds.pack, SoundPack::Original);
+        assert!(!decoded.sounds.key_clicks);
         assert!(
             SoundEvent::ALL
                 .into_iter()
@@ -839,5 +905,27 @@ restore_delay_ms = 250
         assert!(!config.sounds.resume);
         assert!(!config.sounds.error);
         assert!(config.sounds.event_enabled(SoundEvent::LayoutSwitch));
+        assert_eq!(config.sounds.pack, SoundPack::Original);
+        assert!(!config.sounds.key_clicks);
+    }
+
+    #[test]
+    fn migrates_v5_sounds_without_enabling_keyboard_monitoring() {
+        let mut value = toml::Value::try_from(Config::default()).unwrap();
+        let table = value.as_table_mut().unwrap();
+        table.insert("config_version".to_owned(), toml::Value::Integer(5));
+        let sounds = table
+            .get_mut("sounds")
+            .and_then(toml::Value::as_table_mut)
+            .unwrap();
+        sounds.remove("pack");
+        sounds.remove("key_clicks");
+
+        let config = Config::decode(&toml::to_string(&value).unwrap()).unwrap();
+
+        assert_eq!(config.config_version, CURRENT_CONFIG_VERSION);
+        assert_eq!(config.sounds.pack, SoundPack::Original);
+        assert!(!config.sounds.key_clicks);
+        assert!(!config.sounds.key_clicks_enabled());
     }
 }

@@ -4,7 +4,7 @@
 import unittest
 from pathlib import Path
 
-from tools.check_privacy import validate_csp
+from tools.check_privacy import sensitive_log_field, validate_csp
 
 
 VALID_POLICY = (
@@ -31,6 +31,18 @@ class ContentSecurityPolicyTests(unittest.TestCase):
         policy = VALID_POLICY.replace("form-action 'none'", "")
         errors = validate_csp(policy, Path("site/index.html"))
         self.assertTrue(any("CSP is missing `form-action 'none'`" in error for error in errors))
+
+
+class SensitiveLoggingTests(unittest.TestCase):
+    def test_rejects_exact_physical_key_fields(self) -> None:
+        self.assertEqual(sensitive_log_field('debug!(?key, "playback failed");'), "key")
+        self.assertEqual(
+            sensitive_log_field('warn!(keycode = ?event.keycode, "listener failed");'),
+            "keycode",
+        )
+
+    def test_allows_privacy_preserving_key_categories(self) -> None:
+        self.assertIsNone(sensitive_log_field('debug!(?cue, "keyboard sound unavailable");'))
 
 
 if __name__ == "__main__":

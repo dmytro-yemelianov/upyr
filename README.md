@@ -6,7 +6,7 @@
 
 Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in Rust. It turns text typed on the wrong physical layout into what you meant: `ghbdsn` → `привіт`, `руддщ` → `hello`.
 
-**Release status:** v0.1.0 public preview. **The current preview download is not Apple Developer ID signed and is not notarized; its macOS bundle is ad-hoc signed only, so Gatekeeper may block it.** macOS is the primary supported desktop target. Release CI is configured to build and smoke-test Windows and Linux/X11 packages, but those platforms remain preview targets. Upyr follows [Semantic Versioning](#versioning-and-releases); compatibility may change before 1.0.
+**Release status:** v0.2.0 public preview. **The current preview download is not Apple Developer ID signed and is not notarized; its macOS bundle is ad-hoc signed only, so Gatekeeper may block it.** macOS is the primary supported desktop target. Release CI is configured to build and smoke-test Windows and Linux/X11 packages, but those platforms remain preview targets. Upyr follows [Semantic Versioning](#versioning-and-releases); compatibility may change before 1.0.
 
 [Download from GitHub Releases](https://github.com/dmytro-yemelianov/upyr/releases) · [Product page](https://dmytro-yemelianov.github.io/upyr/) · [Report an issue](https://github.com/dmytro-yemelianov/upyr/issues/new/choose)
 
@@ -18,7 +18,7 @@ Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in
 - Detects and switches between installed English and Ukrainian input sources.
 - Uses the physical keys, including the standard Ukrainian punctuation row: `[];'\,./` ↔ `хїжєґбю.`.
 - Protects intentional technical text such as `FAANG`, `SaaS`, `NASDAQ`, `iPhone`, URLs, paths, and configured exceptions.
-- Provides searchable, tabbed settings, press-to-record shortcuts, an optional pointer-side language flag, and per-event sounds with volume control.
+- Provides searchable, tabbed settings, press-to-record shortcuts, an optional pointer-side language flag, and three locally generated sound packs with event/key controls and master volume.
 - By default, snapshots supported clipboard formats and attempts to restore them after conversion; temporary conversion content is concealed from supported clipboard-history systems.
 
 The menu-bar or system-tray app can convert text, pause or resume correction, open Settings, reload configuration, manage launch at login, and quit.
@@ -129,9 +129,11 @@ upyr autostart enable
 upyr settings
 ```
 
-The settings app exposes General, Automatic, Shortcuts, Feedback, and Advanced tabs. Automatic sensitivity can be conservative, balanced, or aggressive; deliberate strings can be added to `auto_correct_exceptions`. Use `UPYR_CONFIG` to select a different config file.
+The settings app exposes General, Automatic, Shortcuts, Feedback, and Advanced tabs. Automatic sensitivity can be conservative, balanced, or aggressive; deliberate strings can be added to `auto_correct_exceptions`. Feedback includes three local sound packs: Upyr Original, Pocket Arcade, and the opt-in Anime Reactions pack. Keyboard feedback crosses into the app as physical key categories only, generates its cues locally, and never stores typed characters. Use `UPYR_CONFIG` to select a different config file.
 
-The versioned TOML schema currently uses `config_version = 5`. Older supported schemas migrate in memory; configurations from a newer unsupported schema are rejected rather than guessed. See the generated default file after `upyr init` for every option and its current value.
+The versioned TOML schema currently uses `config_version = 6`. Older supported schemas migrate in memory; configurations from a newer unsupported schema are rejected rather than guessed. Keyboard sounds remain disabled during migration and by default. See the generated default file after `upyr init` for every option and its current value.
+
+Sound-pack synthesis is offline and dependency-free in `upyr-audio`. Its pfxr-style engine creates short deterministic variations, while Anime Reactions uses a procedural glottal/formant synthesizer for non-character keys—there are no voice recordings, downloads, microphone access, or remote audio-service calls. Playback uses the operating system's native audio API. Audible feedback can reveal typing rhythm to people nearby, so keyboard sounds are always opt-in; headphones are recommended for the vocal-reaction pack.
 
 ## Platform status
 
@@ -147,6 +149,7 @@ The versioned TOML schema currently uses `config_version = 5`. Older supported s
 ```text
 upyr-core          platform-neutral mapping, tracking, n-gram policy
 upyr-wasm          DOM-independent WebAssembly API
+upyr-audio         dependency-free pfxr clicks and procedural formant reactions
 upyr               CLI and native background application
 ├── input hooks    physical key events and permission lifecycle
 ├── automation     guarded selection, replacement, clipboard snapshot/restore

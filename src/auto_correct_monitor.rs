@@ -15,6 +15,7 @@ use device_query::Keycode;
 use device_query::{DeviceQuery, DeviceState};
 use rdev::{EventType, Key};
 use tracing::error;
+use upyr_audio::KeyCue;
 
 use crate::auto_correct::{AutoKeyEvent, AutoWordTracker};
 
@@ -33,13 +34,17 @@ const MISSING_RIGHT_META: u8 = 1 << 5;
 const MAX_DEFERRED_TEXT_EVENTS: usize = 128;
 
 type KeyCallback = Box<dyn FnMut(AutoKeyEvent) + Send + 'static>;
+type KeySoundCallback = Box<dyn FnMut(KeyCue) + Send + 'static>;
 
 struct Subscription {
     id: u64,
+    auto_correct_enabled: bool,
+    key_sounds_enabled: bool,
     suspended: bool,
     deferred_text_events: VecDeque<AutoKeyEvent>,
     deferred_overflowed: bool,
     on_key_down: KeyCallback,
+    on_key_sound: KeySoundCallback,
 }
 
 struct ListenerState {
@@ -418,10 +423,12 @@ impl AutoCorrectMonitor {
     /// replace the active subscription without briefly running duplicate hooks.
     /// No typed text is logged or retained here.
     pub fn start(
-        enabled: bool,
+        auto_correct_enabled: bool,
+        key_sounds_enabled: bool,
         on_key_down: impl FnMut(AutoKeyEvent) + Send + 'static,
+        on_key_sound: impl FnMut(KeyCue) + Send + 'static,
     ) -> Result<Option<Self>> {
-        if !enabled {
+        if !auto_correct_enabled && !key_sounds_enabled {
             return Ok(None);
         }
 
@@ -431,10 +438,13 @@ impl AutoCorrectMonitor {
         let subscription_id = state.next_subscription.fetch_add(1, Ordering::Relaxed);
         let subscription = Subscription {
             id: subscription_id,
+            auto_correct_enabled,
+            key_sounds_enabled,
             suspended: false,
             deferred_text_events: VecDeque::new(),
             deferred_overflowed: false,
             on_key_down: Box::new(on_key_down),
+            on_key_sound: Box::new(on_key_sound),
         };
         *state
             .subscription
@@ -467,14 +477,16 @@ impl AutoCorrectMonitor {
         }
 
         subscription.suspended = false;
-        if subscription.deferred_overflowed {
+        if subscription.auto_correct_enabled && subscription.deferred_overflowed {
             subscription.deferred_text_events.clear();
             subscription.deferred_overflowed = false;
             (subscription.on_key_down)(reset_event(Keycode::Escape));
             return;
         }
-        while let Some(event) = subscription.deferred_text_events.pop_front() {
-            (subscription.on_key_down)(event);
+        if subscription.auto_correct_enabled {
+            while let Some(event) = subscription.deferred_text_events.pop_front() {
+                (subscription.on_key_down)(event);
+            }
         }
     }
 }
@@ -552,6 +564,12 @@ fn spawn_listener(state: &Arc<ListenerState>) -> Result<()> {
                         );
                     }
                 }
+                if let Some(key) = raw_key_down(event.event_type) {
+                    let cue = key_sound_cue(key);
+                    if !capture_state.chord_modifier_active() || cue != KeyCue::Character {
+                        dispatch_key_sound(&callback_state, cue);
+                    }
+                }
                 let captured = capture_state.observe(event.event_type, event.name.as_deref());
                 #[cfg(target_os = "macos")]
                 if matches!(
@@ -615,6 +633,9 @@ fn dispatch_key(state: &ListenerState, event: AutoKeyEvent) {
     let Some(subscription) = subscription.as_mut() else {
         return;
     };
+    if !subscription.auto_correct_enabled {
+        return;
+    }
     if subscription.suspended {
         if AutoWordTracker::can_begin(event.key)
             || matches!(event.key, Keycode::Space | Keycode::Backspace)
@@ -629,6 +650,135 @@ fn dispatch_key(state: &ListenerState, event: AutoKeyEvent) {
         return;
     }
     (subscription.on_key_down)(event);
+}
+
+fn dispatch_key_sound(state: &ListenerState, cue: KeyCue) {
+    let Ok(mut subscription) = state.subscription.lock() else {
+        return;
+    };
+    let Some(subscription) = subscription.as_mut() else {
+        return;
+    };
+    if subscription.suspended || !subscription.key_sounds_enabled {
+        return;
+    }
+    (subscription.on_key_sound)(cue);
+}
+
+fn raw_key_down(event_type: EventType) -> Option<Keycode> {
+    match event_type {
+        EventType::KeyPress(key) => map_key(key),
+        #[cfg(target_os = "macos")]
+        EventType::KeyRelease(Key::CapsLock) => Some(Keycode::CapsLock),
+        _ => None,
+    }
+}
+
+pub(crate) fn is_character_key(key: Keycode) -> bool {
+    matches!(
+        key,
+        Keycode::A
+            | Keycode::B
+            | Keycode::C
+            | Keycode::D
+            | Keycode::E
+            | Keycode::F
+            | Keycode::G
+            | Keycode::H
+            | Keycode::I
+            | Keycode::J
+            | Keycode::K
+            | Keycode::L
+            | Keycode::M
+            | Keycode::N
+            | Keycode::O
+            | Keycode::P
+            | Keycode::Q
+            | Keycode::R
+            | Keycode::S
+            | Keycode::T
+            | Keycode::U
+            | Keycode::V
+            | Keycode::W
+            | Keycode::X
+            | Keycode::Y
+            | Keycode::Z
+            | Keycode::Key0
+            | Keycode::Key1
+            | Keycode::Key2
+            | Keycode::Key3
+            | Keycode::Key4
+            | Keycode::Key5
+            | Keycode::Key6
+            | Keycode::Key7
+            | Keycode::Key8
+            | Keycode::Key9
+            | Keycode::Grave
+            | Keycode::Minus
+            | Keycode::Equal
+            | Keycode::LeftBracket
+            | Keycode::RightBracket
+            | Keycode::Semicolon
+            | Keycode::Apostrophe
+            | Keycode::BackSlash
+            | Keycode::Comma
+            | Keycode::Dot
+            | Keycode::Slash
+            | Keycode::Numpad0
+            | Keycode::Numpad1
+            | Keycode::Numpad2
+            | Keycode::Numpad3
+            | Keycode::Numpad4
+            | Keycode::Numpad5
+            | Keycode::Numpad6
+            | Keycode::Numpad7
+            | Keycode::Numpad8
+            | Keycode::Numpad9
+            | Keycode::NumpadAdd
+            | Keycode::NumpadSubtract
+            | Keycode::NumpadMultiply
+            | Keycode::NumpadDivide
+            | Keycode::NumpadDecimal
+    )
+}
+
+fn key_sound_cue(key: Keycode) -> KeyCue {
+    match key {
+        Keycode::Space => KeyCue::Space,
+        Keycode::Enter | Keycode::NumpadEnter => KeyCue::Enter,
+        Keycode::Escape => KeyCue::Escape,
+        Keycode::Tab => KeyCue::Tab,
+        Keycode::LAlt | Keycode::RAlt | Keycode::LOption | Keycode::ROption => KeyCue::Option,
+        Keycode::Command | Keycode::RCommand | Keycode::LMeta | Keycode::RMeta => KeyCue::Command,
+        Keycode::LControl | Keycode::RControl => KeyCue::Control,
+        Keycode::LShift | Keycode::RShift => KeyCue::Shift,
+        Keycode::CapsLock => KeyCue::CapsLock,
+        Keycode::Delete => KeyCue::Delete,
+        Keycode::Backspace => KeyCue::Backspace,
+        Keycode::Up
+        | Keycode::Down
+        | Keycode::Left
+        | Keycode::Right
+        | Keycode::Home
+        | Keycode::End
+        | Keycode::PageUp
+        | Keycode::PageDown
+        | Keycode::Insert => KeyCue::Navigation,
+        Keycode::F1
+        | Keycode::F2
+        | Keycode::F3
+        | Keycode::F4
+        | Keycode::F5
+        | Keycode::F6
+        | Keycode::F7
+        | Keycode::F8
+        | Keycode::F9
+        | Keycode::F10
+        | Keycode::F11
+        | Keycode::F12 => KeyCue::Function,
+        key if is_character_key(key) => KeyCue::Character,
+        _ => KeyCue::Other,
+    }
 }
 
 fn map_key(key: Key) -> Option<Keycode> {
@@ -752,6 +902,8 @@ mod tests {
         let subscription_id = 1;
         *state.subscription.lock().expect("test listener lock") = Some(Subscription {
             id: subscription_id,
+            auto_correct_enabled: true,
+            key_sounds_enabled: true,
             suspended: false,
             deferred_text_events: VecDeque::new(),
             deferred_overflowed: false,
@@ -761,6 +913,7 @@ mod tests {
                     .expect("test callback lock")
                     .push(event);
             }),
+            on_key_sound: Box::new(|_| {}),
         });
         (
             AutoCorrectMonitor {
@@ -782,6 +935,67 @@ mod tests {
     fn ignores_keys_that_cannot_affect_typed_text() {
         assert_eq!(map_key(Key::PrintScreen), None);
         assert_eq!(map_key(Key::Unknown(9000)), None);
+    }
+
+    #[test]
+    fn raw_key_sound_path_keeps_control_keys_and_shortcut_chords() {
+        assert_eq!(
+            raw_key_down(EventType::KeyPress(Key::Space)),
+            Some(Keycode::Space)
+        );
+        assert_eq!(
+            raw_key_down(EventType::KeyPress(Key::ControlLeft)),
+            Some(Keycode::LControl)
+        );
+        assert!(is_character_key(Keycode::C));
+        assert!(!is_character_key(Keycode::LControl));
+        assert_eq!(key_sound_cue(Keycode::A), KeyCue::Character);
+        assert_eq!(key_sound_cue(Keycode::Space), KeyCue::Space);
+        assert_eq!(key_sound_cue(Keycode::Enter), KeyCue::Enter);
+        assert_eq!(key_sound_cue(Keycode::LAlt), KeyCue::Option);
+        assert_eq!(key_sound_cue(Keycode::LMeta), KeyCue::Command);
+        assert_eq!(key_sound_cue(Keycode::LControl), KeyCue::Control);
+        assert_eq!(key_sound_cue(Keycode::LShift), KeyCue::Shift);
+        assert_eq!(key_sound_cue(Keycode::CapsLock), KeyCue::CapsLock);
+        assert_eq!(key_sound_cue(Keycode::Delete), KeyCue::Delete);
+        assert_eq!(key_sound_cue(Keycode::Backspace), KeyCue::Backspace);
+        assert_eq!(key_sound_cue(Keycode::Left), KeyCue::Navigation);
+        assert_eq!(key_sound_cue(Keycode::F1), KeyCue::Function);
+    }
+
+    #[test]
+    fn suspended_monitor_drops_key_sounds_instead_of_replaying_them() {
+        let state = Arc::new(ListenerState::default());
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let callback_keys = Arc::clone(&received);
+        let subscription_id = 1;
+        *state.subscription.lock().expect("test listener lock") = Some(Subscription {
+            id: subscription_id,
+            auto_correct_enabled: false,
+            key_sounds_enabled: true,
+            suspended: false,
+            deferred_text_events: VecDeque::new(),
+            deferred_overflowed: false,
+            on_key_down: Box::new(|_| {}),
+            on_key_sound: Box::new(move |key| {
+                callback_keys.lock().expect("test callback lock").push(key);
+            }),
+        });
+        let monitor = AutoCorrectMonitor {
+            state,
+            subscription_id,
+        };
+
+        dispatch_key_sound(&monitor.state, KeyCue::Character);
+        monitor.set_suspended(true);
+        dispatch_key_sound(&monitor.state, KeyCue::Backspace);
+        monitor.set_suspended(false);
+        dispatch_key_sound(&monitor.state, KeyCue::Enter);
+
+        assert_eq!(
+            *received.lock().expect("received lock"),
+            [KeyCue::Character, KeyCue::Enter]
+        );
     }
 
     #[test]
