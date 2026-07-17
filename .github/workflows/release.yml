@@ -2,45 +2,85 @@ name: Release packages
 
 on:
   push:
-    tags: ["v*"]
+    tags:
+      - "v*"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   verify:
+    name: Verify release source
+    timeout-minutes: 40
     runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      contents: read
+      issues: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false
+      - name: Verify release tag matches Cargo version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: packaging/macos/verify-release-tag.sh "$GITHUB_REF_NAME"
+      - name: Install Rust quality tools
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: 1.95.0
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
       - name: Install validation dependencies
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev libwayland-dev libgtk-3-dev libayatana-appindicator3-dev zstd
-      - run: python3 tools/check_codebase_graph.py
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-      - run: cargo test --workspace --all-targets --locked
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev \
+            libgtk-3-dev libayatana-appindicator3-dev zstd
+      - name: Verify codebase graph artifact
+        run: python3 tools/check_codebase_graph.py
+      - name: Verify release version synchronization
+        run: python3 tools/check_version_sync.py
+      - name: Verify privacy architecture
+        run: python3 tools/check_privacy.py
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - name: Run workspace tests
+        run: cargo test --workspace --all-targets --locked
+      - name: Audit locked Rust dependencies
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   macos:
+    name: Package macOS
+    timeout-minutes: 60
     needs: verify
     runs-on: macos-14
+    environment: release
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
       - name: Verify release tag matches Cargo version
         if: startsWith(github.ref, 'refs/tags/v')
         run: packaging/macos/verify-release-tag.sh "$GITHUB_REF_NAME"
       - name: Validate Apple release credentials
         shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           required=(
             APPLE_CERTIFICATE
@@ -60,24 +100,30 @@ jobs:
           done
 
           if [[ "$GITHUB_REF" == refs/tags/v* && ${#missing[@]} -ne 0 ]]; then
-            printf 'Tagged macOS releases require Apple signing and notarization credentials. Missing: %s\n' "${missing[*]}" >&2
+            printf 'Tagged macOS releases require signing and notarization credentials. Missing: %s\n' "${missing[*]}" >&2
             exit 1
           fi
           if [[ "$GITHUB_REF" != refs/tags/v* && $present -ne 0 && ${#missing[@]} -ne 0 ]]; then
             printf 'Apple release credentials must be supplied together. Missing: %s\n' "${missing[*]}" >&2
             exit 1
           fi
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust targets
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
+          toolchain: 1.95.0
           targets: aarch64-apple-darwin,x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
       - name: Generate macOS icon from mascot source
         run: packaging/macos/generate-icon.sh
       - name: Build universal macOS binaries
         run: packaging/macos/build-universal.sh
       - name: Import Developer ID certificate
-        if: env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
+          if [[ -z "$APPLE_CERTIFICATE" ]]; then
+            exit 0
+          fi
           CERTIFICATE_PATH="$RUNNER_TEMP/upyr.p12"
           KEYCHAIN_PATH="$RUNNER_TEMP/upyr-signing.keychain-db"
           printf '%s' "$APPLE_CERTIFICATE" | base64 -D > "$CERTIFICATE_PATH"
@@ -94,35 +140,70 @@ jobs:
             *) echo "Certificate is not a Developer ID Application identity: $IDENTITY" >&2; exit 1 ;;
           esac
           echo "UPYR_MACOS_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
-      - name: Build and verify app bundle
+      - name: Build, sign, notarize, and verify app bundle
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash packaging/macos/package.sh
       - name: Verify packaged conversion
         run: test "$(dist/Upyr.app/Contents/MacOS/upyr convert ghbdsn)" = "привіт"
-      - uses: actions/upload-artifact@v4
+      - name: Upload macOS packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: package-macos
           path: |
             dist/*.dmg
             dist/*.zip
           if-no-files-found: error
+          retention-days: 14
 
   windows:
+    name: Package Windows
+    timeout-minutes: 60
     needs: verify
-    runs-on: windows-latest
-    env:
-      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-      UPYR_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+    runs-on: windows-2025
+    environment: release
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --locked -p upyr
-      - name: Install Inno Setup
-        run: choco install innosetup --no-progress -y
-      - name: Prepare Windows signing
-        if: env.WINDOWS_CERTIFICATE != ''
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Verify release tag matches Cargo version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: packaging/macos/verify-release-tag.sh "$GITHUB_REF_NAME"
+      - name: Validate Windows signing credentials
         shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          UPYR_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
+          $missing = @()
+          if (-not $env:WINDOWS_CERTIFICATE) { $missing += "WINDOWS_CERTIFICATE" }
+          if (-not $env:UPYR_CERTIFICATE_PASSWORD) { $missing += "WINDOWS_CERTIFICATE_PASSWORD" }
+          $present = 2 - $missing.Count
+          $tagged = $env:GITHUB_REF -like "refs/tags/v*"
+          if ($tagged -and $missing.Count -ne 0) {
+            throw "Tagged Windows releases require code-signing credentials. Missing: $($missing -join ', ')"
+          }
+          if (-not $tagged -and $present -ne 0 -and $missing.Count -ne 0) {
+            throw "Windows signing credentials must be supplied together. Missing: $($missing -join ', ')"
+          }
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: 1.95.0
+      - name: Build release binaries
+        run: cargo build --release --locked -p upyr
+      - name: Install Inno Setup
+        run: choco install innosetup --version 6.7.1 --no-progress -y
+      - name: Prepare Windows signing
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE) { exit 0 }
           $certificate = Join-Path $env:RUNNER_TEMP "upyr.pfx"
           [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
           $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1
@@ -131,55 +212,110 @@ jobs:
           "UPYR_SIGNTOOL_PATH=$($signTool.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Build installer and portable package
         shell: pwsh
+        env:
+          UPYR_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: ./packaging/windows/package.ps1
+      - name: Verify package signatures
+        if: env.UPYR_SIGNTOOL_PATH != ''
+        shell: pwsh
+        run: |
+          $files = @(
+            "target/release/upyr.exe",
+            "target/release/upyr-background.exe",
+            "target/release/upyr-settings.exe"
+          ) + @(Get-ChildItem "dist/*-setup.exe" | ForEach-Object FullName)
+          foreach ($file in $files) {
+            & $env:UPYR_SIGNTOOL_PATH verify /pa /v $file
+            if ($LASTEXITCODE -ne 0) { throw "Signature verification failed for $file" }
+          }
       - name: Verify packaged conversion
         shell: pwsh
         run: |
           $cli = Get-ChildItem dist/upyr-windows-x86_64-*/upyr.exe | Select-Object -First 1
-          if ((& $cli.FullName convert ghbdsn) -ne "привіт") { throw "Packaged conversion smoke test failed" }
-      - uses: actions/upload-artifact@v4
+          if ((& $cli.FullName convert ghbdsn) -ne "привіт") {
+            throw "Packaged conversion smoke test failed"
+          }
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: package-windows
           path: |
             dist/*-setup.exe
             dist/*.zip
           if-no-files-found: error
+          retention-days: 14
 
   linux:
+    name: Package Linux X11
+    timeout-minutes: 45
     needs: verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Verify release tag matches Cargo version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: packaging/macos/verify-release-tag.sh "$GITHUB_REF_NAME"
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: 1.95.0
       - name: Install Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev libwayland-dev libgtk-3-dev libayatana-appindicator3-dev
-      - run: cargo build --release --locked -p upyr
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev \
+            libgtk-3-dev libayatana-appindicator3-dev
+      - name: Build release binaries
+        run: cargo build --release --locked -p upyr
       - name: Build DEB and portable package
         run: bash packaging/linux/package.sh
       - name: Verify packaged conversion
         run: test "$(find dist/upyr-linux-* -type f -name upyr -perm -111 -exec {} convert ghbdsn \; -quit)" = "привіт"
-      - uses: actions/upload-artifact@v4
+      - name: Upload Linux packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: package-linux
           path: |
             dist/*.deb
             dist/*.tar.gz
           if-no-files-found: error
+          retention-days: 14
 
   publish:
+    name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [verify, macos, windows, linux]
+    timeout-minutes: 20
+    needs:
+      - verify
+      - macos
+      - windows
+      - linux
     runs-on: ubuntu-latest
+    environment: release
     permissions:
+      attestations: write
       contents: write
+      id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download packages
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: package-*
           path: dist
           merge-multiple: true
+      - name: Generate SHA-256 checksums
+        run: |
+          cd dist
+          sha256sum -- * > SHA256SUMS.txt
+      - name: Attest release provenance
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: dist/*
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --verify-tag
+        run: >-
+          gh release create "$GITHUB_REF_NAME" dist/*
+          --generate-notes --verify-tag --title "Upyr $GITHUB_REF_NAME"

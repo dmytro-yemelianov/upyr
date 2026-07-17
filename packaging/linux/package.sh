@@ -2,7 +2,7 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-VERSION=${UPYR_VERSION:-$(awk -F '"' '/^version = / { print $2; exit }' "$ROOT/Cargo.toml")}
+VERSION=$(sh "$ROOT/packaging/version.sh")
 ARCH=${UPYR_DEB_ARCH:-$(dpkg --print-architecture)}
 DIST="$ROOT/dist"
 PORTABLE="$DIST/upyr-linux-$ARCH-$VERSION"
@@ -35,6 +35,7 @@ Section: utils
 Priority: optional
 Architecture: $ARCH
 Maintainer: Upyr contributors
+Homepage: https://dmytro-yemelianov.github.io/upyr/
 Depends: libgtk-3-0, libayatana-appindicator3-1, libx11-6, libgl1
 Description: Private English-Ukrainian keyboard layout fixer
  Upyr fixes selected text or the previous word and follows the correction
@@ -44,3 +45,4 @@ EOF
 tar -C "$DIST" -czf "$DIST/upyr-linux-$ARCH-$VERSION.tar.gz" "$(basename "$PORTABLE")"
 dpkg-deb --root-owner-group --build "$DEB_ROOT" "$DIST/upyr-linux-$ARCH-$VERSION.deb"
 dpkg-deb --info "$DIST/upyr-linux-$ARCH-$VERSION.deb" >/dev/null
+test "$(dpkg-deb --field "$DIST/upyr-linux-$ARCH-$VERSION.deb" Version)" = "$VERSION"

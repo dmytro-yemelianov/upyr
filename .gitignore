@@ -4,6 +4,13 @@
 __pycache__/
 *.log
 .DS_Store
+.env
+.env.*
+!.env.example
+.secrets/
+*.key
+*.p12
+*.pem
 .codebase-memory/*
 !.codebase-memory/.gitattributes
 !.codebase-memory/artifact.json

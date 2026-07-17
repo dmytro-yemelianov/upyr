@@ -1,0 +1,62 @@
+name: Feature request
+description: Propose a focused improvement to Upyr.
+title: "[Feature]: "
+labels:
+  - enhancement
+  - needs-triage
+assignees: []
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem should be solved? Describe the workflow, not just a component.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain the smallest useful outcome and how a user would control it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Primary scope
+      options:
+        - Cross-platform core
+        - macOS
+        - Windows
+        - Linux
+        - WASM or website integration
+        - Settings and UX
+        - Language model
+        - Packaging or distribution
+    validations:
+      required: true
+
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and permission impact
+      description: State whether this needs network access, stored text, new OS permissions, or telemetry. "None" is valid.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched for an existing request.
+          required: true
+        - label: I agree to follow the project Code of Conduct.
+          required: true

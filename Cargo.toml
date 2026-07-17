@@ -1,7 +1,16 @@
 [workspace]
 members = [".", "crates/upyr-core", "crates/upyr-wasm"]
 default-members = ["."]
+exclude = ["vendor/wayland-scanner-0.31.10"]
 resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.86"
+license = "MIT"
+repository = "https://github.com/dmytro-yemelianov/upyr"
+homepage = "https://dmytro-yemelianov.github.io/upyr/"
 
 [workspace.dependencies]
 js-sys = "0.3.103"
@@ -11,13 +20,18 @@ wasm-bindgen = "0.2.126"
 
 [package]
 name = "upyr"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.85"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "A privacy-first, cross-platform English-Ukrainian keyboard layout fixer"
-license = "MIT"
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 readme = "README.md"
 default-run = "upyr"
+publish = false
+keywords = ["keyboard", "layout", "ukrainian", "productivity", "accessibility"]
+categories = ["command-line-utilities", "internationalization"]
 
 [[bin]]
 name = "upyr"
@@ -37,7 +51,7 @@ arboard = "3.6.1"
 clap = { version = "4.6.2", features = ["derive"] }
 directories = "6.0.0"
 device_query = "4.0.1"
-eframe = { version = "0.32.3", default-features = false, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
+eframe = { version = "0.32.3", default-features = false, features = ["default_fonts", "glow", "x11"] }
 enigo = "0.6.1"
 global-hotkey = "0.8.0"
 rdev = "0.5.3"
@@ -48,7 +62,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 tray-icon = { version = "0.24.1", default-features = false, features = ["gtk"] }
 upyr-core = { path = "crates/upyr-core" }
-winit = "0.30.12"
+winit = { version = "0.30.12", default-features = false, features = ["rwh_06", "x11"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18.2"
@@ -62,8 +76,16 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAl
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSArray", "NSData", "NSString"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Media_Audio", "Win32_System_DataExchange", "Win32_System_Diagnostics_Debug", "Win32_System_Memory", "Win32_System_SystemServices", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Media_Audio", "Win32_Storage_FileSystem", "Win32_System_DataExchange", "Win32_System_Diagnostics_Debug", "Win32_System_Memory", "Win32_System_SystemServices", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 lto = "thin"
 strip = true
+
+# RUSTSEC-2026-0194 / RUSTSEC-2026-0195: eframe's mandatory egui-winit
+# clipboard backend still resolves smithay-clipboard and wayland-scanner even
+# on X11-only Linux builds, so the vulnerable parser cannot simply be removed.
+# The vendored crate is the exact 0.31.10 release with quick-xml bumped from
+# 0.39 to 0.41 and its one required API rename; see vendor/README.md.
+[patch.crates-io]
+wayland-scanner = { path = "vendor/wayland-scanner-0.31.10" }

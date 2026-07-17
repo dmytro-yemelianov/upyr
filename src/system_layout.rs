@@ -173,12 +173,12 @@ mod platform {
     }
 
     pub fn switch_to(target: SystemLayout) -> Result<SwitchOutcome> {
-        if let Some(active) = current()?
-            && active.layout == Some(target)
-        {
-            return Ok(SwitchOutcome::AlreadyActive {
-                source_id: active.source_id,
-            });
+        if let Some(active) = current()? {
+            if active.layout == Some(target) {
+                return Ok(SwitchOutcome::AlreadyActive {
+                    source_id: active.source_id,
+                });
+            }
         }
 
         let list = SourceList::load()?;

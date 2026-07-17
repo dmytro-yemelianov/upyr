@@ -1,0 +1,122 @@
+name: Bug report
+description: Report reproducible behavior in the desktop app, CLI, or WASM core.
+title: "[Bug]: "
+labels:
+  - bug
+  - needs-triage
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Upyr. Search existing issues first and never
+        paste passwords, private messages, or other sensitive typed text. Use a
+        synthetic example that reproduces the problem.
+
+  - type: input
+    id: version
+    attributes:
+      label: Upyr version
+      description: Find this in About, the release filename, or `upyr --version`.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Desktop background app
+        - Settings app
+        - Command-line interface
+        - WASM package
+        - Installer or update
+    validations:
+      required: true
+
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux (X11)
+        - Linux (Wayland; currently unsupported)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version and architecture
+      placeholder: "macOS 15.5, Apple silicon"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-source
+    attributes:
+      label: Installation source
+      options:
+        - GitHub Release
+        - Built from source
+        - Development build
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      description: Include the active layout, shortcut or mode, and visible result.
+      placeholder: "With the English layout active, typing a synthetic sample produced..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste `upyr doctor` output and relevant logs after redacting paths or sensitive text.
+      render: shell
+
+  - type: textarea
+    id: attachments
+    attributes:
+      label: Screenshots or recordings
+      description: Optional. Drag files here after checking them carefully for private on-screen content.
+      placeholder: Drag and drop screenshots, recordings, or redacted log files here.
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: I used synthetic input and removed personal or sensitive information.
+          required: true
+        - label: I searched for an existing report of this issue.
+          required: true
+        - label: I agree to follow the project Code of Conduct.
+          required: true

@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#11151c">
+    <meta name="color-scheme" content="dark">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+    >
+    <meta
+      name="description"
+      content="Upyr is a private, native English–Ukrainian keyboard-layout fixer for macOS, built in Rust and powered by a compact local character n-gram model."
+    >
+    <meta name="robots" content="index,follow">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Upyr — type what you meant">
+    <meta property="og:description" content="Private English ↔ Ukrainian layout correction. Local, fast, open source.">
+    <meta property="og:url" content="https://dmytro-yemelianov.github.io/upyr/">
+    <title>Upyr — type what you meant</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main" data-i18n="skip">Skip to content</a>
+
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="#top" aria-label="Upyr home" data-i18n-aria="homeLabel">
+          <img src="favicon.svg" width="36" height="36" alt="">
+          <span>Upyr</span>
+        </a>
+        <nav class="nav" aria-label="Main navigation" data-i18n-aria="navLabel">
+          <a href="#why" data-i18n="navWhy">Why Upyr</a>
+          <a href="#how" data-i18n="navHow">How it works</a>
+          <a href="#privacy" data-i18n="navPrivacy">Privacy</a>
+          <a href="#platforms" data-i18n="navPlatforms">Platforms</a>
+        </nav>
+        <div class="header-actions">
+          <div class="language-switch" role="group" aria-label="Choose language" data-i18n-aria="languageLabel">
+            <button class="language-button is-active" type="button" data-language="en" aria-pressed="true" lang="en">EN</button>
+            <button class="language-button" type="button" data-language="uk" aria-pressed="false" lang="uk">УК</button>
+          </div>
+          <a class="github-link" href="https://github.com/dmytro-yemelianov/upyr" aria-label="Upyr on GitHub" data-i18n-aria="githubLabel">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 .7a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.2.8-.6v-2.2c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.6-.3-5.4-1.3-5.4-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.9 1.2 3.1 0 4.4-2.8 5.4-5.4 5.7.4.4.8 1.1.8 2.2v3.3c0 .4.2.7.8.6A11.5 11.5 0 0 0 12 .7Z"/>
+            </svg>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="hero-glow hero-glow-one" aria-hidden="true"></div>
+        <div class="hero-glow hero-glow-two" aria-hidden="true"></div>
+        <div class="shell hero-grid">
+          <div class="hero-copy">
+            <div class="eyebrow">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span data-i18n="heroEyebrow">Public preview · v0.1.0</span>
+            </div>
+            <h1 data-i18n="heroTitle">Your keyboard can be wrong. Your words don’t have to be.</h1>
+            <p class="hero-lead" data-i18n="heroLead">
+              Upyr instantly restores English and Ukrainian text typed on the wrong layout. Native Rust speed, local decisions, zero tracking.
+            </p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="https://github.com/dmytro-yemelianov/upyr/releases">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v13m0 0 5-5m-5 5-5-5M4 20h16"/></svg>
+                <span data-i18n="downloadMac">Get Upyr for macOS</span>
+              </a>
+              <a class="button button-secondary" href="https://github.com/dmytro-yemelianov/upyr">
+                <span data-i18n="viewSource">View source</span>
+                <span aria-hidden="true">↗</span>
+              </a>
+            </div>
+            <p class="release-note" data-i18n="releaseNote">
+              Universal for Apple Silicon and Intel · macOS 11+ · current preview is ad-hoc signed and not Apple-notarized
+            </p>
+          </div>
+
+          <div class="hero-demo" aria-label="Upyr conversion examples" data-i18n-aria="demoLabel">
+            <div class="demo-topbar">
+              <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+              <div class="local-pill"><span aria-hidden="true">●</span><span data-i18n="localOnly">Local only</span></div>
+            </div>
+            <div class="demo-body">
+              <p class="demo-label" data-i18n="youTyped">You typed</p>
+              <div class="conversion-line">
+                <code>ghbdsn</code>
+                <span class="conversion-arrow" aria-hidden="true">→</span>
+                <code class="converted">привіт</code>
+              </div>
+              <div class="layout-line">
+                <span>EN</span>
+                <div class="layout-track" aria-hidden="true"><i></i></div>
+                <span>УК</span>
+              </div>
+              <div class="demo-divider"></div>
+              <p class="demo-label" data-i18n="physicalRow">Same physical keys</p>
+              <div class="physical-example">
+                <code>[];'\,./</code>
+                <span aria-hidden="true">↔</span>
+                <code>хїжєґбю.</code>
+              </div>
+              <div class="decision-chip">
+                <span class="decision-icon" aria-hidden="true">✓</span>
+                <span><strong data-i18n="decisionTitle">Confident match</strong><small data-i18n="decisionCopy">replaced in milliseconds</small></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="shell trust-strip" aria-label="Product principles" data-i18n-aria="principlesLabel">
+          <div><span class="trust-icon" aria-hidden="true">⌁</span><span data-i18n="trustNetwork">No runtime network</span></div>
+          <div><span class="trust-icon" aria-hidden="true">◉</span><span data-i18n="trustAccount">No account</span></div>
+          <div><span class="trust-icon" aria-hidden="true">◌</span><span data-i18n="trustTracking">No telemetry</span></div>
+          <div><span class="trust-icon" aria-hidden="true">◇</span><span data-i18n="trustSource">Open source · MIT</span></div>
+        </div>
+      </section>
+
+      <section class="section" id="why">
+        <div class="shell">
+          <div class="section-intro">
+            <p class="kicker" data-i18n="whyKicker">Stay in the flow</p>
+            <h2 data-i18n="whyTitle">Fix the layout. Keep the thought.</h2>
+            <p data-i18n="whyLead">A small native tool for a very specific interruption—built to disappear when it has done its job.</p>
+          </div>
+          <div class="feature-grid">
+            <article class="feature-card feature-card-accent">
+              <div class="feature-mark" aria-hidden="true">A<span>Я</span></div>
+              <h3 data-i18n="featureAutoTitle">Automatic when certain</h3>
+              <p data-i18n="featureAutoCopy">Opt in to correction at a word boundary. Conservative policy keeps valid words, names, URLs, and technical tokens untouched.</p>
+            </article>
+            <article class="feature-card">
+              <div class="feature-mark feature-key" aria-hidden="true">⌥⌘␣</div>
+              <h3 data-i18n="featureManualTitle">Manual when you choose</h3>
+              <p data-i18n="featureManualCopy">Fix a selection or the previous word with a shortcut. By default, Upyr attempts to restore the input source and supported clipboard formats.</p>
+            </article>
+            <article class="feature-card">
+              <div class="feature-mark feature-map" aria-hidden="true"><span>G</span><i>→</i><span>П</span></div>
+              <h3 data-i18n="featureKeysTitle">Physical-key truth</h3>
+              <p data-i18n="featureKeysCopy">Upyr derives mappings from installed layouts and understands Shift, punctuation, apostrophes, ї, є, ґ, and fast mixed-language entry.</p>
+            </article>
+            <article class="feature-card">
+              <div class="feature-mark feature-feedback" aria-hidden="true"><span>EN</span><span>УК</span></div>
+              <h3 data-i18n="featureFeedbackTitle">Quiet feedback</h3>
+              <p data-i18n="featureFeedbackCopy">Optional pointer-side language flags and short per-event sounds confirm a switch without pulling focus from the active app.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-panel" id="how">
+        <div class="shell">
+          <div class="section-intro section-intro-wide">
+            <p class="kicker" data-i18n="howKicker">Under the hood</p>
+            <h2 data-i18n="howTitle">A tiny local decision path</h2>
+            <p data-i18n="howLead">No translation service and no generative model. Upyr remaps the exact physical keys, then asks whether the other-layout candidate is clearly more plausible.</p>
+          </div>
+
+          <ol class="pipeline">
+            <li>
+              <span class="step-number">01</span>
+              <h3 data-i18n="stepCaptureTitle">Capture positions</h3>
+              <p data-i18n="stepCaptureCopy">The native hook keeps a bounded in-memory prefix for the current input boundary.</p>
+            </li>
+            <li>
+              <span class="step-number">02</span>
+              <h3 data-i18n="stepMapTitle">Remap keys</h3>
+              <p data-i18n="stepMapCopy">Installed EN and UK input sources produce the opposite-layout candidate, case and punctuation included.</p>
+            </li>
+            <li>
+              <span class="step-number">03</span>
+              <h3 data-i18n="stepScoreTitle">Score evidence</h3>
+              <p data-i18n="stepScoreCopy">Dictionaries, technical guards, exceptions, and the signed character n-gram index compare both readings.</p>
+            </li>
+            <li>
+              <span class="step-number">04</span>
+              <h3 data-i18n="stepApplyTitle">Apply carefully</h3>
+              <p data-i18n="stepApplyCopy">Only a candidate above the selected confidence threshold replaces text and switches the input source.</p>
+            </li>
+          </ol>
+
+          <div class="model-card">
+            <div class="model-copy">
+              <div class="model-label" data-i18n="modelLabel">SIGNED N-GRAM v1</div>
+              <h3 data-i18n="modelTitle">Character patterns, packed small</h3>
+              <p data-i18n="modelCopy">Equal-size English and Ukrainian news corpora are filtered by alphabet and split into 2–5-character sequences. Each retained sequence becomes a packed key plus one signed confidence byte: negative for English, positive for Ukrainian.</p>
+              <p data-i18n="modelPrivacy">The app embeds no corpus sentences and no word-frequency table—only 173,964 n-gram records in about 2.8 MiB. Lookup is local, deterministic, and immediate.</p>
+              <a class="text-link" href="https://github.com/dmytro-yemelianov/upyr/blob/main/docs/benchmarks/signed-ngram-v1.md">
+                <span data-i18n="modelEval">Read the frozen evaluation</span><span aria-hidden="true">→</span>
+              </a>
+            </div>
+            <div class="model-visual" aria-label="Signed n-gram record examples" data-i18n-aria="modelVisualLabel">
+              <div class="model-axis"><span>EN −127</span><span>0</span><span>+127 УК</span></div>
+              <div class="gram-row gram-en"><code>^th</code><span><i></i></span><strong>−96</strong></div>
+              <div class="gram-row gram-uk"><code>при</code><span><i></i></span><strong>+104</strong></div>
+              <div class="gram-row gram-en"><code>ing$</code><span><i></i></span><strong>−121</strong></div>
+              <div class="gram-row gram-uk"><code>ість</code><span><i></i></span><strong>+117</strong></div>
+              <div class="packed-record"><span data-i18n="packedKey">16-byte key</span><span data-i18n="signedByte">signed byte</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="privacy">
+        <div class="shell privacy-grid">
+          <div class="privacy-heading">
+            <p class="kicker" data-i18n="privacyKicker">Privacy is architecture</p>
+            <h2 data-i18n="privacyTitle">Your typing never needs to leave your Mac.</h2>
+            <p data-i18n="privacyLead">Upyr has no account system, cloud inference, analytics SDK, telemetry endpoint, crash reporter, advertising, or automatic update ping.</p>
+            <a class="button button-secondary" href="https://github.com/dmytro-yemelianov/upyr/security">
+              <span data-i18n="securityPolicy">Security and advisories</span><span aria-hidden="true">↗</span>
+            </a>
+          </div>
+          <div class="privacy-list">
+            <article>
+              <span class="privacy-check" aria-hidden="true">✓</span>
+              <div><h3 data-i18n="privacyMemoryTitle">Short-lived memory</h3><p data-i18n="privacyMemoryCopy">Only the bounded current input prefix is retained in memory. Boundaries and resets discard it; typed content is not written to logs or disk.</p></div>
+            </article>
+            <article>
+              <span class="privacy-check" aria-hidden="true">✓</span>
+              <div><h3 data-i18n="privacyClipboardTitle">Guarded clipboard</h3><p data-i18n="privacyClipboardCopy">When restoration is enabled, Upyr attempts to restore supported formats and reports platform failures. macOS temporary data is marked concealed and Copy detection uses the native change counter.</p></div>
+            </article>
+            <article>
+              <span class="privacy-check" aria-hidden="true">✓</span>
+              <div><h3 data-i18n="privacyOptTitle">Opt-in automation</h3><p data-i18n="privacyOptCopy">Automatic correction, modifier gestures, sounds, and the language flag start disabled. Accessibility is requested only when needed.</p></div>
+            </article>
+            <article>
+              <span class="privacy-check" aria-hidden="true">✓</span>
+              <div><h3 data-i18n="privacyAuditTitle">Verifiable controls</h3><p data-i18n="privacyAuditCopy">Open source, reproducible model generation, RustSec reporting, CodeQL, dependency review, tests, and package smoke checks make claims inspectable.</p></div>
+            </article>
+          </div>
+        </div>
+        <div class="shell evidence-note">
+          <span aria-hidden="true">i</span>
+          <p data-i18n="evidenceNote">Security tooling reduces risk; it cannot prove that software is vulnerability-free. The corpus generator is the sole intentional downloader and runs only when a developer invokes it. Desktop and WASM runtime paths implement no network client.</p>
+        </div>
+      </section>
+
+      <section class="section section-panel" id="platforms">
+        <div class="shell">
+          <div class="section-intro">
+            <p class="kicker" data-i18n="platformKicker">Delivery</p>
+            <h2 data-i18n="platformTitle">macOS first. One portable core.</h2>
+            <p data-i18n="platformLead">The shared Rust engine already runs across native desktop and WebAssembly. Product polish is deliberately landing platform by platform.</p>
+          </div>
+          <div class="platform-grid">
+            <article class="platform-card platform-primary">
+              <div class="platform-top"><span class="platform-symbol" aria-hidden="true">●</span><span class="status-badge status-live" data-i18n="statusPrimary">PRIMARY</span></div>
+              <h3>macOS 11+</h3>
+              <p data-i18n="macCopy">Universal Apple Silicon + Intel app, native AppKit settings, input-source mapping, rich pasteboard snapshot/restore support, feedback, and launch at login.</p>
+              <a class="text-link" href="https://github.com/dmytro-yemelianov/upyr/releases"><span data-i18n="macDownload">Open releases</span><span aria-hidden="true">→</span></a>
+            </article>
+            <article class="platform-card">
+              <div class="platform-top"><span class="platform-symbol" aria-hidden="true">▦</span><span class="status-badge" data-i18n="statusPreview">PREVIEW</span></div>
+              <h3>Windows</h3>
+              <p data-i18n="windowsCopy">Tray app, layout mapping, broad clipboard snapshot/restore support, installer, portable ZIP, and CI coverage. The settings screen-reader bridge is temporarily unavailable.</p>
+            </article>
+            <article class="platform-card">
+              <div class="platform-top"><span class="platform-symbol" aria-hidden="true">⌁</span><span class="status-badge" data-i18n="statusPreview2">PREVIEW</span></div>
+              <h3>Linux / X11</h3>
+              <p data-i18n="linuxCopy">XKB-aware mapping, GTK tray, DEB and tar packages. The settings screen-reader bridge is temporarily unavailable; native Wayland global input awaits a portal-backed design.</p>
+            </article>
+            <article class="platform-card">
+              <div class="platform-top"><span class="platform-symbol platform-wasm" aria-hidden="true">W</span><span class="status-badge" data-i18n="statusEngine">ENGINE</span></div>
+              <h3>WebAssembly</h3>
+              <p data-i18n="wasmCopy">DOM-independent core and generated TypeScript contracts are ready. A browser adapter, playground, and npm delivery are next.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section about-section" id="about">
+        <div class="shell about-grid">
+          <div class="about-mark" aria-hidden="true"><img src="favicon.svg" width="112" height="112" alt=""></div>
+          <div>
+            <p class="kicker" data-i18n="aboutKicker">About the name</p>
+            <h2 data-i18n="aboutTitle">Made to switch.</h2>
+            <p data-i18n="aboutCopy">Upyr takes its name from the Ukrainian «упир»—a shape-changing figure, one who turns. The app does the same small transformation for text typed in the wrong layout.</p>
+            <p data-i18n="inspirationCopy">It is an independent Rust implementation inspired by Punto Switcher and TolikPylypchuk/KeyboardSwitch, with a narrower EN–UK focus and local-first architecture.</p>
+            <div class="about-links">
+              <a class="text-link" href="https://github.com/TolikPylypchuk/KeyboardSwitch"><span>KeyboardSwitch</span><span aria-hidden="true">↗</span></a>
+              <a class="text-link" href="https://github.com/dmytro-yemelianov/upyr/blob/main/LICENSE"><span data-i18n="mitLicense">MIT license</span><span aria-hidden="true">↗</span></a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="download-section">
+        <div class="shell download-card">
+          <div>
+            <p class="kicker" data-i18n="downloadKicker">Public preview</p>
+            <h2 data-i18n="downloadTitle">Keep typing. Upyr will flip the rest.</h2>
+            <p data-i18n="downloadCopy">The current macOS preview is ad-hoc signed and not Apple-notarized, so Gatekeeper may block it. You can also inspect and build every line yourself.</p>
+          </div>
+          <div class="download-actions">
+            <a class="button button-light" href="https://github.com/dmytro-yemelianov/upyr/releases"><span data-i18n="downloadButton">Download for macOS</span><span aria-hidden="true">↓</span></a>
+            <a class="button button-ghost" href="https://github.com/dmytro-yemelianov/upyr/issues/new/choose"><span data-i18n="reportIssue">Report an issue</span><span aria-hidden="true">↗</span></a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <div class="footer-brand">
+          <img src="favicon.svg" width="32" height="32" alt="">
+          <div><strong>Upyr</strong><span data-i18n="footerTagline">Type what you meant.</span></div>
+        </div>
+        <div class="footer-links">
+          <a href="https://github.com/dmytro-yemelianov/upyr" data-i18n="footerSource">Source</a>
+          <a href="https://github.com/dmytro-yemelianov/upyr/releases" data-i18n="footerReleases">Releases</a>
+          <a href="https://github.com/dmytro-yemelianov/upyr/issues" data-i18n="footerIssues">Issues</a>
+          <a href="https://github.com/dmytro-yemelianov/upyr/security" data-i18n="footerSecurity">Security</a>
+        </div>
+        <p class="footer-meta" data-i18n="footerMeta">No cookies · No analytics · No external assets</p>
+      </div>
+    </footer>
+  </body>
+</html>

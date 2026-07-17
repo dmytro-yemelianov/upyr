@@ -15,6 +15,7 @@ pub enum TrayAction {
     ConvertSelection,
     TogglePaused,
     OpenSettings,
+    OpenAbout,
     ReloadConfiguration,
     ToggleAutostart,
     Quit,
@@ -27,6 +28,7 @@ pub struct Tray {
     convert: MenuItem,
     pause: CheckMenuItem,
     edit_config: MenuItem,
+    about: MenuItem,
     reload_config: MenuItem,
     autostart: CheckMenuItem,
     quit: MenuItem,
@@ -39,6 +41,7 @@ impl Tray {
         let convert = MenuItem::new("Convert selected text", true, None);
         let pause = CheckMenuItem::new("Pause shortcut", true, false, None);
         let edit_config = MenuItem::new("Settings…", true, None);
+        let about = MenuItem::new("About Upyr…", true, None);
         let reload_config = MenuItem::new("Reload configuration", true, None);
         let autostart_status = autostart::status()?;
         let (autostart_label, autostart_checked) = autostart_presentation(autostart_status.state);
@@ -55,6 +58,7 @@ impl Tray {
             &pause,
             &second_separator,
             &edit_config,
+            &about,
             &reload_config,
             &autostart,
             &third_separator,
@@ -79,6 +83,7 @@ impl Tray {
             convert,
             pause,
             edit_config,
+            about,
             reload_config,
             autostart,
             quit,
@@ -95,6 +100,8 @@ impl Tray {
             Some(TrayAction::TogglePaused)
         } else if id == self.edit_config.id() {
             Some(TrayAction::OpenSettings)
+        } else if id == self.about.id() {
+            Some(TrayAction::OpenAbout)
         } else if id == self.reload_config.id() {
             Some(TrayAction::ReloadConfiguration)
         } else if id == self.autostart.id() {

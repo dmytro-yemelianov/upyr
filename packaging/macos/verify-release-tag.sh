@@ -7,7 +7,7 @@ if [ "$#" -ne 1 ]; then
 fi
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-VERSION=$(awk -F '"' '/^version = / { print $2; exit }' "$ROOT/Cargo.toml")
+VERSION=$(sh "$ROOT/packaging/version.sh")
 EXPECTED="v$VERSION"
 
 if [ "$1" != "$EXPECTED" ]; then

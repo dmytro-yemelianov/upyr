@@ -1,0 +1,151 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: en-US
+early_access: false
+
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  review_status: true
+  review_details: true
+  commit_status: true
+  fail_commit_status: true
+  collapse_walkthrough: false
+  changed_files_summary: true
+  sequence_diagrams: false
+  estimate_code_review_effort: true
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  suggested_labels: true
+  auto_apply_labels: false
+  suggested_reviewers: true
+  auto_assign_reviewers: false
+  in_progress_fortune: false
+  poem: false
+  enable_prompt_for_ai_agents: true
+
+  path_filters:
+    - "!dist/**"
+    - "!target/**"
+    - "!.codebase-memory/**"
+    - "!artifacts/**"
+    - "!assets/sounds/*.wav"
+    - "!crates/upyr-core/assets/models/*.ngm"
+    - "!packaging/macos/*.icns"
+    - "!vendor/**"
+
+  path_instructions:
+    - path: "{src,crates}/**/*.rs"
+      instructions: |
+        Review for correctness, memory safety, race conditions, panic paths, and
+        cross-platform behavior. Treat keyboard events, clipboard contents, and
+        selected text as sensitive: flag logging, persistence, networking, or
+        telemetry involving those values. Pay special attention to synthetic-key
+        recursion, modifier state, UTF-8 boundaries, physical-key mapping,
+        punctuation, capitalization, and stale asynchronous events.
+    - path: "crates/upyr-core/**"
+      instructions: |
+        This is the platform-neutral correction engine and future WASM boundary.
+        Keep it deterministic, allocation-conscious on the typing hot path, and
+        free of OS, network, filesystem, and wall-clock dependencies. Require
+        regression tests for English/Ukrainian layout mapping and n-gram changes.
+    - path: "tools/generate_ngram_model.py"
+      instructions: |
+        Require deterministic output from pinned, license-compatible corpora.
+        Check corpus hashes, token normalization, language labels, bounded model
+        size, and benchmark/holdout evidence. Never accept personal or private
+        text as training data.
+    - path: "packaging/**"
+      instructions: |
+        Verify that versions come from the workspace manifest, release artifacts
+        contain licenses, installers are least-privilege, and tagged macOS and
+        Windows releases cannot silently fall back to unsigned packages. Secrets
+        must never be printed or committed.
+    - path: ".github/workflows/**"
+      instructions: |
+        Require least-privilege job permissions, immutable action SHAs, explicit
+        timeouts, safe handling of forked pull requests, and no execution of
+        untrusted pull-request code with write tokens or release secrets.
+    - path: "site/**"
+      instructions: |
+        Keep English and Ukrainian content equivalent. Reject analytics, cookies,
+        tracking pixels, remote runtime resources, or claims that exceed verified
+        application behavior. Preserve accessibility and responsive layout.
+    - path: "**/*{test,tests}*"
+      instructions: |
+        Check that assertions cover failures and boundaries, especially mixed
+        layouts, capitalization, apostrophes, punctuation, shortcuts, fast typing,
+        and platform-specific physical-key behavior.
+
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 10
+    drafts: false
+    ignore_title_keywords:
+      - "WIP"
+      - "[skip review]"
+    labels:
+      - "!do-not-review"
+    ignore_usernames:
+      - "dependabot[bot]"
+
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: true
+    simplify:
+      enabled: false
+    autofix:
+      enabled: false
+
+  pre_merge_checks:
+    docstrings:
+      mode: off
+    title:
+      mode: warning
+      requirements: "Use a concise imperative title that describes the user-visible outcome."
+    description:
+      mode: warning
+    issue_assessment:
+      mode: warning
+
+  tools:
+    github-checks:
+      enabled: true
+      timeout_ms: 600000
+    actionlint:
+      enabled: true
+    zizmor:
+      enabled: true
+    clippy:
+      enabled: true
+    shellcheck:
+      enabled: true
+    psscriptanalyzer:
+      enabled: true
+    markdownlint:
+      enabled: true
+    osvScanner:
+      enabled: true
+
+chat:
+  art: false
+  auto_reply: true
+
+# CodeRabbit still processes pull-request diffs when installed, but it does not
+# retain repository learnings or use web search for this privacy-focused project.
+knowledge_base:
+  opt_out: true
+  web_search:
+    enabled: false
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "CONTRIBUTING.md"
+      - "SECURITY.md"
+      - "docs/architecture/*.md"

@@ -2,7 +2,7 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-VERSION=${UPYR_VERSION:-$(awk -F '"' '/^version = / { print $2; exit }' "$ROOT/Cargo.toml")}
+VERSION=$(sh "$ROOT/packaging/version.sh")
 DIST="$ROOT/dist"
 APP="$DIST/Upyr.app"
 CONTENTS="$APP/Contents"
@@ -131,6 +131,12 @@ plutil -lint "$CONTENTS/Info.plist"
 plutil -lint "$SETTINGS_CONTENTS/Info.plist"
 test "$(plutil -extract CFBundleIconFile raw "$CONTENTS/Info.plist")" = "Upyr.icns"
 test "$(plutil -extract CFBundleIconFile raw "$SETTINGS_CONTENTS/Info.plist")" = "Upyr.icns"
+test "$(plutil -extract CFBundleIdentifier raw "$CONTENTS/Info.plist")" = "dev.Upyr.Upyr"
+test "$(plutil -extract CFBundleIdentifier raw "$SETTINGS_CONTENTS/Info.plist")" = "dev.Upyr.Upyr.Settings"
+test "$(plutil -extract CFBundleShortVersionString raw "$CONTENTS/Info.plist")" = "$VERSION"
+test "$(plutil -extract CFBundleVersion raw "$CONTENTS/Info.plist")" = "$VERSION"
+test "$(plutil -extract CFBundleShortVersionString raw "$SETTINGS_CONTENTS/Info.plist")" = "$VERSION"
+test "$(plutil -extract CFBundleVersion raw "$SETTINGS_CONTENTS/Info.plist")" = "$VERSION"
 
 # Sign every nested code object from the leaves outward. Do not use --deep for
 # signing: it can mask missing or incorrectly ordered signatures.
@@ -145,6 +151,7 @@ verify_code_signature "$CONTENTS/MacOS/upyr-background"
 verify_code_signature "$SETTINGS_CONTENTS/MacOS/upyr-settings"
 verify_code_signature "$SETTINGS_APP"
 verify_code_signature "$APP"
+codesign --verify --deep --strict --verbose=2 "$APP"
 verify_universal_binary "$CONTENTS/MacOS/upyr-background"
 verify_universal_binary "$CONTENTS/MacOS/upyr"
 verify_universal_binary "$SETTINGS_CONTENTS/MacOS/upyr-settings"

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/dmytro-yemelianov/upyr/security/advisories/new
+    about: Send security-sensitive details privately; do not open a public issue.
+  - name: Ask a question
+    url: https://github.com/dmytro-yemelianov/upyr/discussions
+    about: Get help with setup, permissions, or expected behavior.

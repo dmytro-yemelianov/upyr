@@ -5,17 +5,25 @@ param(
 
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-if (-not $Version) {
-    $manifest = Get-Content (Join-Path $Root "Cargo.toml") -Raw
-    $Version = [regex]::Match($manifest, '(?m)^version = "([^"]+)"').Groups[1].Value
+$metadataJson = & cargo metadata --no-deps --format-version 1 --manifest-path (Join-Path $Root "Cargo.toml")
+if ($LASTEXITCODE -ne 0) { throw "Could not read Cargo metadata" }
+$CargoVersion = (($metadataJson | ConvertFrom-Json).packages | Where-Object name -eq "upyr" | Select-Object -First 1).version
+if (-not $CargoVersion) { throw "Could not read the Upyr package version" }
+if ($Version -and $Version -ne $CargoVersion) {
+    throw "Requested version '$Version' does not match Cargo version '$CargoVersion'"
 }
-if (-not $Version) { throw "Could not read the package version" }
+$Version = $CargoVersion
 
 $Dist = Join-Path $Root "dist"
 $Stage = Join-Path $Dist "upyr-windows-x86_64-$Version"
 $Cli = Join-Path $Root "target\release\upyr.exe"
 $Background = Join-Path $Root "target\release\upyr-background.exe"
 $Settings = Join-Path $Root "target\release\upyr-settings.exe"
+
+$reportedVersion = (& $Cli --version).Trim()
+if ($reportedVersion -ne "upyr $Version") {
+    throw "CLI reports '$reportedVersion'; expected 'upyr $Version'"
+}
 
 function Invoke-UpyrSign([string]$Path) {
     if (-not $env:UPYR_SIGNTOOL_PATH) { return }
@@ -24,6 +32,8 @@ function Invoke-UpyrSign([string]$Path) {
     }
     & $env:UPYR_SIGNTOOL_PATH sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $env:UPYR_CERTIFICATE_PATH /p $env:UPYR_CERTIFICATE_PASSWORD $Path
     if ($LASTEXITCODE -ne 0) { throw "Signing failed for $Path" }
+    & $env:UPYR_SIGNTOOL_PATH verify /pa /all $Path
+    if ($LASTEXITCODE -ne 0) { throw "Signature verification failed for $Path" }
 }
 
 Invoke-UpyrSign $Cli
@@ -39,6 +49,7 @@ Copy-Item (Join-Path $Root "LICENSE"), (Join-Path $Root "README.md"), (Join-Path
 $Zip = "$Stage.zip"
 Remove-Item $Zip -Force -ErrorAction SilentlyContinue
 Compress-Archive -Path $Stage -DestinationPath $Zip -CompressionLevel Optimal
+if (-not (Test-Path $Zip)) { throw "Portable archive output was not created" }
 
 if (-not (Test-Path $InnoCompiler)) { throw "Inno Setup compiler was not found at $InnoCompiler" }
 & $InnoCompiler "/DAppVersion=$Version" "/DSourceDir=$(Join-Path $Root 'target\release')" "/DOutputDir=$Dist" (Join-Path $PSScriptRoot "upyr.iss")

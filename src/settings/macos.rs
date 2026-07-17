@@ -1,6 +1,9 @@
 #![allow(unsafe_code)]
 
-use std::cell::{Cell, OnceCell, RefCell};
+use std::{
+    cell::{Cell, OnceCell, RefCell},
+    process::Command,
+};
 
 use anyhow::{Context, Result, anyhow};
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
@@ -21,8 +24,9 @@ use objc2_foundation::{
 };
 
 use super::{
-    SEARCH_PARAMETERS, SettingsTab, autostart_attention, parse_exceptions, pretty_hotkey,
-    sensitivity_label, sync_launch_at_login,
+    ACTIVATION_POLL_INTERVAL, APP_VERSION, ActivationInbox, IMPLEMENTATION_SUMMARY,
+    PRIVACY_SUMMARY, PROJECT_WEBSITE_URL, REPOSITORY_URL, SEARCH_PARAMETERS, SettingsTab,
+    autostart_attention, parse_exceptions, pretty_hotkey, sensitivity_label, sync_launch_at_login,
 };
 use crate::{
     autostart,
@@ -38,6 +42,7 @@ const PAGE_HEIGHT: f64 = 456.0;
 struct ControllerIvars {
     config: RefCell<Config>,
     autostart_status: RefCell<autostart::AutostartStatus>,
+    activation: ActivationInbox,
     controls: OnceCell<Controls>,
 }
 
@@ -199,6 +204,21 @@ define_class!(
             self.controls().window.performClose(None);
         }
 
+        #[unsafe(method(openProjectWebsite:))]
+        fn open_project_website(&self, _sender: &AnyObject) {
+            self.open_external_url(PROJECT_WEBSITE_URL);
+        }
+
+        #[unsafe(method(openSourceRepository:))]
+        fn open_source_repository(&self, _sender: &AnyObject) {
+            self.open_external_url(REPOSITORY_URL);
+        }
+
+        #[unsafe(method(reportSecurityIssue:))]
+        fn report_security_issue(&self, _sender: &AnyObject) {
+            self.open_external_url(&format!("{REPOSITORY_URL}/security/advisories/new"));
+        }
+
         #[unsafe(method(searchSettings:))]
         fn search_settings(&self, _sender: &AnyObject) {
             let query = self.controls().search.stringValue().to_string().trim().to_lowercase();
@@ -316,10 +336,30 @@ define_class!(
             crate::feedback::hide_layout_indicator();
         }
 
+        #[unsafe(method(checkSettingsActivation:))]
+        fn check_settings_activation(&self, _sender: Option<&AnyObject>) {
+            match self.ivars().activation.drain() {
+                Ok(Some(tab)) => self.activate_tab(tab),
+                Ok(None) => {}
+                Err(error) => self.set_status(
+                    false,
+                    &format!("Could not activate the settings window: {error:#}"),
+                ),
+            }
+            self.schedule_activation_poll();
+        }
+
     }
 );
 
 impl NativeController {
+    fn open_external_url(&self, url: &str) {
+        match Command::new("open").arg(url).spawn() {
+            Ok(_) => self.set_status(true, "Opened in your default browser."),
+            Err(error) => self.set_status(false, &format!("Could not open the link: {error}")),
+        }
+    }
+
     fn preview_sound(&self, event: SoundEvent) {
         let mut settings = self.ivars().config.borrow().sounds;
         settings.enabled = true;
@@ -353,14 +393,37 @@ impl NativeController {
     fn new(
         config: Config,
         autostart_status: autostart::AutostartStatus,
+        activation: ActivationInbox,
         mtm: MainThreadMarker,
     ) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(ControllerIvars {
             config: RefCell::new(config),
             autostart_status: RefCell::new(autostart_status),
+            activation,
             controls: OnceCell::new(),
         });
         unsafe { msg_send![super(this), init] }
+    }
+
+    fn activate_tab(&self, tab: SettingsTab) {
+        self.controls()
+            .tabs
+            .selectTabViewItemAtIndex(tab_index(tab));
+        self.controls().window.deminiaturize(None);
+        self.controls().window.makeKeyAndOrderFront(None);
+        #[allow(deprecated)]
+        NSApplication::sharedApplication(self.mtm()).activateIgnoringOtherApps(true);
+    }
+
+    fn schedule_activation_poll(&self) {
+        unsafe {
+            let _: () = msg_send![
+                self,
+                performSelector: sel!(checkSettingsActivation:),
+                withObject: None::<&AnyObject>,
+                afterDelay: ACTIVATION_POLL_INTERVAL.as_secs_f64()
+            ];
+        }
     }
 
     fn controls(&self) -> &Controls {
@@ -447,6 +510,8 @@ impl NativeController {
         add_tab(&tabs, "Feedback", &feedback, mtm);
         let (advanced, copy_delay, paste_delay, restore_delay) = make_advanced_page(mtm);
         add_tab(&tabs, "Advanced", &advanced, mtm);
+        let about = make_about_page(self, mtm);
+        add_tab(&tabs, "About", &about, mtm);
         content.addSubview(&tabs);
 
         let status = label("", rect(24.0, 60.0, 672.0, 40.0), mtm);
@@ -833,16 +898,26 @@ impl ShortcutRecorder {
     }
 }
 
-pub(super) fn run(config: Config, autostart_status: autostart::AutostartStatus) -> Result<()> {
+pub(super) fn run(
+    config: Config,
+    autostart_status: autostart::AutostartStatus,
+    initial_tab: SettingsTab,
+    activation: ActivationInbox,
+) -> Result<()> {
     let mtm =
         MainThreadMarker::new().context("Upyr Settings must start on the macOS main thread")?;
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
-    let controller = NativeController::new(config, autostart_status, mtm);
+    let controller = NativeController::new(config, autostart_status, activation, mtm);
     let window = controller.build_window();
+    controller
+        .controls()
+        .tabs
+        .selectTabViewItemAtIndex(tab_index(initial_tab));
     window.makeKeyAndOrderFront(None);
     #[allow(deprecated)]
     app.activateIgnoringOtherApps(true);
+    controller.schedule_activation_poll();
     app.run();
     Ok(())
 }
@@ -1194,6 +1269,69 @@ fn make_advanced_page(
     (page, copy, paste, restore)
 }
 
+fn make_about_page(controller: &NativeController, mtm: MainThreadMarker) -> Retained<NSView> {
+    let page = page(mtm);
+    page_header(
+        &page,
+        &format!("Upyr {APP_VERSION}"),
+        "English ↔ Ukrainian keyboard layout correction.",
+        mtm,
+    );
+
+    let privacy_heading = label(
+        "Private by construction",
+        rect(24.0, 330.0, 610.0, 24.0),
+        mtm,
+    );
+    privacy_heading.setFont(Some(&NSFont::boldSystemFontOfSize(14.0)));
+    page.addSubview(&privacy_heading);
+    page.addSubview(&multiline_label(
+        PRIVACY_SUMMARY,
+        rect(24.0, 276.0, 620.0, 50.0),
+        mtm,
+    ));
+
+    let implementation_heading = label("How it works", rect(24.0, 238.0, 610.0, 24.0), mtm);
+    implementation_heading.setFont(Some(&NSFont::boldSystemFontOfSize(14.0)));
+    page.addSubview(&implementation_heading);
+    page.addSubview(&multiline_label(
+        IMPLEMENTATION_SUMMARY,
+        rect(24.0, 178.0, 620.0, 56.0),
+        mtm,
+    ));
+
+    let license_heading = label("Open source", rect(24.0, 140.0, 610.0, 24.0), mtm);
+    license_heading.setFont(Some(&NSFont::boldSystemFontOfSize(14.0)));
+    page.addSubview(&license_heading);
+    page.addSubview(&label(
+        "MIT licensed. Source, security policy, and release history are public.",
+        rect(24.0, 116.0, 620.0, 22.0),
+        mtm,
+    ));
+    page.addSubview(&action_button(
+        "Project Website",
+        rect(24.0, 68.0, 150.0, 32.0),
+        controller,
+        sel!(openProjectWebsite:),
+        mtm,
+    ));
+    page.addSubview(&action_button(
+        "Source Repository",
+        rect(184.0, 68.0, 158.0, 32.0),
+        controller,
+        sel!(openSourceRepository:),
+        mtm,
+    ));
+    page.addSubview(&action_button(
+        "Report Security Issue",
+        rect(352.0, 68.0, 178.0, 32.0),
+        controller,
+        sel!(reportSecurityIssue:),
+        mtm,
+    ));
+    page
+}
+
 fn page(mtm: MainThreadMarker) -> Retained<NSView> {
     NSView::initWithFrame(NSView::alloc(mtm), rect(0.0, 0.0, PAGE_WIDTH, PAGE_HEIGHT))
 }
@@ -1215,6 +1353,13 @@ fn add_tab(tabs: &NSTabView, title: &str, page: &NSView, _mtm: MainThreadMarker)
 fn label(value: &str, frame: NSRect, mtm: MainThreadMarker) -> Retained<NSTextField> {
     let label = NSTextField::labelWithString(&NSString::from_str(value), mtm);
     label.setFrame(frame);
+    label
+}
+
+fn multiline_label(value: &str, frame: NSRect, mtm: MainThreadMarker) -> Retained<NSTextField> {
+    let label = label(value, frame, mtm);
+    label.setMaximumNumberOfLines(3);
+    label.setUsesSingleLineMode(false);
     label
 }
 
@@ -1306,6 +1451,7 @@ fn tab_index(tab: SettingsTab) -> isize {
         SettingsTab::Shortcuts => 2,
         SettingsTab::Feedback => 3,
         SettingsTab::Advanced => 4,
+        SettingsTab::About => 5,
     }
 }
 
