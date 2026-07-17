@@ -219,6 +219,7 @@ impl CaptureState {
             || self.right_meta
     }
 
+    #[cfg(any(target_os = "macos", test))]
     fn momentary_modifier_active(&self) -> bool {
         self.left_shift || self.right_shift || self.chord_modifier_active()
     }
