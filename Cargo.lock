@@ -3767,7 +3767,6 @@ dependencies = [
 [[package]]
 name = "wayland-scanner"
 version = "0.31.10"
-source = "git+https://github.com/Smithay/wayland-rs?rev=d07c4f91f28b42e5a485823ffd9d8d5a210b1053#d07c4f91f28b42e5a485823ffd9d8d5a210b1053"
 dependencies = [
  "proc-macro2",
  "quick-xml",
