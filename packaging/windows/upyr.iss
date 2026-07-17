@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #error AppVersion must be supplied from Cargo metadata
 #endif
 #ifndef SourceDir
   #define SourceDir "..\..\target\release"
@@ -13,6 +13,9 @@ AppId={{487BE3CD-4C0A-40B8-B496-0A7DA0D74858}
 AppName=Upyr
 AppVersion={#AppVersion}
 AppPublisher=Upyr contributors
+AppPublisherURL=https://dmytro-yemelianov.github.io/upyr/
+AppSupportURL=https://github.com/dmytro-yemelianov/upyr/issues
+AppUpdatesURL=https://github.com/dmytro-yemelianov/upyr/releases
 DefaultDirName={localappdata}\Programs\Upyr
 DefaultGroupName=Upyr
 DisableProgramGroupPage=yes
@@ -25,8 +28,15 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
 UninstallDisplayIcon={app}\upyr-background.exe
+UninstallDisplayName=Upyr {#AppVersion}
 CloseApplications=yes
 RestartApplications=no
+VersionInfoVersion={#AppVersion}
+VersionInfoCompany=Upyr contributors
+VersionInfoDescription=Private English-Ukrainian keyboard layout fixer
+VersionInfoProductName=Upyr
+VersionInfoProductVersion={#AppVersion}
+VersionInfoCopyright=Copyright (C) 2026 Upyr contributors
 
 [Tasks]
 Name: "autostart"; Description: "Launch Upyr when I sign in"; GroupDescription: "Startup:"; Flags: unchecked

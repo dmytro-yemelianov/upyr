@@ -283,10 +283,10 @@ fn snapshot(clipboard: &mut Clipboard) -> SavedClipboard {
         return SavedClipboard::Native(snapshot);
     }
 
-    if let Ok(files) = clipboard.get().file_list()
-        && !files.is_empty()
-    {
-        return SavedClipboard::Files(files);
+    if let Ok(files) = clipboard.get().file_list() {
+        if !files.is_empty() {
+            return SavedClipboard::Files(files);
+        }
     }
     if let Ok(html) = clipboard.get().html() {
         let alternative = clipboard.get_text().ok();

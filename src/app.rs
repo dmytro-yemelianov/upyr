@@ -595,6 +595,7 @@ impl App {
             }
             Some(TrayAction::TogglePaused) => self.toggle_paused(),
             Some(TrayAction::OpenSettings) => settings::spawn(),
+            Some(TrayAction::OpenAbout) => settings::spawn_about(),
             Some(TrayAction::ReloadConfiguration) => self.reload_configuration(),
             Some(TrayAction::ToggleAutostart) => self.toggle_autostart(),
             Some(TrayAction::Quit) => {
@@ -746,10 +747,10 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::TrayFlipFrame { generation, frame }
                 if generation == self.tray_flip_generation =>
             {
-                if let Some(tray) = &self.tray
-                    && let Err(error) = tray.set_flip_frame(frame)
-                {
-                    debug!(%error, "could not advance tray icon flip");
+                if let Some(tray) = &self.tray {
+                    if let Err(error) = tray.set_flip_frame(frame) {
+                        debug!(%error, "could not advance tray icon flip");
+                    }
                 }
             }
             #[cfg(target_os = "macos")]

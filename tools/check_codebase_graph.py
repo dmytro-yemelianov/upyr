@@ -28,7 +28,10 @@ def parse_args() -> argparse.Namespace:
 
 
 def count_rows(database: Path, table: str) -> int:
-    with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+    # The persisted graph can retain WAL journal mode. The database is already a
+    # disposable temp copy, so allow SQLite to create its empty -wal/-shm
+    # sidecars while validating it.
+    with sqlite3.connect(database) as connection:
         row = connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
     if row is None:
         raise RuntimeError(f"missing count result for {table}")
@@ -80,7 +83,7 @@ def main() -> None:
                 f"{original_size} != {metadata.get('original_size')}"
             )
 
-        with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+        with sqlite3.connect(database) as connection:
             validate_json_properties(connection, "nodes")
             validate_json_properties(connection, "edges")
             integrity = [row[0] for row in connection.execute("PRAGMA integrity_check")]

@@ -1,0 +1,7 @@
+# Sensitive release, security, and privacy surfaces require owner review.
+* @dmytro-yemelianov
+/.github/ @dmytro-yemelianov
+/SECURITY.md @dmytro-yemelianov
+/packaging/ @dmytro-yemelianov
+/crates/upyr-core/assets/models/ @dmytro-yemelianov
+/tools/generate_ngram_model.py @dmytro-yemelianov

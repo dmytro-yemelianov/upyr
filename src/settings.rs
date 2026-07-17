@@ -27,6 +27,12 @@ use crate::config::config_path;
 #[cfg(target_os = "macos")]
 mod macos;
 
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const PROJECT_WEBSITE_URL: &str = "https://dmytro-yemelianov.github.io/upyr/";
+const REPOSITORY_URL: &str = "https://github.com/dmytro-yemelianov/upyr";
+const PRIVACY_SUMMARY: &str = "Local-only by design: no accounts, analytics, telemetry, ads, or text uploads. Typed text and clipboard contents stay on this device.";
+const IMPLEMENTATION_SUMMARY: &str = "Upyr is written in Rust. It maps physical English and Ukrainian keys, then uses a bundled compact character n-gram model to score language candidates locally; no cloud inference is involved.";
+
 pub fn run() -> Result<()> {
     let instance_key = settings_instance_key()?;
     let instance = SingleInstance::new(&instance_key)
@@ -37,8 +43,13 @@ pub fn run() -> Result<()> {
 
     let config = Config::load()?;
     let autostart_status = autostart::status()?;
+    let initial_tab = if env::args_os().any(|argument| argument == "--about") {
+        SettingsTab::About
+    } else {
+        SettingsTab::General
+    };
     #[cfg(target_os = "macos")]
-    return macos::run(config, autostart_status);
+    return macos::run(config, autostart_status, initial_tab);
 
     #[cfg(not(target_os = "macos"))]
     {
@@ -52,7 +63,13 @@ pub fn run() -> Result<()> {
         eframe::run_native(
             "Upyr Settings",
             options,
-            Box::new(move |_context| Ok(Box::new(SettingsApp::new(config, autostart_status)))),
+            Box::new(move |_context| {
+                Ok(Box::new(SettingsApp::new(
+                    config,
+                    autostart_status,
+                    initial_tab,
+                )))
+            }),
         )
         .map_err(|error| anyhow!(error.to_string()))
     }
@@ -142,10 +159,22 @@ fn instance_is_held(key: &str) -> bool {
 }
 
 pub fn spawn() -> Result<()> {
+    spawn_tab(None)
+}
+
+pub fn spawn_about() -> Result<()> {
+    spawn_tab(Some("--about"))
+}
+
+fn spawn_tab(argument: Option<&str>) -> Result<()> {
     #[cfg(target_os = "macos")]
     if let Some(bundle) = packaged_macos_bundle()? {
-        let child = Command::new("open")
-            .arg(&bundle)
+        let mut command = Command::new("open");
+        command.arg(&bundle);
+        if let Some(argument) = argument {
+            command.args(["--args", argument]);
+        }
+        let child = command
             .spawn()
             .with_context(|| format!("failed to open Upyr Settings at {}", bundle.display()))?;
         if child.id() == 0 {
@@ -155,7 +184,11 @@ pub fn spawn() -> Result<()> {
     }
 
     let path = settings_executable()?;
-    let child = Command::new(&path)
+    let mut command = Command::new(&path);
+    if let Some(argument) = argument {
+        command.arg(argument);
+    }
+    let child = command
         .spawn()
         .with_context(|| format!("failed to open Upyr Settings at {}", path.display()))?;
     if child.id() == 0 {
@@ -202,16 +235,18 @@ enum SettingsTab {
     Shortcuts,
     Feedback,
     Advanced,
+    About,
 }
 
 impl SettingsTab {
     #[cfg(not(target_os = "macos"))]
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::General,
         Self::Automatic,
         Self::Shortcuts,
         Self::Feedback,
         Self::Advanced,
+        Self::About,
     ];
 
     const fn label(self) -> &'static str {
@@ -221,6 +256,7 @@ impl SettingsTab {
             Self::Shortcuts => "Shortcuts",
             Self::Feedback => "Feedback",
             Self::Advanced => "Advanced",
+            Self::About => "About",
         }
     }
 }
@@ -349,6 +385,16 @@ const SEARCH_PARAMETERS: &[SearchParameter] = &[
         label: "Clipboard restore delay",
         terms: "pasteboard milliseconds timing",
     },
+    SearchParameter {
+        tab: SettingsTab::About,
+        label: "Version and license",
+        terms: "about release semver copyright mit",
+    },
+    SearchParameter {
+        tab: SettingsTab::About,
+        label: "Privacy and implementation",
+        terms: "local only no tracking telemetry analytics n-gram model rust security source",
+    },
 ];
 
 #[cfg(not(target_os = "macos"))]
@@ -367,7 +413,11 @@ struct SettingsApp {
 
 #[cfg(not(target_os = "macos"))]
 impl SettingsApp {
-    fn new(config: Config, autostart_status: autostart::AutostartStatus) -> Self {
+    fn new(
+        config: Config,
+        autostart_status: autostart::AutostartStatus,
+        initial_tab: SettingsTab,
+    ) -> Self {
         let exceptions = config.auto_correct_exceptions.join("\n");
         let launch_at_login = autostart_status.enabled;
         Self {
@@ -377,7 +427,7 @@ impl SettingsApp {
             autostart_status,
             status: None,
             style_applied: false,
-            tab: SettingsTab::General,
+            tab: initial_tab,
             search: String::new(),
             recording: None,
             shortcut_error: None,
@@ -824,6 +874,33 @@ impl SettingsApp {
             });
     }
 
+    fn draw_about(&mut self, ui: &mut egui::Ui) {
+        section_heading(
+            ui,
+            &format!("Upyr {APP_VERSION}"),
+            "English ↔ Ukrainian keyboard layout correction.",
+        );
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new("Private by construction").strong());
+        ui.label(PRIVACY_SUMMARY);
+        ui.add_space(14.0);
+        ui.label(egui::RichText::new("How it works").strong());
+        ui.label(IMPLEMENTATION_SUMMARY);
+        ui.add_space(14.0);
+        ui.label(egui::RichText::new("Open source").strong());
+        ui.label("MIT licensed. Security reports and implementation details are published with the source.");
+        ui.horizontal_wrapped(|ui| {
+            ui.hyperlink_to("Project website", PROJECT_WEBSITE_URL);
+            ui.separator();
+            ui.hyperlink_to("Source repository", REPOSITORY_URL);
+            ui.separator();
+            ui.hyperlink_to(
+                "Report a security issue",
+                format!("{REPOSITORY_URL}/security/advisories/new"),
+            );
+        });
+    }
+
     fn draw_search_results(&mut self, ui: &mut egui::Ui) {
         let query = self.search.trim().to_lowercase();
         section_heading(ui, "Search results", "Choose a setting to open its tab.");
@@ -932,6 +1009,7 @@ impl eframe::App for SettingsApp {
                         SettingsTab::Shortcuts => self.draw_shortcuts(ui),
                         SettingsTab::Feedback => self.draw_feedback(ui),
                         SettingsTab::Advanced => self.draw_advanced(ui),
+                        SettingsTab::About => self.draw_about(ui),
                     }
                 } else {
                     self.draw_search_results(ui);

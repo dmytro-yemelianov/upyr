@@ -330,10 +330,13 @@ fn evaluate_with_scorer<S: CandidateScorer + ?Sized>(
     // ordinary whole-token conversion. This keeps `[ks,` -> `хліб`, while
     // allowing `Jkmuf,` -> `Ольга,`.
     if let Some(preserved) = Candidates::preserving_terminal_delimiter(sample, &candidates, mapping)
-        && terminal_delimiter_is_likely(&preserved, policy, scorer)
     {
-        if let AutoDecision::Correct(correction) = evaluate_candidates(&preserved, policy, scorer) {
-            return AutoDecision::Correct(correction);
+        if terminal_delimiter_is_likely(&preserved, policy, scorer) {
+            if let AutoDecision::Correct(correction) =
+                evaluate_candidates(&preserved, policy, scorer)
+            {
+                return AutoDecision::Correct(correction);
+            }
         }
     }
 

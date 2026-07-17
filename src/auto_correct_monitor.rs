@@ -540,23 +540,27 @@ fn spawn_listener(state: &Arc<ListenerState>) -> Result<()> {
                 #[cfg(target_os = "macos")]
                 if capture_state.momentary_modifier_active()
                     && is_ordinary_key_press(event.event_type)
-                    && let Some(device) = device_state.as_ref()
                 {
-                    // rdev's first flags-changed event can classify release as
-                    // press when the key predated its event tap. Reconcile only
-                    // while a modifier appears active, keeping normal typing on
-                    // the zero-query fast path.
-                    capture_state
-                        .synchronize_momentary_modifiers(&device.get_keys(), event.name.as_deref());
+                    if let Some(device) = device_state.as_ref() {
+                        // rdev's first flags-changed event can classify release as
+                        // press when the key predated its event tap. Reconcile only
+                        // while a modifier appears active, keeping normal typing on
+                        // the zero-query fast path.
+                        capture_state.synchronize_momentary_modifiers(
+                            &device.get_keys(),
+                            event.name.as_deref(),
+                        );
+                    }
                 }
                 let captured = capture_state.observe(event.event_type, event.name.as_deref());
                 #[cfg(target_os = "macos")]
                 if matches!(
                     event.event_type,
                     EventType::KeyRelease(Key::ShiftLeft | Key::ShiftRight)
-                ) && let Some(device) = device_state.as_ref()
-                {
-                    capture_state.reconcile_shift_release(&device.get_keys());
+                ) {
+                    if let Some(device) = device_state.as_ref() {
+                        capture_state.reconcile_shift_release(&device.get_keys());
+                    }
                 }
                 if let Some(captured) = captured {
                     dispatch_key(&callback_state, captured);

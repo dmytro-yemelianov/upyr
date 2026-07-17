@@ -1,0 +1,103 @@
+name: Correction or language-model report
+description: Report a false correction, missed correction, or physical-key mapping error.
+title: "[Model]: "
+labels:
+  - bug
+  - model
+  - needs-triage
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Model reports become regression fixtures. Use a synthetic phrase with the
+        same character pattern as the original; do not submit private typed text.
+
+  - type: dropdown
+    id: behavior
+    attributes:
+      label: Behavior
+      options:
+        - Missed correction
+        - Incorrect automatic correction
+        - Wrong capitalization
+        - Wrong punctuation or apostrophe mapping
+        - First character was lost
+        - Layout switched incorrectly
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Automatic correction
+        - Convert previous word
+        - Convert selection
+        - CLI conversion
+        - WASM evaluation
+    validations:
+      required: true
+
+  - type: dropdown
+    id: source-layout
+    attributes:
+      label: Physical keyboard layout active while typing
+      options:
+        - English
+        - Ukrainian
+        - Unknown or custom
+    validations:
+      required: true
+
+  - type: input
+    id: typed
+    attributes:
+      label: Synthetic text typed
+      description: Preserve case, spaces, punctuation, and apostrophe variant exactly.
+      placeholder: "Hj,jnf"
+    validations:
+      required: true
+
+  - type: input
+    id: observed
+    attributes:
+      label: Observed result
+      placeholder: "Hобота"
+    validations:
+      required: true
+
+  - type: input
+    id: expected
+    attributes:
+      label: Expected result
+      placeholder: "Робота"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Surrounding synthetic context
+      description: Include mixed-language terms or proper names that affected the decision.
+      placeholder: "Event ... Railway ... Work ..."
+
+  - type: input
+    id: version-platform
+    attributes:
+      label: Upyr version and platform
+      placeholder: "0.1.0 on macOS 15.5 (Apple silicon)"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmation
+      options:
+        - label: This report contains only synthetic, non-sensitive input.
+          required: true
+        - label: I agree to follow the project Code of Conduct.
+          required: true

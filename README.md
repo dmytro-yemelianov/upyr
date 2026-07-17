@@ -1,33 +1,49 @@
 # Upyr
 
-Upyr is a privacy-first, native English ↔ Ukrainian keyboard-layout fixer written in Rust. It is an early cross-platform alternative to Punto Switcher for macOS, Windows, and Linux/X11.
+[![CI](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml/badge.svg)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml)
+[![Security](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml/badge.svg)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml)
+[![MIT License](https://img.shields.io/badge/license-MIT-58d6a8.svg)](LICENSE)
 
-Назва **Upyr** походить від українського «упир» — образу перевертня, того, хто перекидається. Так само Upyr «перекидає» текст, набраний у неправильній розкладці, у потрібну форму.
+Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in Rust. It turns text typed on the wrong physical layout into what you meant: `ghbdsn` → `привіт`, `руддщ` → `hello`.
 
-Upyr supports two local workflows. The explicit workflow is always available:
+**Release status:** v0.1.0 public preview. macOS is the primary supported desktop target. Release CI is configured to build and smoke-test Windows and Linux/X11 packages, but those platforms remain preview targets. Upyr follows [Semantic Versioning](#versioning-and-releases); compatibility may change before 1.0.
 
-1. Select text typed in the wrong layout.
-2. Press `CmdOrCtrl+Alt+Space`.
-3. Upyr copies the selection, detects its direction, converts the physical-key positions, and pastes it back.
+[Download from GitHub Releases](https://github.com/dmytro-yemelianov/upyr/releases) · [Product page](https://dmytro-yemelianov.github.io/upyr/) · [Report an issue](https://github.com/dmytro-yemelianov/upyr/issues/new/choose)
 
-Automatic correction is opt-in. When enabled, Upyr can recognize a confidently mistyped word as soon as you press Space—for example, `ghbdsn` becomes `привіт` while an already valid `hello` remains unchanged. It also recognizes likely proper names (`Jkmuf` → `Ольга`, `Щдрф` → `Olha`) and scores an ambiguous final physical punctuation key both as a layout letter and as punctuation, so `Jkmuf,` becomes `Ольга,` without breaking `[ks,` → `хліб`. A native global key-down listener keeps only a short input prefix in memory; typed input is never logged or sent anywhere.
+## What it does
 
-Upyr also adds a **U** icon to the macOS menu bar or system tray. Its menu can convert text, pause/resume Upyr, open the native settings window, reload the configuration, or quit the app.
+- Fixes selected text with `CmdOrCtrl+Alt+Space`.
+- Fixes the word before the caret with `CmdOrCtrl+Alt+Backspace`.
+- Optionally corrects a confidently mistyped word after Space; automatic correction is off by default.
+- Detects and switches between installed English and Ukrainian input sources.
+- Uses the physical keys, including the standard Ukrainian punctuation row: `[];'\,./` ↔ `хїжєʼбю.`.
+- Protects intentional technical text such as `FAANG`, `SaaS`, `NASDAQ`, `iPhone`, URLs, paths, and configured exceptions.
+- Provides searchable, tabbed settings, press-to-record shortcuts, an optional pointer-side language flag, and per-event sounds with volume control.
+- By default, snapshots supported clipboard formats and attempts to restore them after conversion; temporary conversion content is concealed from supported clipboard-history systems.
 
-For example, `ghbdsn` becomes `привіт`, and `руддщ` becomes `hello`. Processing stays on the device. The desktop and WASM runtimes have no network or telemetry code; corpus-generation tools download pinned public datasets only when invoked explicitly.
+The menu-bar or system-tray app can convert text, pause or resume correction, open Settings, reload configuration, manage launch at login, and quit.
 
-For a faster no-selection workflow, place the caret immediately after a mistyped word and press `CmdOrCtrl+Alt+Backspace`. Upyr selects the previous word and fixes it in place.
+## Install on macOS
+
+1. Open the [Releases page](https://github.com/dmytro-yemelianov/upyr/releases), read the signing status in the notes, and download the universal macOS DMG or ZIP.
+2. Move **Upyr.app** to `/Applications` and launch it.
+3. Grant **Accessibility** access when macOS asks. Upyr needs it to observe opted-in word boundaries and send Copy/Paste keystrokes.
+4. Return to Upyr. When a new grant is detected, the app offers to restart so every input monitor starts with the permission.
+
+Release builds target macOS 11 or newer and contain Apple Silicon and Intel binaries. Tagged macOS releases fail closed unless signing and notarization complete; check the release notes and artifact provenance rather than bypassing Gatekeeper.
 
 ## Build and run
 
-Install the current stable Rust toolchain, then:
+Upyr requires Rust 1.86 or newer.
 
 ```sh
-cargo build --release
-./target/release/upyr
+cargo build --release --locked
+./target/release/upyr doctor
+./target/release/upyr settings
+./target/release/upyr convert ghbdsn
 ```
 
-On Ubuntu/Debian, install the desktop build dependencies first:
+On Windows, use `target\release\upyr-background.exe` for the tray app without a console window. On Ubuntu/Debian, install the desktop dependencies first:
 
 ```sh
 sudo apt-get update
@@ -35,46 +51,7 @@ sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev \
   libwayland-dev libgtk-3-dev libayatana-appindicator3-dev
 ```
 
-On Windows, run `target\release\upyr-background.exe` for the tray application without a console window, or use `target\release\upyr.exe` for CLI commands and foreground diagnostics.
-
-You can test the conversion engine without desktop permissions:
-
-```sh
-cargo run -- convert ghbdsn
-printf 'руддщ' | cargo run -- convert --direction smart
-./target/release/upyr convert --installed ghbdsn
-./target/release/upyr doctor
-./target/release/upyr settings
-```
-
-The shared engine also has a headless WebAssembly binding (no DOM adapter or npm
-release yet):
-
-```sh
-rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli --version 0.2.126 --locked
-cargo check -p upyr-core -p upyr-wasm --all-targets \
-  --target wasm32-unknown-unknown --locked
-CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
-  cargo test -p upyr-wasm --target wasm32-unknown-unknown --locked
-cargo build --release -p upyr-wasm --target wasm32-unknown-unknown --locked
-wasm-bindgen --target nodejs --out-dir target/upyr-wasm-node \
-  target/wasm32-unknown-unknown/release/upyr_wasm.wasm
-node tools/smoke_wasm_node.cjs target/upyr-wasm-node/upyr_wasm.js
-# Requires the `brotli` command (`brew install brotli` or `apt install brotli`).
-python3 tools/check_wasm_size.py
-```
-
-See [`crates/upyr-wasm/README.md`](crates/upyr-wasm/README.md) for the current
-`convertText`/`UpyrSession` contract and browser-host safety requirements.
-
-Tagged releases produce installable artifacts:
-
-- macOS: a universal Apple Silicon/Intel `Upyr.app` in DMG and ZIP form
-- Windows: a per-user Inno Setup installer and a portable ZIP
-- Linux/X11: a DEB package and a portable tarball
-
-Build a local universal macOS package with:
+To build a local universal macOS bundle:
 
 ```sh
 packaging/macos/generate-icon.sh
@@ -82,11 +59,62 @@ packaging/macos/build-universal.sh
 packaging/macos/package.sh
 ```
 
-The resulting `dist/Upyr.app`, ZIP, and DMG are ad-hoc signed for local testing. Move `Upyr.app` to `/Applications` before enabling launch at login. Official tag builds fail closed unless a Developer ID Application identity and complete Apple notarization credentials are configured; they sign and notarize the app before the final ZIP/DMG are created, then sign, notarize, staple, and assess the DMG. Windows release CI signs both executables and the installer when its certificate secrets are present; otherwise the Windows artifacts are explicitly unsigned. See [`.github/workflows/release.yml`](.github/workflows/release.yml) for the required secret names.
+Local packages are ad-hoc signed for development. Public release artifacts use the stricter release signing pipeline.
+
+## How correction works
+
+Upyr does not translate words. It reconstructs the characters produced by the same physical keys on the other layout, then decides whether the reconstructed text is more plausible.
+
+1. The native input hook records physical key positions for the current short input boundary.
+2. The installed EN/UK layouts provide the positional map; a deterministic built-in map is the fallback.
+3. Upyr creates source and opposite-layout candidates while preserving case and punctuation.
+4. Exact dictionaries, technical-token guards, exceptions, and a compact language model score the pair.
+5. Only a candidate that clears the selected confidence policy is applied. Upyr replaces the text, switches the OS input source when configured, and, by default, attempts to restore the clipboard.
+
+The embedded model is a **signed character n-gram index**, not a general language model. It contains 173,964 packed 2–5-character records in about 2.8 MiB. Each record stores a character-sequence key and one signed confidence byte: negative for English, positive for Ukrainian. Evidence from the typed candidate is accumulated locally and looked up with binary search.
+
+The index is generated from pinned, checksum-verified English and Ukrainian Leipzig news corpora of equal size. Training tokens are alphabet-filtered and split into character n-grams; corpus sentences and word-frequency tables are not embedded in the app. The generator is reproducible:
+
+```sh
+python3 tools/generate_ngram_model.py
+```
+
+Model and policy behavior is measured against the frozen [signed N-gram v1 evaluation](docs/benchmarks/signed-ngram-v1.md), covering both directions, native text, names, punctuation, technical identifiers, contextual boundaries, and reported physical-key edge cases.
+
+## Privacy and security
+
+Upyr is designed to work without an account, server, or runtime network connection.
+
+- **No telemetry or analytics.** The desktop and WASM runtime paths have no HTTP client, updater, crash reporter, advertising SDK, or analytics integration.
+- **No remote inference.** Layout mapping, n-gram scoring, dictionaries, and settings stay on the device.
+- **No typing history.** Automatic mode keeps only a bounded in-memory prefix for the active input boundary. It does not write typed text to logs or disk; resets discard the prefix.
+- **Private configuration writes.** On macOS and Linux, Upyr replaces configuration atomically and enforces owner-only `0600` file permissions; Windows uses the per-user application-data ACL.
+- **Opt-in observation.** Automatic correction, modifier gestures, sounds, and the language indicator are disabled by default.
+- **Clipboard protection.** By default, Upyr snapshots supported clipboard formats and attempts to restore them. Restoration can be disabled, and an unsupported format or platform failure can prevent a complete restore. On macOS it uses the native pasteboard change counter and concealed-data hint instead of a text sentinel.
+- **Permission restraint.** macOS Accessibility is requested only when required, an existing grant is accepted silently, and a missing grant is prompted at most once per process.
+- **Inspectable artifacts.** The implementation is MIT-licensed, release builds are produced by GitHub Actions, and the release pipeline smoke-tests packaged conversion.
+
+The corpus generator is the one intentional network-capable development tool: when explicitly run, it downloads pinned public archives and verifies SHA-256 before processing. It is not called by the desktop app or WASM runtime.
+
+Security CI adds RustSec dependency auditing, CodeQL analysis, pull-request dependency review, and scheduled scans. These controls reduce risk; they are not a claim that any non-trivial program is vulnerability-free. Please follow [`SECURITY.md`](SECURITY.md) to report a suspected vulnerability instead of opening a public issue.
+
+Run the local verification suite with:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --all-targets --locked
+python3 tools/check_privacy.py
+python3 tools/check_version_sync.py
+python3 tools/check_codebase_graph.py
+cargo audit
+```
+
+For an independent non-tracking review, inspect the normal dependency graph with `cargo tree --workspace --edges normal --locked` and search `src/` plus `crates/` for network clients, telemetry endpoints, or analytics SDK initialization. The [Security workflow](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml) records the automated checks for each revision.
 
 ## Configuration
 
-Create the default config and print its location:
+Create or inspect the configuration with:
 
 ```sh
 upyr init
@@ -96,115 +124,55 @@ upyr autostart enable
 upyr settings
 ```
 
-Default configuration:
+The settings app exposes General, Automatic, Shortcuts, Feedback, and Advanced tabs. Automatic sensitivity can be conservative, balanced, or aggressive; deliberate strings can be added to `auto_correct_exceptions`. Use `UPYR_CONFIG` to select a different config file.
 
-```toml
-config_version = 5
-hotkey = "CmdOrCtrl+Alt+Space"
-last_word_hotkey = "CmdOrCtrl+Alt+Backspace"
-direction = "smart"
-copy_delay_ms = 90
-paste_delay_ms = 40
-switch_layout = true
-show_layout_indicator = false
-layout_indicator_duration_ms = 900
-auto_correct = false
-auto_correct_sensitivity = "conservative"
-auto_correct_min_word_length = 4
-auto_correct_delay_ms = 35
-auto_correct_exceptions = []
-modifier_gesture = "disabled"
-modifier_gesture_action = "previous-word"
-modifier_gesture_timeout_ms = 500
-restore_clipboard = true
-restore_delay_ms = 250
+The versioned TOML schema currently uses `config_version = 5`. Older supported schemas migrate in memory; configurations from a newer unsupported schema are rejected rather than guessed. See the generated default file after `upyr init` for every option and its current value.
 
-[sounds]
-enabled = false
-volume_percent = 65
-auto_correct = true
-manual_conversion = true
-layout_switch = true
-pause = true
-resume = true
-error = true
+## Platform status
+
+| Platform | Status | Notes |
+| --- | --- | --- |
+| macOS 11+ | Primary public-preview target | Native AppKit settings and feedback, universal Apple Silicon/Intel package, native input-source and rich pasteboard integration |
+| Windows | Preview | Tray app, installer and portable ZIP, foreground-layout mapping, broad clipboard snapshot/restore support; the settings screen-reader bridge is temporarily unavailable |
+| Linux/X11 | Preview | DEB and tar package, XKB layout mapping and GTK tray/feedback; the settings screen-reader bridge is temporarily unavailable, and native Wayland global input awaits a portal-backed design |
+| WebAssembly | Engine preview | DOM-independent `upyr-core` binding with generated TypeScript contracts; browser adapter and npm delivery are planned |
+
+## Architecture
+
+```text
+upyr-core          platform-neutral mapping, tracking, n-gram policy
+upyr-wasm          DOM-independent WebAssembly API
+upyr               CLI and native background application
+├── input hooks    physical key events and permission lifecycle
+├── automation     guarded selection, replacement, clipboard snapshot/restore
+├── system layout  installed EN/UK mapping and source switching
+└── settings       AppKit on macOS; cross-platform UI elsewhere
 ```
 
-Set `UPYR_CONFIG` to use a different config path. Valid directions are `smart`, `english-to-ukrainian`, and `ukrainian-to-english`. Hotkey modifier names include `CmdOrCtrl`, `Cmd`, `Ctrl`, `Alt`, and `Shift`.
+The shared core has no operating-system or network dependency. Desktop adapters own permissions, input events, clipboard access, layout switching, feedback, and autostart. The WASM host contract is documented in [`crates/upyr-wasm/README.md`](crates/upyr-wasm/README.md).
 
-The optional modifier-only trigger can be `double-control`, `double-shift`, or `double-control-shift`; its action can be `previous-word` or `selection`. It is deliberately `disabled` by default, which means Upyr does not poll global keyboard state. When enabled, Upyr immediately reduces each sample to modifier flags plus an “other key pressed” bit; it does not retain or log key identities. Any ordinary key or unrelated modifier cancels the gesture. Enabling it requires Accessibility permission on macOS and an active X11 display on Linux.
+## Versioning and releases
 
-Automatic correction is also deliberately disabled by default. Its sensitivity can be `conservative`, `balanced`, or `aggressive`. Upyr combines exact dictionary matches with a compact, frequency-weighted character 2–5-gram index generated from comparable 1,000,000-sentence English and Ukrainian news corpora. Training tokens are filtered by alphabet, split into character n-grams, and immediately tagged with an EN or UK confidence; the application embeds no corpus word-frequency table or sentences, only packed n-gram evidence (which can naturally include complete short words). Pairwise policy keeps the source when both interpretations are plausible and applies physical-punctuation assistance only in the direction where those positions become Ukrainian letters. Upyr keeps only a short, in-memory prefix from the current input boundary and converts that prefix when the target language becomes substantially more likely; navigation, layout changes, known or confidently recognized source-language segments, technical punctuation, and the 256-character limit reset the context. Deliberate Latin identifiers such as `FAANG`, `SaaS`, `NASDAQ`, `iPhone`, and `ServiceNow`, plus recognizable URL/path tokens, also close the current source-language segment so a later foreign-layout word cannot sweep them into a correction. Automatic mode uses OS key-down hooks instead of periodic keyboard snapshots, so brief presses during fast typing are not lost. Add project names, abbreviations, or other intentional strings to `auto_correct_exceptions`. The settings window validates and writes this configuration, and a running Upyr process reloads it automatically.
+Upyr uses SemVer for app and crate versions. While the project is in `0.x`, minor releases may contain compatibility changes; patch releases are intended for backwards-compatible fixes. Git tags use `vMAJOR.MINOR.PATCH` and must exactly match the workspace package version before release packaging starts.
 
-The committed language index can be reproduced with `python3 tools/generate_ngram_model.py`. The generator downloads pinned Leipzig Corpora Collection archives, verifies their SHA-256 checksums, filters mixed-script and malformed tokens, and writes the packed `crates/upyr-core/assets/models/language.ngm` artifact. The generated index currently contains 173,964 language-tagged n-grams in roughly 2.8 MiB; full training archives stay outside the repository.
+Explicitly unsigned development previews use a non-`v*` tag such as `macos-preview-0.1.0`; they are prereleases, do not enter the official tag publisher, and must state their unnotarized status prominently.
 
-Model and policy changes are measured against the frozen [signed N-gram v1 evaluation](docs/benchmarks/signed-ngram-v1.md). Its 191 materialized cases cover both directions, native text, technical identifiers, names, punctuation, short-word abstention, contextual phrases, and reported physical-key mappings without regenerating expected snapshots through production conversion code. An optional independently generated Wikipedia holdout adds 20,000 clean boundaries for false-correction screening.
+The app version, configuration schema, and n-gram model version are separate on purpose. A model or policy update does not imply a configuration migration, and a compatible app patch does not silently rename the model contract. Release notes identify platform support, signing status, migration impact, and model changes.
 
-Settings are organized into General, Automatic, Shortcuts, Feedback, and Advanced tabs. Parameter search jumps directly to the matching tab. Shortcut fields are press-to-record controls: they capture physical keys, require a modifier, render readable platform symbols, reject duplicate assignments, and offer an individual reset. macOS uses AppKit controls throughout the settings companion; Windows and Linux keep the same tab/search model in the cross-platform frontend.
+User-visible changes and known limitations are maintained in [`CHANGELOG.md`](CHANGELOG.md).
 
-Optional feedback is disabled by default. `show_layout_indicator` briefly displays the target language flag next to the pointer for `layout_indicator_duration_ms`. The `[sounds]` section provides a master switch, 0–100% volume, and separate cues for automatic correction, manual conversion, layout switching, pause, resume, and errors. Each cue is a bundled 220–320 ms local sound; Upyr makes no network request during playback. Settings can preview every cue even while sound feedback is disabled. The overlay uses AppKit on macOS, a non-activating Win32 window on Windows, and a GTK popup on Linux/X11.
+Tagged releases run formatting, Clippy, tests, security gates, package smoke tests, and platform packaging. macOS tags require a Developer ID identity and complete notarization credentials; the workflow refuses to publish a partially signed official macOS release.
 
-When testing locally on macOS, the packaging script embeds stable designated requirements in its ad-hoc signatures. Accessibility approval therefore survives normal Upyr rebuilds even without a Developer ID certificate. The background app also ignores global shortcuts while Settings is open, allowing an existing shortcut to be recorded without running its action.
+## About and inspiration
 
-## Platform notes
+The name **Upyr** comes from the Ukrainian *упир*: a shape-changing figure in folklore—an apt name for software that flips mistyped text into its intended form.
 
-### macOS
-
-Grant Accessibility access to the terminal running Upyr, or to the packaged **Upyr** app, in **System Settings → Privacy & Security → Accessibility**. macOS needs this permission to observe opt-in word boundaries and to send Copy and Paste. Upyr checks the current trust state before initializing input monitors: an existing grant is accepted silently, while a missing permission is requested at most once per process. When access changes from denied to granted, Upyr detects the transition and offers to restart itself once. You can also choose **Save settings** so the background monitor retries initialization without a restart.
-
-After a successful conversion, Upyr selects the matching installed English or Ukrainian input source. Set `switch_layout = false` to leave the active input source unchanged. Upyr derives the character mapping—including Shift and Option layers—from the installed `ABC`/`U.S.` and Ukrainian input sources, then falls back to its built-in map if native translation is unavailable. The standard macOS `Ukrainian` source is preferred over `Ukrainian-PC`, preserving its physical punctuation row (`[];'\\,./` → `хїжєʼбю.`); automatic mode treats those positions as language evidence instead of rejecting them as technical punctuation. Temporary conversion text is tagged with the standard concealed pasteboard hint, and Copy detection uses the native pasteboard change counter instead of placing a sentinel string on the clipboard. When restoration is enabled, Upyr snapshots and restores every readable macOS pasteboard item and format rather than reducing rich clipboard content to plain text.
-
-### Windows
-
-No elevated privileges are expected. Some elevated applications reject simulated input from a non-elevated Upyr process.
-
-Upyr reads the keyboard-layout handle of the foreground window, generates the positional character map from the installed English/Ukrainian layouts, posts the target layout after conversion, and marks its temporary text to stay out of Windows Clipboard History and Cloud Clipboard. It falls back to the built-in map if Windows cannot expose a usable pair. Clipboard restoration preserves complete HGLOBAL-backed format sets—including Unicode text, HTML/RTF, file lists, DIB images, and registered formats—with contention retries and a 64 MiB safety limit. If the clipboard includes handle-only GDI formats, Upyr uses the safe text/image/file fallback rather than silently restoring a partial set. The target layouts must already be installed in Windows Settings.
-
-### Linux
-
-The global-hotkey backend currently supports X11. Wayland intentionally restricts global input; run under an X11 session/XWayland, or use the CLI converter until a desktop-portal hotkey backend is added. Clipboard timing can be increased for slower desktop environments.
-
-Under X11, Upyr reads and locks the active XKB group after discovering configured groups with `setxkbmap -query`. It derives the positional map from those XKB groups and falls back to the built-in map if X11 cannot expose a usable pair. Install `setxkbmap` (commonly provided by `x11-xkb-utils`) and configure both `us` and `ua` groups. Linux still uses the sentinel fallback for guarded Copy detection, but both the sentinel and converted text carry the desktop clipboard-history exclusion MIME hint. Restoration prioritizes file lists and HTML with its plain-text alternative before falling back to text or images.
-
-## What is included
-
-- Reversible US-QWERTY ↔ Ukrainian positional mapping, including Ukrainian `і`, `ї`, `є`, and `ґ`
-- Smart direction detection and explicit direction overrides
-- Cross-platform global hotkey and layout-independent physical Copy/Paste shortcuts
-- A second shortcut that fixes the previous word without manually selecting it
-- Opt-in automatic correction after Space with conservative, balanced, and aggressive confidence levels
-- Searchable, tabbed settings with native AppKit controls on macOS and press-to-record physical hotkey selectors with conflict detection
-- Optional language-flag overlays plus distinct, volume-controlled sounds for correction, conversion, layout, pause/resume, and error events
-- Clipboard restoration for native rich formats, HTML, file lists, text, and images, plus guarded Copy detection that prevents accidental conversion when nothing is selected
-- Full readable pasteboard-format restoration on macOS
-- Native macOS, Windows, and Linux/X11 input-source detection and switching after conversion
-- OS-derived physical-key mappings on macOS, Windows, and Linux/X11 with a deterministic built-in fallback
-- Cross-platform single-instance enforcement so duplicate listeners cannot compete for hotkeys
-- User-level launch-at-login controls through the tray or `upyr autostart`
-- An opt-in double-Control, double-Shift, or double-Control+Shift trigger with no polling while disabled
-- Versioned configuration with in-memory migration through schema version 5
-- Configurable timing for applications with slow clipboard handling
-- Native menu-bar/system-tray controls for conversion, pause, configuration, and quit
-- A shared `upyr-core` decision engine plus a tested, DOM-independent WASM binding with generated TypeScript contracts
-- Unit, deterministic property-style, and CLI integration tests plus CI builds for macOS, Windows, and Linux
-- Universal macOS DMG/ZIP, Windows installer/ZIP, and Linux DEB/tar release packaging
-
-## Roadmap
-
-- [TypeScript DOM facade, playground, and npm integration](docs/architecture/wasm-web-plan.md) on the implemented headless WASM binding, developed in parallel with the calibrated N-gram v2 scorer
-- Arbitrary Linux MIME-set restoration and Windows GDI-handle duplication beyond the current safe fallbacks
-- Production code-signing/notarization credentials for official releases
-- Per-application exclusions and editable custom dictionaries
-- Additional keyboard layouts through data files
-
-## Inspiration
-
-Upyr is inspired by Punto Switcher and [TolikPylypchuk/KeyboardSwitch](https://github.com/TolikPylypchuk/KeyboardSwitch). KeyboardSwitch demonstrated several particularly useful product ideas: explicit selected-text correction, following a correction with the matching OS input source, generated physical-key mappings, configurable modifier gestures, and careful startup/config migration behavior.
-
-Upyr is an independent Rust implementation, not a port. It keeps one small background process; the Rust settings companion exists only while its window is open. It avoids an always-running settings service and arbitrary cycling through every installed layout. The initial product stays focused on private English ↔ Ukrainian correction, with ordinary-key monitoring and automatic changes remaining opt-in.
+Upyr is an independent Rust implementation inspired by Punto Switcher and [TolikPylypchuk/KeyboardSwitch](https://github.com/TolikPylypchuk/KeyboardSwitch). KeyboardSwitch helped validate selected-text correction, following conversion with the matching OS input source, generated physical-key mappings, configurable modifier gestures, and careful startup/config migration. Upyr is not a port and shares no KeyboardSwitch code.
 
 The native macOS input-source binding was adapted from the MIT-licensed [issw](https://github.com/0xAndoroid/issw); its notice is retained in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
+Contributions and reproducible bug reports are welcome. Start with the [issue forms](https://github.com/dmytro-yemelianov/upyr/issues/new/choose) and include the OS version, Upyr version, input sources, expected text, typed physical sequence, and actual result. By participating, you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
-MIT
+[MIT](LICENSE)
