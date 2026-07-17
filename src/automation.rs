@@ -216,7 +216,11 @@ pub fn convert_previous_word_if_matches(
     )?;
     select_previous_word(&mut enigo)?;
     thread::sleep(Duration::from_millis(30));
-    convert_selection_if_matches(config, expected_source, None)
+    let outcome = convert_selection_if_matches(config, expected_source, None);
+    if matches!(outcome, Ok(SelectionOutcome::NoSelection)) {
+        undo_previous_word_selection(&mut enigo)?;
+    }
+    outcome
 }
 
 /// Selects an exact in-memory prefix immediately before the caret and converts
@@ -233,9 +237,15 @@ pub fn convert_previous_input_if_matches(
     let mut enigo = Enigo::new(&Settings::default()).context(
         "could not connect to desktop input; check Accessibility permissions or DISPLAY",
     )?;
-    select_previous_characters(&mut enigo, expected_source.chars().count())?;
+    let characters = expected_source.chars().count();
+    select_previous_characters(&mut enigo, characters)?;
     thread::sleep(Duration::from_millis(30));
-    convert_selection_if_matches(config, Some(expected_source), Some(on_text_committed))
+    let outcome =
+        convert_selection_if_matches(config, Some(expected_source), Some(on_text_committed));
+    if matches!(outcome, Ok(SelectionOutcome::NoSelection)) {
+        undo_previous_characters_selection(&mut enigo, characters)?;
+    }
+    outcome
 }
 
 fn select_previous_word(enigo: &mut Enigo) -> Result<()> {
@@ -262,6 +272,27 @@ fn select_previous_word(enigo: &mut Enigo) -> Result<()> {
     Ok(())
 }
 
+/// Best-effort caret recovery for apps that drop the Shift modifier from the
+/// word-selection chord instead of extending a selection with it (observed in
+/// terminal emulators, where the chord collapses to plain backward-word
+/// cursor movement). Without this, a failed selection still leaves the caret
+/// one word to the left with nothing selected or converted.
+fn undo_previous_word_selection(enigo: &mut Enigo) -> Result<()> {
+    #[cfg(target_os = "macos")]
+    let word_modifier = Key::Alt;
+    #[cfg(not(target_os = "macos"))]
+    let word_modifier = Key::Control;
+
+    enigo
+        .key(word_modifier, KeyDirection::Press)
+        .context("failed to press word-selection modifier")?;
+    let move_result = enigo.key(Key::RightArrow, KeyDirection::Click);
+    let modifier_release = enigo.key(word_modifier, KeyDirection::Release);
+
+    move_result.context("failed to restore the caret after a failed word selection")?;
+    modifier_release.context("failed to release word-selection modifier")
+}
+
 fn select_previous_characters(enigo: &mut Enigo, characters: usize) -> Result<()> {
     enigo
         .key(Key::Shift, KeyDirection::Press)
@@ -275,6 +306,18 @@ fn select_previous_characters(enigo: &mut Enigo, characters: usize) -> Result<()
     enigo
         .key(Key::Shift, KeyDirection::Release)
         .context("failed to release Shift after prefix selection")
+}
+
+/// Best-effort caret recovery mirroring [`undo_previous_word_selection`], for
+/// the character-count prefix selection used by contextual automatic
+/// correction.
+fn undo_previous_characters_selection(enigo: &mut Enigo, characters: usize) -> Result<()> {
+    for _ in 0..characters {
+        enigo
+            .key(Key::RightArrow, KeyDirection::Click)
+            .context("failed to restore the caret after a failed prefix selection")?;
+    }
+    Ok(())
 }
 
 fn snapshot(clipboard: &mut Clipboard) -> SavedClipboard {
