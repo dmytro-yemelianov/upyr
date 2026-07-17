@@ -4,7 +4,7 @@ use tray_icon::{
     menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem},
 };
 
-use crate::{autostart, config::Config};
+use crate::{autostart, config::Config, settings::pretty_hotkey};
 
 pub const TRAY_FLIP_FRAME_COUNT: u8 = 17;
 pub const TRAY_FLIP_FRAME_DELAY_MS: u64 = 32;
@@ -143,11 +143,15 @@ fn autostart_presentation(state: autostart::AutostartState) -> (&'static str, bo
     }
 }
 
+fn display_hotkey(value: &str) -> String {
+    pretty_hotkey(value).unwrap_or_else(|| value.to_owned())
+}
+
 fn status_text(config: &Config, paused: bool) -> String {
     if paused {
         "Status: paused".to_owned()
     } else {
-        format!("Shortcut: {}", config.hotkey)
+        format!("Shortcut: {}", display_hotkey(&config.hotkey))
     }
 }
 
@@ -157,7 +161,8 @@ fn tooltip(config: &Config, paused: bool) -> String {
     } else {
         format!(
             "Upyr — selection: {}; previous word: {}",
-            config.hotkey, config.last_word_hotkey
+            display_hotkey(&config.hotkey),
+            display_hotkey(&config.last_word_hotkey)
         )
     }
 }
@@ -360,8 +365,17 @@ mod tests {
     fn status_reflects_pause_state() {
         let config = Config::default();
 
-        assert!(status_text(&config, false).contains(&config.hotkey));
+        assert!(status_text(&config, false).contains(&display_hotkey(&config.hotkey)));
         assert_eq!(status_text(&config, true), "Status: paused");
+    }
+
+    #[test]
+    fn status_and_tooltip_use_native_shortcut_notation_not_the_raw_config_string() {
+        let config = Config::default();
+
+        assert!(!status_text(&config, false).contains(&config.hotkey));
+        assert!(!tooltip(&config, false).contains(&config.hotkey));
+        assert!(!tooltip(&config, false).contains(&config.last_word_hotkey));
     }
 
     #[test]

@@ -5,7 +5,7 @@ use tracing::debug;
 use upyr_audio::KeyCue;
 
 use crate::{
-    config::{Config, SoundEvent, SoundSettings},
+    config::{Config, IndicatorStyle, SoundEvent, SoundSettings},
     system_layout::SystemLayout,
 };
 
@@ -76,7 +76,7 @@ fn sound_pack_needs_prewarm(settings: &SoundSettings) -> bool {
 /// Shows the enabled visual feedback for a confirmed OS input-source change.
 /// Sound dispatch stays separate so each action can produce at most one cue.
 pub fn layout_switched(layout: SystemLayout, config: &Config) -> bool {
-    config.show_layout_indicator && platform::show_indicator(layout)
+    config.show_layout_indicator && platform::show_indicator(layout, config.indicator_style)
 }
 
 pub fn hide_layout_indicator() {
@@ -84,10 +84,14 @@ pub fn hide_layout_indicator() {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux", test))]
-fn indicator_text(layout: SystemLayout) -> &'static str {
-    match layout {
-        SystemLayout::English => "EN  🇬🇧",
-        SystemLayout::Ukrainian => "UK  🇺🇦",
+fn indicator_text(layout: SystemLayout, style: IndicatorStyle) -> &'static str {
+    match (layout, style) {
+        (SystemLayout::English, IndicatorStyle::Letters) => "EN",
+        (SystemLayout::English, IndicatorStyle::Flag) => "🇬🇧",
+        (SystemLayout::English, IndicatorStyle::Both) => "EN  🇬🇧",
+        (SystemLayout::Ukrainian, IndicatorStyle::Letters) => "UK",
+        (SystemLayout::Ukrainian, IndicatorStyle::Flag) => "🇺🇦",
+        (SystemLayout::Ukrainian, IndicatorStyle::Both) => "UK  🇺🇦",
     }
 }
 
@@ -103,7 +107,7 @@ mod platform {
     };
     use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 
-    use super::{SystemLayout, indicator_text};
+    use super::{IndicatorStyle, SystemLayout, indicator_text};
 
     struct Indicator {
         panel: Retained<NSPanel>,
@@ -114,7 +118,7 @@ mod platform {
         static INDICATOR: RefCell<Option<Indicator>> = const { RefCell::new(None) };
     }
 
-    pub fn show_indicator(layout: SystemLayout) -> bool {
+    pub fn show_indicator(layout: SystemLayout, style: IndicatorStyle) -> bool {
         let Some(main_thread) = MainThreadMarker::new() else {
             return false;
         };
@@ -122,7 +126,7 @@ mod platform {
             let indicator = indicator.get_or_insert_with(|| make_indicator(main_thread));
             indicator
                 .label
-                .setStringValue(&NSString::from_str(indicator_text(layout)));
+                .setStringValue(&NSString::from_str(indicator_text(layout, style)));
             let pointer = NSEvent::mouseLocation();
             indicator
                 .panel
@@ -197,14 +201,14 @@ mod platform {
         },
     };
 
-    use super::{SystemLayout, indicator_text};
+    use super::{IndicatorStyle, SystemLayout, indicator_text};
 
     thread_local! {
         static INDICATOR: Cell<HWND> = const { Cell::new(ptr::null_mut()) };
     }
 
-    pub fn show_indicator(layout: SystemLayout) -> bool {
-        let text = wide(indicator_text(layout));
+    pub fn show_indicator(layout: SystemLayout, style: IndicatorStyle) -> bool {
+        let text = wide(indicator_text(layout, style));
         let class = wide("STATIC");
         let mut pointer = POINT { x: 0, y: 0 };
         unsafe {
@@ -281,7 +285,7 @@ mod platform {
     use device_query::{DeviceQuery, DeviceState};
     use gtk::prelude::*;
 
-    use super::{SystemLayout, indicator_text};
+    use super::{IndicatorStyle, SystemLayout, indicator_text};
 
     struct Indicator {
         window: gtk::Window,
@@ -292,7 +296,7 @@ mod platform {
         static INDICATOR: RefCell<Option<Indicator>> = const { RefCell::new(None) };
     }
 
-    pub fn show_indicator(layout: SystemLayout) -> bool {
+    pub fn show_indicator(layout: SystemLayout, style: IndicatorStyle) -> bool {
         if !gtk::is_initialized() {
             return false;
         }
@@ -316,7 +320,7 @@ mod platform {
             });
             indicator.label.set_markup(&format!(
                 "<b><span size=\"large\">{}</span></b>",
-                indicator_text(layout)
+                indicator_text(layout, style)
             ));
             let pointer = DeviceState::new().get_mouse().coords;
             indicator.window.move_(pointer.0 + 16, pointer.1 + 18);
@@ -336,9 +340,9 @@ mod platform {
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 mod platform {
-    use super::SystemLayout;
+    use super::{IndicatorStyle, SystemLayout};
 
-    pub fn show_indicator(_layout: SystemLayout) -> bool {
+    pub fn show_indicator(_layout: SystemLayout, _style: IndicatorStyle) -> bool {
         false
     }
     pub fn hide_indicator() {}
@@ -349,9 +353,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn indicator_uses_short_language_labels_and_flags() {
-        assert_eq!(indicator_text(SystemLayout::English), "EN  🇬🇧");
-        assert_eq!(indicator_text(SystemLayout::Ukrainian), "UK  🇺🇦");
+    fn indicator_style_selects_letters_flag_or_both() {
+        assert_eq!(
+            indicator_text(SystemLayout::English, IndicatorStyle::Letters),
+            "EN"
+        );
+        assert_eq!(
+            indicator_text(SystemLayout::English, IndicatorStyle::Flag),
+            "🇬🇧"
+        );
+        assert_eq!(
+            indicator_text(SystemLayout::English, IndicatorStyle::Both),
+            "EN  🇬🇧"
+        );
+        assert_eq!(
+            indicator_text(SystemLayout::Ukrainian, IndicatorStyle::Letters),
+            "UK"
+        );
+        assert_eq!(
+            indicator_text(SystemLayout::Ukrainian, IndicatorStyle::Flag),
+            "🇺🇦"
+        );
+        assert_eq!(
+            indicator_text(SystemLayout::Ukrainian, IndicatorStyle::Both),
+            "UK  🇺🇦"
+        );
     }
 
     #[test]

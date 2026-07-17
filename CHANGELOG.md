@@ -24,25 +24,48 @@ Sound-pack and keyboard-feedback preview.
 - Dependency-free `upyr-audio` synthesis with deterministic pfxr-style cue
   variations and locally generated, non-sampled formant reactions for
   non-character keys in the Anime pack.
+- Anime Reactions' six application-event cues (auto-correct, manual
+  conversion, layout switch, pause, resume, error), rendered offline with the
+  ElevenLabs Sound Effects API by the new `tools/generate_event_sound_pack.py`
+  and bundled the same way as the Original pack's event cues.
 - Opt-in physical-key feedback for characters, Space, Enter, Escape, Tab,
   modifiers, Caps Lock, Delete, Backspace, navigation, and function keys.
+- A dedicated Exceptions tab with an editable table for words that automatic
+  correction must always leave alone, replacing the single comma-separated
+  text field on the Automatic tab in both settings UIs.
+- An indicator style setting (letters, flag, or both) for the floating
+  language indicator, in both settings UIs.
 
 ### Changed
 
 - Configuration schema 6 adds `sounds.pack` and `sounds.key_clicks`; migrations
   preserve the original event theme and keep keyboard monitoring disabled.
+- Configuration schema 7 adds `indicator_style`; migrations keep today's
+  combined letters-and-flag presentation.
 - Keyboard cues branch from raw physical events before autocorrect filtering,
   are cached by pack/cue/variant, and are rate-limited for comfortable typing.
-- Every pack now synthesizes both event and key cues locally. Pre-rendered raw
-  audio assets were removed from the source tree and distributable packages.
+- Every pack now synthesizes both key cues and most event cues locally.
+  Pre-rendered raw audio assets were removed from the source tree and
+  distributable packages, except the Anime pack's six application-event cues
+  (see Security).
+
+### Fixed
+
+- Word and prefix conversion no longer strands the caret when the focused app
+  (notably terminal emulators) drops the Shift modifier from the selection
+  chord instead of extending a selection with it: Upyr now detects the
+  resulting empty copy and moves the caret back to its original position.
 
 ### Security
 
 - Audio synthesis is local-only and receives physical key categories rather
-  than rendered text. It uses no recordings, microphone, network service,
-  telemetry, or new third-party runtime dependency.
-- Privacy CI and automated review reject pre-rendered audio assets in
-  distributable source paths.
+  than rendered text. It uses no microphone, network service, telemetry, or
+  new third-party runtime dependency. Anime Reactions' six event cues are the
+  one documented exception: like the Original pack's cues used to be, they are
+  pre-rendered offline by a manual, developer-run tool and bundled as static
+  assets, never generated or fetched at runtime. Privacy CI and automated
+  review reject pre-rendered audio assets everywhere else in distributable
+  source paths.
 - Upyr drops keyboard cues while its own synthetic replacement input is active,
   preventing copy, paste, and correction keystrokes from producing feedback.
 

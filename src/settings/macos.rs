@@ -16,8 +16,8 @@ use objc2::{
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSBackingStoreType, NSButton, NSColor,
     NSControlStateValueOff, NSControlStateValueOn, NSEvent, NSEventModifierFlags, NSFont,
-    NSPopUpButton, NSSearchField, NSSlider, NSTabView, NSTabViewItem, NSTextField, NSView,
-    NSWindow, NSWindowDelegate, NSWindowStyleMask,
+    NSPopUpButton, NSScrollView, NSSearchField, NSSlider, NSTabView, NSTabViewItem, NSTextField,
+    NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_foundation::{
     NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
@@ -32,7 +32,8 @@ use super::{
 use crate::{
     autostart,
     config::{
-        AutoCorrectSensitivity, Config, GestureAction, ModifierGesture, SoundEvent, SoundPack,
+        AutoCorrectSensitivity, Config, GestureAction, IndicatorStyle, ModifierGesture, SoundEvent,
+        SoundPack,
     },
     layout::Direction,
 };
@@ -41,6 +42,14 @@ const WINDOW_WIDTH: f64 = 720.0;
 const WINDOW_HEIGHT: f64 = 680.0;
 const PAGE_WIDTH: f64 = 672.0;
 const PAGE_HEIGHT: f64 = 456.0;
+
+const EXCEPTION_LIST_WIDTH: f64 = 600.0;
+const EXCEPTION_LIST_VISIBLE_HEIGHT: f64 = 250.0;
+const EXCEPTION_ROW_HEIGHT: f64 = 26.0;
+const EXCEPTION_ROW_STEP: f64 = 32.0;
+const EXCEPTION_ROW_TOP_PADDING: f64 = 8.0;
+const EXCEPTION_FIELD_WIDTH: f64 = 470.0;
+const EXCEPTION_REMOVE_WIDTH: f64 = 90.0;
 
 struct ControllerIvars {
     config: RefCell<Config>,
@@ -64,7 +73,9 @@ struct Controls {
     sensitivity: Retained<NSPopUpButton>,
     minimum_word_length: Retained<NSTextField>,
     auto_delay: Retained<NSTextField>,
-    exceptions: Retained<NSTextField>,
+    exceptions_container: Retained<NSView>,
+    exceptions_rows: RefCell<Vec<ExceptionRow>>,
+    exceptions_new_word: Retained<NSTextField>,
     selection_shortcut: Retained<ShortcutRecorder>,
     previous_word_shortcut: Retained<ShortcutRecorder>,
     modifier_gesture: Retained<NSPopUpButton>,
@@ -72,6 +83,7 @@ struct Controls {
     gesture_timeout: Retained<NSTextField>,
     show_indicator: Retained<NSButton>,
     indicator_duration: Retained<NSTextField>,
+    indicator_style: Retained<NSPopUpButton>,
     sounds_enabled: Retained<NSButton>,
     sound_pack: Retained<NSPopUpButton>,
     key_clicks: Retained<NSButton>,
@@ -81,6 +93,17 @@ struct Controls {
     copy_delay: Retained<NSTextField>,
     paste_delay: Retained<NSTextField>,
     restore_delay: Retained<NSTextField>,
+}
+
+struct ExceptionRow {
+    field: Retained<NSTextField>,
+    remove: Retained<NSButton>,
+}
+
+struct ExceptionsControls {
+    page: Retained<NSView>,
+    container: Retained<NSView>,
+    new_word: Retained<NSTextField>,
 }
 
 struct SoundEventControls {
@@ -109,6 +132,7 @@ struct FeedbackControls {
     page: Retained<NSView>,
     show_indicator: Retained<NSButton>,
     indicator_duration: Retained<NSTextField>,
+    indicator_style: Retained<NSPopUpButton>,
     sounds_enabled: Retained<NSButton>,
     sound_pack: Retained<NSPopUpButton>,
     key_clicks: Retained<NSButton>,
@@ -279,6 +303,7 @@ define_class!(
                     3_000,
                 )
                 .unwrap_or(900),
+                indicator_style: self.selected_indicator_style(),
                 ..Config::default()
             };
             if !preview.show_layout_indicator {
@@ -353,6 +378,30 @@ define_class!(
             crate::feedback::hide_layout_indicator();
         }
 
+        #[unsafe(method(addException:))]
+        fn add_exception(&self, _sender: &AnyObject) {
+            let input = self.controls().exceptions_new_word.stringValue().to_string();
+            let mut existing: std::collections::HashSet<String> = self
+                .exception_words()
+                .into_iter()
+                .map(|word| word.to_lowercase())
+                .collect();
+            for word in parse_exceptions(&input) {
+                if existing.insert(word.to_lowercase()) {
+                    self.push_exception_row(&word);
+                }
+            }
+            self.controls()
+                .exceptions_new_word
+                .setStringValue(&NSString::from_str(""));
+        }
+
+        #[unsafe(method(removeException:))]
+        fn remove_exception(&self, sender: &AnyObject) {
+            let tag: isize = unsafe { msg_send![sender, tag] };
+            self.remove_exception_row(tag);
+        }
+
         #[unsafe(method(checkSettingsActivation:))]
         fn check_settings_activation(&self, _sender: Option<&AnyObject>) {
             match self.ivars().activation.drain() {
@@ -411,6 +460,123 @@ impl NativeController {
             1 => SoundPack::Arcade,
             2 => SoundPack::Anime,
             _ => SoundPack::Original,
+        }
+    }
+
+    fn selected_indicator_style(&self) -> IndicatorStyle {
+        match self.controls().indicator_style.indexOfSelectedItem() {
+            1 => IndicatorStyle::Flag,
+            2 => IndicatorStyle::Both,
+            _ => IndicatorStyle::Letters,
+        }
+    }
+
+    /// Reads every exception row's current text, trimming, dropping blanks,
+    /// and dropping case-insensitive duplicates a live edit may have created.
+    fn exception_words(&self) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        self.controls()
+            .exceptions_rows
+            .borrow()
+            .iter()
+            .map(|row| row.field.stringValue().to_string())
+            .map(|word| word.trim().to_owned())
+            .filter(|word| !word.is_empty())
+            .filter(|word| seen.insert(word.to_lowercase()))
+            .collect()
+    }
+
+    /// Replaces every exception row with fresh ones built from `words`, used
+    /// when a config is loaded, reset, or applied to the form.
+    fn rebuild_exception_rows(&self, words: &[String]) {
+        {
+            let mut rows = self.controls().exceptions_rows.borrow_mut();
+            for row in rows.drain(..) {
+                row.field.removeFromSuperview();
+                row.remove.removeFromSuperview();
+            }
+        }
+        for word in words {
+            self.push_exception_row(word);
+        }
+    }
+
+    fn push_exception_row(&self, word: &str) {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let controls = self.controls();
+        let index = controls.exceptions_rows.borrow().len();
+        let field = text_field(
+            word,
+            rect(0.0, 0.0, EXCEPTION_FIELD_WIDTH, EXCEPTION_ROW_HEIGHT),
+            mtm,
+        );
+        let remove = unsafe {
+            NSButton::buttonWithTitle_target_action(
+                &NSString::from_str("Remove"),
+                Some(self),
+                Some(sel!(removeException:)),
+                mtm,
+            )
+        };
+        remove.setFrame(rect(0.0, 0.0, EXCEPTION_REMOVE_WIDTH, EXCEPTION_ROW_HEIGHT));
+        remove.setTag(index as isize);
+        controls.exceptions_container.addSubview(&field);
+        controls.exceptions_container.addSubview(&remove);
+        controls
+            .exceptions_rows
+            .borrow_mut()
+            .push(ExceptionRow { field, remove });
+        self.layout_exception_rows();
+    }
+
+    fn remove_exception_row(&self, tag: isize) {
+        let Ok(index) = usize::try_from(tag) else {
+            return;
+        };
+        let removed = {
+            let mut rows = self.controls().exceptions_rows.borrow_mut();
+            if index >= rows.len() {
+                return;
+            }
+            rows.remove(index)
+        };
+        removed.field.removeFromSuperview();
+        removed.remove.removeFromSuperview();
+        for (new_index, row) in self.controls().exceptions_rows.borrow().iter().enumerate() {
+            row.remove.setTag(new_index as isize);
+        }
+        self.layout_exception_rows();
+    }
+
+    /// Repositions every row top-to-bottom and grows the scrollable container
+    /// to fit them, so the exceptions list is never silently truncated.
+    fn layout_exception_rows(&self) {
+        let controls = self.controls();
+        let rows = controls.exceptions_rows.borrow();
+        let container_height = (EXCEPTION_ROW_TOP_PADDING * 2.0
+            + rows.len() as f64 * EXCEPTION_ROW_STEP)
+            .max(EXCEPTION_LIST_VISIBLE_HEIGHT);
+        controls
+            .exceptions_container
+            .setFrameSize(NSSize::new(EXCEPTION_LIST_WIDTH, container_height));
+        for (index, row) in rows.iter().enumerate() {
+            let top =
+                container_height - EXCEPTION_ROW_TOP_PADDING - index as f64 * EXCEPTION_ROW_STEP;
+            let field_y = top - EXCEPTION_ROW_HEIGHT;
+            row.field.setFrame(rect(
+                8.0,
+                field_y,
+                EXCEPTION_FIELD_WIDTH,
+                EXCEPTION_ROW_HEIGHT,
+            ));
+            row.remove.setFrame(rect(
+                8.0 + EXCEPTION_FIELD_WIDTH + 10.0,
+                field_y,
+                EXCEPTION_REMOVE_WIDTH,
+                EXCEPTION_ROW_HEIGHT,
+            ));
         }
     }
 
@@ -526,9 +692,15 @@ impl NativeController {
             remove_autostart,
         ) = make_general_page(self, mtm);
         add_tab(&tabs, "General", &general, mtm);
-        let (automatic, auto_correct, sensitivity, minimum_word_length, auto_delay, exceptions) =
+        let (automatic, auto_correct, sensitivity, minimum_word_length, auto_delay) =
             make_automatic_page(mtm);
         add_tab(&tabs, "Automatic", &automatic, mtm);
+        let ExceptionsControls {
+            page: exceptions_page,
+            container: exceptions_container,
+            new_word: exceptions_new_word,
+        } = make_exceptions_page(self, mtm);
+        add_tab(&tabs, "Exceptions", &exceptions_page, mtm);
         let (
             shortcuts,
             selection_shortcut,
@@ -542,6 +714,7 @@ impl NativeController {
             page: feedback,
             show_indicator,
             indicator_duration,
+            indicator_style,
             sounds_enabled,
             sound_pack,
             key_clicks,
@@ -599,7 +772,9 @@ impl NativeController {
                 sensitivity,
                 minimum_word_length,
                 auto_delay,
-                exceptions,
+                exceptions_container,
+                exceptions_rows: RefCell::new(Vec::new()),
+                exceptions_new_word,
                 selection_shortcut,
                 previous_word_shortcut,
                 modifier_gesture,
@@ -607,6 +782,7 @@ impl NativeController {
                 gesture_timeout,
                 show_indicator,
                 indicator_duration,
+                indicator_style,
                 sounds_enabled,
                 sound_pack,
                 key_clicks,
@@ -655,8 +831,7 @@ impl NativeController {
             parse_number(&controls.minimum_word_length, "minimum word length", 2, 32)? as usize;
         config.auto_correct_delay_ms =
             parse_number(&controls.auto_delay, "automatic correction delay", 10, 250)?;
-        config.auto_correct_exceptions =
-            parse_exceptions(&controls.exceptions.stringValue().to_string());
+        config.auto_correct_exceptions = self.exception_words();
         config.modifier_gesture = match controls.modifier_gesture.indexOfSelectedItem() {
             1 => ModifierGesture::DoubleControl,
             2 => ModifierGesture::DoubleShift,
@@ -676,6 +851,7 @@ impl NativeController {
             250,
             3_000,
         )?;
+        config.indicator_style = self.selected_indicator_style();
         config.sounds.enabled = is_checked(&controls.sounds_enabled);
         config.sounds.volume_percent = self.sound_volume_percent();
         config.sounds.pack = self.selected_sound_pack();
@@ -717,9 +893,7 @@ impl NativeController {
             config.auto_correct_min_word_length,
         );
         set_text(&controls.auto_delay, config.auto_correct_delay_ms);
-        controls.exceptions.setStringValue(&NSString::from_str(
-            &config.auto_correct_exceptions.join(", "),
-        ));
+        self.rebuild_exception_rows(&config.auto_correct_exceptions);
         controls.selection_shortcut.set_value(&config.hotkey);
         controls
             .previous_word_shortcut
@@ -747,6 +921,13 @@ impl NativeController {
             &controls.indicator_duration,
             config.layout_indicator_duration_ms,
         );
+        controls
+            .indicator_style
+            .selectItemAtIndex(match config.indicator_style {
+                IndicatorStyle::Letters => 0,
+                IndicatorStyle::Flag => 1,
+                IndicatorStyle::Both => 2,
+            });
         set_checked(&controls.sounds_enabled, config.sounds.enabled);
         controls
             .sound_pack
@@ -1065,7 +1246,6 @@ fn make_automatic_page(
     Retained<NSPopUpButton>,
     Retained<NSTextField>,
     Retained<NSTextField>,
-    Retained<NSTextField>,
 ) {
     let page = page(mtm);
     page_header(
@@ -1094,19 +1274,69 @@ fn make_automatic_page(
     let minimum = numeric_row(&page, "Minimum word length", 250.0, mtm);
     let delay = numeric_row(&page, "Delay after Space (ms)", 206.0, mtm);
     page.addSubview(&label(
-        "Never correct (comma-separated)",
-        rect(28.0, 158.0, 220.0, 24.0),
+        "Never-correct words moved to the Exceptions tab.",
+        rect(28.0, 158.0, 400.0, 24.0),
         mtm,
     ));
-    let exceptions = text_field("", rect(252.0, 154.0, 372.0, 26.0), mtm);
-    exceptions.setPlaceholderString(Some(&NSString::from_str("GitHub, Upyr, project-name")));
-    page.addSubview(&exceptions);
     page.addSubview(&label(
         "macOS Accessibility access is checked before input monitoring starts.",
         rect(28.0, 96.0, 590.0, 24.0),
         mtm,
     ));
-    (page, enabled, sensitivity, minimum, delay, exceptions)
+    (page, enabled, sensitivity, minimum, delay)
+}
+
+fn make_exceptions_page(
+    controller: &NativeController,
+    mtm: MainThreadMarker,
+) -> ExceptionsControls {
+    let page = page(mtm);
+    page_header(
+        &page,
+        "Exceptions",
+        "Exact words that automatic correction must always leave alone.",
+        mtm,
+    );
+
+    let scroll = NSScrollView::initWithFrame(
+        NSScrollView::alloc(mtm),
+        rect(24.0, 100.0, 624.0, EXCEPTION_LIST_VISIBLE_HEIGHT),
+    );
+    scroll.setHasVerticalScroller(true);
+    scroll.setDrawsBackground(true);
+    let container = NSView::initWithFrame(
+        NSView::alloc(mtm),
+        rect(
+            0.0,
+            0.0,
+            EXCEPTION_LIST_WIDTH,
+            EXCEPTION_LIST_VISIBLE_HEIGHT,
+        ),
+    );
+    scroll.setDocumentView(Some(&container));
+    page.addSubview(&scroll);
+
+    let new_word = text_field("", rect(24.0, 66.0, 470.0, 26.0), mtm);
+    new_word.setPlaceholderString(Some(&NSString::from_str("word, or a comma-separated list")));
+    page.addSubview(&new_word);
+    page.addSubview(&action_button(
+        "Add",
+        rect(504.0, 64.0, 96.0, 30.0),
+        controller,
+        sel!(addException:),
+        mtm,
+    ));
+    page.addSubview(&multiline_label(
+        "Case-insensitive duplicates and blank entries are ignored. Each word must be a single token with no spaces.",
+        rect(24.0, 26.0, 624.0, 32.0),
+        mtm,
+    ));
+
+    ExceptionsControls {
+        page,
+        container,
+        new_word,
+    }
 }
 
 #[allow(clippy::type_complexity)]
@@ -1225,6 +1455,17 @@ fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> F
     ));
     let duration = text_field("", rect(252.0, 305.0, 116.0, 26.0), mtm);
     page.addSubview(&duration);
+    page.addSubview(&label("Shows", rect(388.0, 308.0, 46.0, 24.0), mtm));
+    let indicator_style = popup(
+        &[
+            IndicatorStyle::Letters.label(),
+            IndicatorStyle::Flag.label(),
+            IndicatorStyle::Both.label(),
+        ],
+        rect(436.0, 305.0, 168.0, 28.0),
+        mtm,
+    );
+    page.addSubview(&indicator_style);
 
     let sounds_enabled = checkbox("Enable sounds", rect(24.0, 267.0, 145.0, 26.0), mtm);
     page.addSubview(&sounds_enabled);
@@ -1299,6 +1540,7 @@ fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> F
         page,
         show_indicator: indicator,
         indicator_duration: duration,
+        indicator_style,
         sounds_enabled,
         sound_pack,
         key_clicks,
@@ -1542,10 +1784,11 @@ fn tab_index(tab: SettingsTab) -> isize {
     match tab {
         SettingsTab::General => 0,
         SettingsTab::Automatic => 1,
-        SettingsTab::Shortcuts => 2,
-        SettingsTab::Feedback => 3,
-        SettingsTab::Advanced => 4,
-        SettingsTab::About => 5,
+        SettingsTab::Exceptions => 2,
+        SettingsTab::Shortcuts => 3,
+        SettingsTab::Feedback => 4,
+        SettingsTab::Advanced => 5,
+        SettingsTab::About => 6,
     }
 }
 

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::layout::Direction;
 
-pub const CURRENT_CONFIG_VERSION: u32 = 6;
+pub const CURRENT_CONFIG_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -72,7 +72,34 @@ impl SoundPack {
         match self {
             Self::Original => "Soft local clicks with Upyr's original event cues.",
             Self::Arcade => "Bright pfxr-style clicks and action sounds.",
-            Self::Anime => "Clicks for text keys and synthesized vocal reactions for control keys.",
+            Self::Anime => {
+                "Clicks for text keys, synthesized vocal reactions for control keys, and \
+                 expressive cues for Upyr's own events."
+            }
+        }
+    }
+}
+
+/// What the floating layout indicator shows next to the pointer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum IndicatorStyle {
+    /// Just the language letters, for example `EN`.
+    Letters,
+    /// Just the flag emoji.
+    Flag,
+    /// Letters and flag together, for example `EN  🇬🇧`.
+    Both,
+}
+
+impl IndicatorStyle {
+    pub const ALL: [Self; 3] = [Self::Letters, Self::Flag, Self::Both];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Letters => "Letters",
+            Self::Flag => "Flag",
+            Self::Both => "Letters and flag",
         }
     }
 }
@@ -185,6 +212,8 @@ pub struct Config {
     /// the active OS input source.
     pub show_layout_indicator: bool,
     pub layout_indicator_duration_ms: u64,
+    /// What the layout indicator displays: letters, a flag, or both.
+    pub indicator_style: IndicatorStyle,
     /// Event-specific local sound feedback.
     pub sounds: SoundSettings,
     /// Correct confidently recognized wrong-layout text after Space.
@@ -215,6 +244,7 @@ impl Default for Config {
             switch_layout: true,
             show_layout_indicator: false,
             layout_indicator_duration_ms: 900,
+            indicator_style: IndicatorStyle::Both,
             sounds: SoundSettings::default(),
             auto_correct: false,
             auto_correct_sensitivity: AutoCorrectSensitivity::Conservative,
@@ -596,6 +626,16 @@ fn migrate(value: &mut toml::Value) -> Result<()> {
         sounds
             .entry("key_clicks".to_owned())
             .or_insert(toml::Value::Boolean(false));
+        table.insert("config_version".to_owned(), toml::Value::Integer(6));
+        version = 6;
+    }
+
+    // Version 7 lets the layout indicator show letters, a flag, or both.
+    // Existing installations keep today's combined presentation.
+    if version == 6 {
+        table
+            .entry("indicator_style".to_owned())
+            .or_insert_with(|| toml::Value::String("both".to_owned()));
         table.insert(
             "config_version".to_owned(),
             toml::Value::Integer(i64::from(CURRENT_CONFIG_VERSION)),
@@ -632,6 +672,7 @@ mod tests {
         assert_eq!(decoded.direction, Direction::Smart);
         assert!(decoded.switch_layout);
         assert!(!decoded.show_layout_indicator);
+        assert_eq!(decoded.indicator_style, IndicatorStyle::Both);
         assert!(!decoded.sounds.enabled);
         assert_eq!(decoded.sounds.volume_percent, 65);
         assert_eq!(decoded.sounds.pack, SoundPack::Original);
@@ -927,5 +968,18 @@ restore_delay_ms = 250
         assert_eq!(config.sounds.pack, SoundPack::Original);
         assert!(!config.sounds.key_clicks);
         assert!(!config.sounds.key_clicks_enabled());
+    }
+
+    #[test]
+    fn migrates_v6_configuration_with_the_combined_indicator_style() {
+        let mut value = toml::Value::try_from(Config::default()).unwrap();
+        let table = value.as_table_mut().unwrap();
+        table.insert("config_version".to_owned(), toml::Value::Integer(6));
+        table.remove("indicator_style");
+
+        let config = Config::decode(&toml::to_string(&value).unwrap()).unwrap();
+
+        assert_eq!(config.config_version, CURRENT_CONFIG_VERSION);
+        assert_eq!(config.indicator_style, IndicatorStyle::Both);
     }
 }

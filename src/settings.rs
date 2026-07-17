@@ -30,7 +30,7 @@ use crate::{
 };
 #[cfg(not(target_os = "macos"))]
 use crate::{
-    config::{GestureAction, ModifierGesture, SoundEvent, SoundPack},
+    config::{GestureAction, IndicatorStyle, ModifierGesture, SoundEvent, SoundPack},
     layout::Direction,
 };
 
@@ -370,6 +370,7 @@ fn packaged_macos_bundle() -> Result<Option<PathBuf>> {
 enum SettingsTab {
     General,
     Automatic,
+    Exceptions,
     Shortcuts,
     Feedback,
     Advanced,
@@ -378,9 +379,10 @@ enum SettingsTab {
 
 impl SettingsTab {
     #[cfg(not(target_os = "macos"))]
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::General,
         Self::Automatic,
+        Self::Exceptions,
         Self::Shortcuts,
         Self::Feedback,
         Self::Advanced,
@@ -391,6 +393,7 @@ impl SettingsTab {
         match self {
             Self::General => "General",
             Self::Automatic => "Automatic",
+            Self::Exceptions => "Exceptions",
             Self::Shortcuts => "Shortcuts",
             Self::Feedback => "Feedback",
             Self::Advanced => "Advanced",
@@ -402,6 +405,7 @@ impl SettingsTab {
         match self {
             Self::General => "general",
             Self::Automatic => "automatic",
+            Self::Exceptions => "exceptions",
             Self::Shortcuts => "shortcuts",
             Self::Feedback => "feedback",
             Self::Advanced => "advanced",
@@ -413,6 +417,7 @@ impl SettingsTab {
         match command {
             "general" => Some(Self::General),
             "automatic" => Some(Self::Automatic),
+            "exceptions" => Some(Self::Exceptions),
             "shortcuts" => Some(Self::Shortcuts),
             "feedback" => Some(Self::Feedback),
             "advanced" => Some(Self::Advanced),
@@ -424,9 +429,12 @@ impl SettingsTab {
     const fn cli_argument(self) -> Option<&'static str> {
         match self {
             Self::About => Some("--about"),
-            Self::General | Self::Automatic | Self::Shortcuts | Self::Feedback | Self::Advanced => {
-                None
-            }
+            Self::General
+            | Self::Automatic
+            | Self::Exceptions
+            | Self::Shortcuts
+            | Self::Feedback
+            | Self::Advanced => None,
         }
     }
 }
@@ -494,9 +502,9 @@ const SEARCH_PARAMETERS: &[SearchParameter] = &[
         terms: "space milliseconds timing",
     },
     SearchParameter {
-        tab: SettingsTab::Automatic,
+        tab: SettingsTab::Exceptions,
         label: "Never correct list",
-        terms: "exceptions dictionary words ignore exclude",
+        terms: "exceptions dictionary words ignore exclude table add remove",
     },
     SearchParameter {
         tab: SettingsTab::Shortcuts,
@@ -532,6 +540,11 @@ const SEARCH_PARAMETERS: &[SearchParameter] = &[
         tab: SettingsTab::Feedback,
         label: "Indicator duration",
         terms: "flag overlay milliseconds timing",
+    },
+    SearchParameter {
+        tab: SettingsTab::Feedback,
+        label: "Indicator style",
+        terms: "letters flag both language display shows",
     },
     SearchParameter {
         tab: SettingsTab::Feedback,
@@ -588,7 +601,7 @@ const SEARCH_PARAMETERS: &[SearchParameter] = &[
 #[cfg(not(target_os = "macos"))]
 struct SettingsApp {
     config: Config,
-    exceptions: String,
+    new_exception: String,
     launch_at_login: bool,
     autostart_status: autostart::AutostartStatus,
     activation: ActivationInbox,
@@ -609,11 +622,10 @@ impl SettingsApp {
         initial_tab: SettingsTab,
         activation: ActivationInbox,
     ) -> Self {
-        let exceptions = config.auto_correct_exceptions.join("\n");
         let launch_at_login = autostart_status.enabled;
         Self {
             config,
-            exceptions,
+            new_exception: String::new(),
             launch_at_login,
             autostart_status,
             activation,
@@ -653,8 +665,6 @@ impl SettingsApp {
     }
 
     fn save(&mut self) {
-        self.config.auto_correct_exceptions = parse_exceptions(&self.exceptions);
-        self.exceptions = self.config.auto_correct_exceptions.join("\n");
         if let Err(error) = self.config.write(true) {
             self.status = Some((false, format!("Could not save settings: {error:#}")));
             return;
@@ -713,7 +723,7 @@ impl SettingsApp {
 
     fn reset(&mut self) {
         self.config = Config::default();
-        self.exceptions.clear();
+        self.new_exception.clear();
         self.recording = None;
         self.shortcut_error = None;
         self.status = Some((
@@ -888,15 +898,69 @@ impl SettingsApp {
                     });
                     ui.end_row();
                 });
-            ui.add_space(8.0);
-            ui.label("Never auto-correct these words");
-            ui.small("One word per line, or separate words with commas.");
-            ui.add(
-                egui::TextEdit::multiline(&mut self.exceptions)
-                    .desired_rows(8)
-                    .desired_width(f32::INFINITY),
-            );
         });
+    }
+
+    fn draw_exceptions(&mut self, ui: &mut egui::Ui) {
+        section_heading(
+            ui,
+            "Never correct",
+            "Exact words that automatic correction must always leave alone.",
+        );
+        ui.add_space(8.0);
+
+        let mut remove_index = None;
+        egui::Grid::new("exceptions-table")
+            .num_columns(2)
+            .spacing([12.0, 6.0])
+            .striped(true)
+            .show(ui, |ui| {
+                ui.strong("Word");
+                ui.end_row();
+                for (index, word) in self.config.auto_correct_exceptions.iter_mut().enumerate() {
+                    ui.add(egui::TextEdit::singleline(word).desired_width(260.0));
+                    if ui.small_button("Remove").clicked() {
+                        remove_index = Some(index);
+                    }
+                    ui.end_row();
+                }
+            });
+        if let Some(index) = remove_index {
+            self.config.auto_correct_exceptions.remove(index);
+        }
+        if self.config.auto_correct_exceptions.is_empty() {
+            ui.small("No exceptions yet.");
+        }
+
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.new_exception)
+                    .desired_width(260.0)
+                    .hint_text("word, or a comma-separated list"),
+            );
+            if ui.button("Add").clicked() {
+                self.add_exceptions();
+            }
+        });
+        ui.small(
+            "Case-insensitive duplicates and blank entries are ignored. Each word must be a single token with no spaces.",
+        );
+    }
+
+    fn add_exceptions(&mut self) {
+        let mut seen: HashSet<String> = self
+            .config
+            .auto_correct_exceptions
+            .iter()
+            .map(|word| word.to_lowercase())
+            .collect();
+        for word in parse_exceptions(&self.new_exception) {
+            if seen.insert(word.to_lowercase()) {
+                self.config.auto_correct_exceptions.push(word);
+            }
+        }
+        self.new_exception.clear();
     }
 
     fn draw_shortcuts(&mut self, ui: &mut egui::Ui) {
@@ -1036,6 +1100,20 @@ impl SettingsApp {
                         .range(250..=3_000),
                 );
                 ui.label("ms");
+            });
+            ui.horizontal(|ui| {
+                ui.label("Shows");
+                egui::ComboBox::from_id_salt("indicator-style")
+                    .selected_text(self.config.indicator_style.label())
+                    .show_ui(ui, |ui| {
+                        for style in IndicatorStyle::ALL {
+                            ui.selectable_value(
+                                &mut self.config.indicator_style,
+                                style,
+                                style.label(),
+                            );
+                        }
+                    });
             });
         });
         ui.add_space(18.0);
@@ -1265,6 +1343,7 @@ impl eframe::App for SettingsApp {
                     match self.tab {
                         SettingsTab::General => self.draw_general(ui),
                         SettingsTab::Automatic => self.draw_automatic(ui),
+                        SettingsTab::Exceptions => self.draw_exceptions(ui),
                         SettingsTab::Shortcuts => self.draw_shortcuts(ui),
                         SettingsTab::Feedback => self.draw_feedback(ui),
                         SettingsTab::Advanced => self.draw_advanced(ui),
@@ -1414,7 +1493,7 @@ fn shortcuts_equal(left: &str, right: &str) -> bool {
     }
 }
 
-fn pretty_hotkey(value: &str) -> Option<String> {
+pub(crate) fn pretty_hotkey(value: &str) -> Option<String> {
     let hotkey = value.parse::<HotKey>().ok()?;
     let key = pretty_key(hotkey.key);
     #[cfg(target_os = "macos")]
@@ -1572,6 +1651,7 @@ mod tests {
         for tab in [
             SettingsTab::General,
             SettingsTab::Automatic,
+            SettingsTab::Exceptions,
             SettingsTab::Shortcuts,
             SettingsTab::Feedback,
             SettingsTab::Advanced,
