@@ -9,9 +9,26 @@ permissions:
   contents: read
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install validation dependencies
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev libwayland-dev libgtk-3-dev libayatana-appindicator3-dev zstd
+      - run: python3 tools/check_codebase_graph.py
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - run: cargo test --workspace --all-targets --locked
+
   macos:
+    needs: verify
     runs-on: macos-14
     env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -19,24 +36,51 @@ jobs:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
+      - name: Verify release tag matches Cargo version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: packaging/macos/verify-release-tag.sh "$GITHUB_REF_NAME"
+      - name: Validate Apple release credentials
+        shell: bash
+        run: |
+          required=(
+            APPLE_CERTIFICATE
+            APPLE_CERTIFICATE_PASSWORD
+            APPLE_ID
+            APPLE_APP_PASSWORD
+            APPLE_TEAM_ID
+          )
+          missing=()
+          present=0
+          for name in "${required[@]}"; do
+            if [[ -n "${!name:-}" ]]; then
+              present=$((present + 1))
+            else
+              missing+=("$name")
+            fi
+          done
+
+          if [[ "$GITHUB_REF" == refs/tags/v* && ${#missing[@]} -ne 0 ]]; then
+            printf 'Tagged macOS releases require Apple signing and notarization credentials. Missing: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" != refs/tags/v* && $present -ne 0 && ${#missing[@]} -ne 0 ]]; then
+            printf 'Apple release credentials must be supplied together. Missing: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
+      - name: Generate macOS icon from mascot source
+        run: packaging/macos/generate-icon.sh
       - name: Build universal macOS binaries
-        run: |
-          cargo build --release --locked -p upyr --target aarch64-apple-darwin
-          cargo build --release --locked -p upyr --target x86_64-apple-darwin
-          mkdir -p target/release
-          lipo -create target/aarch64-apple-darwin/release/upyr target/x86_64-apple-darwin/release/upyr -output target/release/upyr
-          lipo -create target/aarch64-apple-darwin/release/upyr-background target/x86_64-apple-darwin/release/upyr-background -output target/release/upyr-background
-          lipo -create target/aarch64-apple-darwin/release/upyr-settings target/x86_64-apple-darwin/release/upyr-settings -output target/release/upyr-settings
+        run: packaging/macos/build-universal.sh
       - name: Import Developer ID certificate
         if: env.APPLE_CERTIFICATE != ''
         run: |
           CERTIFICATE_PATH="$RUNNER_TEMP/upyr.p12"
           KEYCHAIN_PATH="$RUNNER_TEMP/upyr-signing.keychain-db"
-          echo "$APPLE_CERTIFICATE" | base64 --decode > "$CERTIFICATE_PATH"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 -D > "$CERTIFICATE_PATH"
           security create-keychain -p temporary "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p temporary "$KEYCHAIN_PATH"
@@ -45,18 +89,15 @@ jobs:
           security list-keychain -d user -s "$KEYCHAIN_PATH"
           IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | awk -F '"' 'NR == 1 { print $2 }')
           test -n "$IDENTITY"
+          case "$IDENTITY" in
+            "Developer ID Application:"*) ;;
+            *) echo "Certificate is not a Developer ID Application identity: $IDENTITY" >&2; exit 1 ;;
+          esac
           echo "UPYR_MACOS_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
       - name: Build and verify app bundle
         run: bash packaging/macos/package.sh
       - name: Verify packaged conversion
         run: test "$(dist/Upyr.app/Contents/MacOS/upyr convert ghbdsn)" = "привіт"
-      - name: Notarize release DMG
-        if: env.APPLE_ID != ''
-        run: |
-          DMG=$(find dist -name '*.dmg' -print -quit)
-          xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
-          xcrun stapler staple "$DMG"
-          xcrun stapler validate "$DMG"
       - uses: actions/upload-artifact@v4
         with:
           name: package-macos
@@ -66,6 +107,7 @@ jobs:
           if-no-files-found: error
 
   windows:
+    needs: verify
     runs-on: windows-latest
     env:
       WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -104,6 +146,7 @@ jobs:
           if-no-files-found: error
 
   linux:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -126,7 +169,7 @@ jobs:
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [macos, windows, linux]
+    needs: [verify, macos, windows, linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write

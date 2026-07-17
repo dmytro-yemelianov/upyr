@@ -10,6 +10,8 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use device_query::Keycode;
+#[cfg(target_os = "macos")]
+use device_query::{DeviceQuery, DeviceState};
 use rdev::{EventType, Key};
 use tracing::error;
 
@@ -47,6 +49,234 @@ impl Default for ListenerState {
 }
 
 static LISTENER_STATE: OnceLock<Arc<ListenerState>> = OnceLock::new();
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct CaptureState {
+    left_shift: bool,
+    right_shift: bool,
+    left_control: bool,
+    right_control: bool,
+    left_option: bool,
+    right_option: bool,
+    left_meta: bool,
+    right_meta: bool,
+    caps_lock: bool,
+}
+
+impl CaptureState {
+    #[cfg(any(target_os = "macos", test))]
+    fn from_pressed_keys(keys: &[Keycode]) -> Self {
+        Self {
+            left_shift: keys.contains(&Keycode::LShift),
+            right_shift: keys.contains(&Keycode::RShift),
+            left_control: keys.contains(&Keycode::LControl),
+            right_control: keys.contains(&Keycode::RControl),
+            left_option: keys.contains(&Keycode::LAlt) || keys.contains(&Keycode::LOption),
+            right_option: keys.contains(&Keycode::RAlt) || keys.contains(&Keycode::ROption),
+            left_meta: keys.contains(&Keycode::Command) || keys.contains(&Keycode::LMeta),
+            right_meta: keys.contains(&Keycode::RCommand) || keys.contains(&Keycode::RMeta),
+            caps_lock: keys.contains(&Keycode::CapsLock),
+        }
+    }
+
+    #[cfg(any(target_os = "macos", test))]
+    fn synchronize_momentary_modifiers(&mut self, keys: &[Keycode]) {
+        self.left_shift = keys.contains(&Keycode::LShift);
+        self.right_shift = keys.contains(&Keycode::RShift);
+        self.left_control = keys.contains(&Keycode::LControl);
+        self.right_control = keys.contains(&Keycode::RControl);
+        self.left_option = keys.contains(&Keycode::LAlt) || keys.contains(&Keycode::LOption);
+        self.right_option = keys.contains(&Keycode::RAlt) || keys.contains(&Keycode::ROption);
+        self.left_meta = keys.contains(&Keycode::Command) || keys.contains(&Keycode::LMeta);
+        self.right_meta = keys.contains(&Keycode::RCommand) || keys.contains(&Keycode::RMeta);
+    }
+
+    fn observe(&mut self, event_type: EventType, name: Option<&str>) -> Option<AutoKeyEvent> {
+        match event_type {
+            EventType::KeyPress(Key::ShiftLeft) => {
+                self.left_shift = true;
+                None
+            }
+            EventType::KeyPress(Key::ShiftRight) => {
+                self.right_shift = true;
+                None
+            }
+            EventType::KeyRelease(Key::ShiftLeft) => {
+                self.left_shift = false;
+                None
+            }
+            EventType::KeyRelease(Key::ShiftRight) => {
+                self.right_shift = false;
+                None
+            }
+            EventType::KeyPress(Key::ControlLeft) => {
+                self.left_control = true;
+                Some(reset_event(Keycode::LControl))
+            }
+            EventType::KeyPress(Key::ControlRight) => {
+                self.right_control = true;
+                Some(reset_event(Keycode::RControl))
+            }
+            EventType::KeyRelease(Key::ControlLeft) => {
+                self.left_control = false;
+                None
+            }
+            EventType::KeyRelease(Key::ControlRight) => {
+                self.right_control = false;
+                None
+            }
+            EventType::KeyPress(Key::Alt) => {
+                self.left_option = true;
+                Some(reset_event(Keycode::LAlt))
+            }
+            EventType::KeyPress(Key::AltGr) => {
+                self.right_option = true;
+                Some(reset_event(Keycode::RAlt))
+            }
+            EventType::KeyRelease(Key::Alt) => {
+                self.left_option = false;
+                None
+            }
+            EventType::KeyRelease(Key::AltGr) => {
+                self.right_option = false;
+                None
+            }
+            EventType::KeyPress(Key::MetaLeft) => {
+                self.left_meta = true;
+                Some(reset_event(Keycode::LMeta))
+            }
+            EventType::KeyPress(Key::MetaRight) => {
+                self.right_meta = true;
+                Some(reset_event(Keycode::RMeta))
+            }
+            EventType::KeyRelease(Key::MetaLeft) => {
+                self.left_meta = false;
+                None
+            }
+            EventType::KeyRelease(Key::MetaRight) => {
+                self.right_meta = false;
+                None
+            }
+            EventType::KeyPress(Key::CapsLock) => {
+                #[cfg(target_os = "macos")]
+                {
+                    // Quartz reports activation as a press and deactivation as
+                    // a release because both are flags-changed events.
+                    self.caps_lock = true;
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    // Other rdev backends report the physical press/release
+                    // pair, so the logical lock state changes on each press.
+                    self.caps_lock = !self.caps_lock;
+                }
+                Some(reset_event(Keycode::CapsLock))
+            }
+            EventType::KeyRelease(Key::CapsLock) => {
+                #[cfg(target_os = "macos")]
+                {
+                    self.caps_lock = false;
+                    Some(reset_event(Keycode::CapsLock))
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    None
+                }
+            }
+            EventType::KeyPress(key) => self.capture_key(key, name),
+            _ => None,
+        }
+    }
+
+    fn capture_key(&mut self, key: Key, name: Option<&str>) -> Option<AutoKeyEvent> {
+        if self.chord_modifier_active() {
+            return None;
+        }
+
+        let shifted = self.left_shift || self.right_shift;
+        if let Some(caps_lock) = infer_caps_lock(name, shifted) {
+            let newly_detected = caps_lock && !self.caps_lock;
+            self.caps_lock = caps_lock;
+            if newly_detected {
+                // The OS-rendered character exposes a Caps Lock state that may
+                // predate listener startup and therefore has no press event.
+                return Some(reset_event(Keycode::CapsLock));
+            }
+        }
+        if self.caps_lock {
+            return None;
+        }
+
+        map_key(key).map(|key| AutoKeyEvent { key, shifted })
+    }
+
+    fn chord_modifier_active(&self) -> bool {
+        self.left_control
+            || self.right_control
+            || self.left_option
+            || self.right_option
+            || self.left_meta
+            || self.right_meta
+    }
+
+    fn momentary_modifier_active(&self) -> bool {
+        self.left_shift || self.right_shift || self.chord_modifier_active()
+    }
+}
+
+fn reset_event(key: Keycode) -> AutoKeyEvent {
+    AutoKeyEvent {
+        key,
+        shifted: false,
+    }
+}
+
+fn infer_caps_lock(name: Option<&str>, shifted: bool) -> Option<bool> {
+    let mut characters = name?.chars();
+    let character = characters.next()?;
+    if characters.next().is_some() {
+        return None;
+    }
+    if character.is_uppercase() {
+        Some(!shifted)
+    } else if character.is_lowercase() {
+        Some(shifted)
+    } else {
+        None
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn initial_capture_state(device: Option<&DeviceState>) -> CaptureState {
+    device.map_or_else(CaptureState::default, |device| {
+        CaptureState::from_pressed_keys(&device.get_keys())
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn initial_capture_state() -> CaptureState {
+    CaptureState::default()
+}
+
+#[cfg(target_os = "macos")]
+fn is_ordinary_key_press(event_type: EventType) -> bool {
+    matches!(
+        event_type,
+        EventType::KeyPress(key)
+            if !matches!(
+                key,
+                Key::ShiftLeft
+                    | Key::ShiftRight
+                    | Key::ControlLeft
+                    | Key::ControlRight
+                    | Key::Alt
+                    | Key::AltGr
+                    | Key::MetaLeft
+                    | Key::MetaRight
+                    | Key::CapsLock
+            )
+    )
+}
 
 pub struct AutoCorrectMonitor {
     state: Arc<ListenerState>,
@@ -145,20 +375,29 @@ fn spawn_listener(state: &Arc<ListenerState>) -> Result<()> {
     if let Err(error) = thread::Builder::new()
         .name("upyr-auto-correct".to_owned())
         .spawn(move || {
-            let mut left_shift = false;
-            let mut right_shift = false;
+            #[cfg(target_os = "macos")]
+            let device_state = DeviceState::checked_new();
+            #[cfg(target_os = "macos")]
+            let mut capture_state = initial_capture_state(device_state.as_ref());
+            #[cfg(not(target_os = "macos"))]
+            let mut capture_state = initial_capture_state();
             let callback_state = Arc::clone(&listener_state);
-            let result = rdev::listen(move |event| match event.event_type {
-                EventType::KeyPress(Key::ShiftLeft) => left_shift = true,
-                EventType::KeyPress(Key::ShiftRight) => right_shift = true,
-                EventType::KeyRelease(Key::ShiftLeft) => left_shift = false,
-                EventType::KeyRelease(Key::ShiftRight) => right_shift = false,
-                EventType::KeyPress(key) => {
-                    if let Some(key) = map_key(key) {
-                        dispatch_key(&callback_state, key, left_shift || right_shift);
-                    }
+            let result = rdev::listen(move |event| {
+                #[cfg(target_os = "macos")]
+                if capture_state.momentary_modifier_active()
+                    && is_ordinary_key_press(event.event_type)
+                    && let Some(device) = device_state.as_ref()
+                {
+                    // rdev's first flags-changed event can classify release as
+                    // press when the key predated its event tap. Reconcile only
+                    // while a modifier appears active, keeping normal typing on
+                    // the zero-query fast path.
+                    capture_state.synchronize_momentary_modifiers(&device.get_keys());
                 }
-                _ => {}
+                if let Some(event) = capture_state.observe(event.event_type, event.name.as_deref())
+                {
+                    dispatch_key(&callback_state, event);
+                }
             });
 
             listener_state
@@ -202,7 +441,7 @@ fn spawn_listener(state: &Arc<ListenerState>) -> Result<()> {
     }
 }
 
-fn dispatch_key(state: &ListenerState, key: Keycode, shifted: bool) {
+fn dispatch_key(state: &ListenerState, event: AutoKeyEvent) {
     let Ok(mut subscription) = state.subscription.lock() else {
         return;
     };
@@ -210,7 +449,7 @@ fn dispatch_key(state: &ListenerState, key: Keycode, shifted: bool) {
         return;
     };
     if !subscription.suspended.load(Ordering::Relaxed) {
-        (subscription.on_key_down)(AutoKeyEvent { key, shifted });
+        (subscription.on_key_down)(event);
     }
 }
 
@@ -339,5 +578,146 @@ mod tests {
     fn ignores_keys_that_cannot_affect_typed_text() {
         assert_eq!(map_key(Key::PrintScreen), None);
         assert_eq!(map_key(Key::Unknown(9000)), None);
+    }
+
+    #[test]
+    fn command_chord_resets_suppresses_and_then_recovers() {
+        let mut state = CaptureState::default();
+
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
+            Some(AutoKeyEvent {
+                key: Keycode::A,
+                shifted: false,
+            })
+        );
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::MetaLeft), None),
+            Some(reset_event(Keycode::LMeta))
+        );
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyC), Some("c")),
+            None
+        );
+        assert_eq!(
+            state.observe(EventType::KeyRelease(Key::MetaLeft), None),
+            None
+        );
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyN), Some("n")),
+            Some(AutoKeyEvent {
+                key: Keycode::N,
+                shifted: false,
+            })
+        );
+    }
+
+    #[test]
+    fn all_chord_modifiers_must_be_released_before_capture_resumes() {
+        let mut state = CaptureState::default();
+
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::ControlLeft), None),
+            Some(reset_event(Keycode::LControl))
+        );
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::Alt), None),
+            Some(reset_event(Keycode::LAlt))
+        );
+        state.observe(EventType::KeyRelease(Key::ControlLeft), None);
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
+            None
+        );
+        state.observe(EventType::KeyRelease(Key::Alt), None);
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
+            Some(AutoKeyEvent {
+                key: Keycode::A,
+                shifted: false,
+            })
+        );
+    }
+
+    #[test]
+    fn live_modifier_resync_recovers_from_a_stale_release_event() {
+        let mut state = CaptureState::from_pressed_keys(&[
+            Keycode::LShift,
+            Keycode::LControl,
+            Keycode::LOption,
+            Keycode::Command,
+        ]);
+        assert!(state.momentary_modifier_active());
+
+        state.synchronize_momentary_modifiers(&[]);
+
+        assert!(!state.momentary_modifier_active());
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
+            Some(AutoKeyEvent {
+                key: Keycode::A,
+                shifted: false,
+            })
+        );
+    }
+
+    #[test]
+    fn already_active_caps_lock_is_suppressed_and_recovers_when_off() {
+        let mut state = CaptureState::from_pressed_keys(&[Keycode::CapsLock]);
+
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyA), Some("A")),
+            None
+        );
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
+            Some(AutoKeyEvent {
+                key: Keycode::A,
+                shifted: false,
+            })
+        );
+    }
+
+    #[test]
+    fn rendered_ukrainian_case_detects_caps_lock_before_capture() {
+        let mut state = CaptureState::default();
+
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::LeftBracket), Some("Х")),
+            Some(reset_event(Keycode::CapsLock))
+        );
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyA), Some("Ф")),
+            None
+        );
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::LeftBracket), Some("х")),
+            Some(AutoKeyEvent {
+                key: Keycode::LeftBracket,
+                shifted: false,
+            })
+        );
+    }
+
+    #[test]
+    fn shift_is_preserved_without_becoming_a_blocker() {
+        let mut state = CaptureState::default();
+
+        state.observe(EventType::KeyPress(Key::ShiftLeft), None);
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyA), Some("A")),
+            Some(AutoKeyEvent {
+                key: Keycode::A,
+                shifted: true,
+            })
+        );
+        state.observe(EventType::KeyRelease(Key::ShiftLeft), None);
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
+            Some(AutoKeyEvent {
+                key: Keycode::A,
+                shifted: false,
+            })
+        );
     }
 }

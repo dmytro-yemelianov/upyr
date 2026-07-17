@@ -74,7 +74,15 @@ Tagged releases produce installable artifacts:
 - Windows: a per-user Inno Setup installer and a portable ZIP
 - Linux/X11: a DEB package and a portable tarball
 
-The macOS package script always signs the bundle: ad hoc for local/test builds, or with a Developer ID identity when `UPYR_MACOS_SIGNING_IDENTITY` is set. Release CI can additionally notarize and staple the DMG with Apple credentials. Windows release CI signs both executables and the installer when its certificate secrets are present; otherwise the Windows artifacts are explicitly unsigned. See [`.github/workflows/release.yml`](.github/workflows/release.yml) for the required secret names.
+Build a local universal macOS package with:
+
+```sh
+packaging/macos/generate-icon.sh
+packaging/macos/build-universal.sh
+packaging/macos/package.sh
+```
+
+The resulting `dist/Upyr.app`, ZIP, and DMG are ad-hoc signed for local testing. Move `Upyr.app` to `/Applications` before enabling launch at login. Official tag builds fail closed unless a Developer ID Application identity and complete Apple notarization credentials are configured; they sign and notarize the app before the final ZIP/DMG are created, then sign, notarize, staple, and assess the DMG. Windows release CI signs both executables and the installer when its certificate secrets are present; otherwise the Windows artifacts are explicitly unsigned. See [`.github/workflows/release.yml`](.github/workflows/release.yml) for the required secret names.
 
 ## Configuration
 

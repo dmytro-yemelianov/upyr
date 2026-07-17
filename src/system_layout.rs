@@ -111,6 +111,7 @@ mod platform {
         static kTISPropertyInputSourceCategory: CfStringRef;
         static kTISPropertyInputSourceID: CfStringRef;
         static kTISPropertyInputSourceIsSelectCapable: CfStringRef;
+        static kTISPropertyInputSourceLanguages: CfStringRef;
         static kTISPropertyLocalizedName: CfStringRef;
         static kTISPropertyUnicodeKeyLayoutData: CfStringRef;
 
@@ -361,12 +362,13 @@ mod platform {
     struct SourceInfo {
         id: String,
         name: String,
+        languages: Vec<String>,
     }
 
     impl SourceInfo {
         fn active_source(self) -> ActiveInputSource {
             ActiveInputSource {
-                layout: classify(&self.id, &self.name),
+                layout: classify(&self.id, &self.name, &self.languages),
                 source_id: self.id,
                 source_name: self.name,
             }
@@ -376,7 +378,9 @@ mod platform {
     fn preferred_source(sources: &[InputSource], target: SystemLayout) -> Option<&InputSource> {
         sources
             .iter()
-            .filter(|source| classify(&source.info.id, &source.info.name) == Some(target))
+            .filter(|source| {
+                classify(&source.info.id, &source.info.name, &source.info.languages) == Some(target)
+            })
             .min_by_key(|source| preference(&source.info.id, target))
     }
 
@@ -391,9 +395,21 @@ mod platform {
         }
     }
 
-    fn classify(id: &str, name: &str) -> Option<SystemLayout> {
+    fn classify(id: &str, name: &str, languages: &[String]) -> Option<SystemLayout> {
         let id = id.to_lowercase();
         let name = name.to_lowercase();
+        let language_family = languages.iter().find_map(|language| {
+            let language = language.to_ascii_lowercase();
+            let primary = language
+                .split(['-', '_'])
+                .next()
+                .unwrap_or(language.as_str());
+            match primary {
+                "uk" => Some(SystemLayout::Ukrainian),
+                "en" => Some(SystemLayout::English),
+                _ => None,
+            }
+        });
 
         if id.contains("ukrainian") || name.contains("ukrainian") || name.contains("україн") {
             return Some(SystemLayout::Ukrainian);
@@ -404,14 +420,19 @@ mod platform {
         {
             return Some(SystemLayout::English);
         }
-        None
+        language_family
     }
 
     fn source_info(raw: NonNull<c_void>) -> Option<SourceInfo> {
         let source = raw.as_ptr().cast_const();
         let id = string_property(source, unsafe { kTISPropertyInputSourceID })?;
         let name = string_property(source, unsafe { kTISPropertyLocalizedName })?;
-        Some(SourceInfo { id, name })
+        let languages = string_array_property(source, unsafe { kTISPropertyInputSourceLanguages });
+        Some(SourceInfo {
+            id,
+            name,
+            languages,
+        })
     }
 
     fn is_selectable_keyboard_source(source: TisInputSourceRef) -> bool {
@@ -426,6 +447,23 @@ mod platform {
     fn string_property(source: TisInputSourceRef, key: CfStringRef) -> Option<String> {
         let value = unsafe { TISGetInputSourceProperty(source, key) };
         cf_string_to_string(value.cast())
+    }
+
+    fn string_array_property(source: TisInputSourceRef, key: CfStringRef) -> Vec<String> {
+        let array = unsafe { TISGetInputSourceProperty(source, key) } as CfArrayRef;
+        if array.is_null() {
+            return Vec::new();
+        }
+        let count = unsafe { CFArrayGetCount(array) };
+        if count <= 0 {
+            return Vec::new();
+        }
+        (0..count)
+            .filter_map(|index| {
+                let value = unsafe { CFArrayGetValueAtIndex(array, index) };
+                cf_string_to_string(value.cast())
+            })
+            .collect()
     }
 
     fn bool_property(source: TisInputSourceRef, key: CfStringRef) -> bool {
@@ -505,14 +543,34 @@ mod platform {
         #[test]
         fn classifies_initial_macos_sources() {
             assert_eq!(
-                classify("com.apple.keylayout.US", "U.S."),
+                classify("com.apple.keylayout.US", "U.S.", &["en".to_owned()]),
                 Some(SystemLayout::English)
             );
             assert_eq!(
-                classify("com.apple.keylayout.Ukrainian-PC", "Ukrainian – PC"),
+                classify(
+                    "com.apple.keylayout.Ukrainian-PC",
+                    "Ukrainian – PC",
+                    &["uk-UA".to_owned()]
+                ),
                 Some(SystemLayout::Ukrainian)
             );
-            assert_eq!(classify("com.apple.keylayout.Dvorak", "Dvorak"), None);
+            assert_eq!(
+                classify(
+                    "com.apple.keylayout.British",
+                    "British",
+                    &["en-GB".to_owned()]
+                ),
+                Some(SystemLayout::English)
+            );
+            assert_eq!(
+                classify(
+                    "com.apple.keylayout.Australian",
+                    "Australian",
+                    &["en-AU".to_owned()]
+                ),
+                Some(SystemLayout::English)
+            );
+            assert_eq!(classify("com.apple.keylayout.Dvorak", "Dvorak", &[]), None);
         }
 
         #[test]

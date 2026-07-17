@@ -249,11 +249,11 @@ impl AutoWordTracker {
                 self.backspace();
                 return None;
             }
-            PhysicalKey::Shift
-            | PhysicalKey::CapsLock
-            | PhysicalKey::Control
-            | PhysicalKey::Alt
-            | PhysicalKey::Meta => return None,
+            PhysicalKey::Shift => return None,
+            PhysicalKey::CapsLock | PhysicalKey::Control | PhysicalKey::Alt | PhysicalKey::Meta => {
+                self.clear();
+                return None;
+            }
             _ => {}
         }
 
@@ -1459,6 +1459,44 @@ mod tests {
         });
         tracker.set_source_layout(Some(InputLayout::Ukrainian));
         assert!(tracker.needs_layout_check());
+    }
+
+    #[test]
+    fn tracker_clears_on_blocking_modifiers_and_recovers() {
+        for modifier in [
+            PhysicalKey::CapsLock,
+            PhysicalKey::Control,
+            PhysicalKey::Alt,
+            PhysicalKey::Meta,
+        ] {
+            let mut tracker = AutoWordTracker::default();
+            tracker.set_source_layout(Some(InputLayout::English));
+            tracker.observe(PhysicalKeyEvent {
+                key: PhysicalKey::KeyA,
+                shifted: false,
+            });
+            tracker.observe(PhysicalKeyEvent {
+                key: modifier,
+                shifted: false,
+            });
+            assert!(tracker.needs_layout_check(), "modifier: {modifier:?}");
+
+            tracker.set_source_layout(Some(InputLayout::English));
+            for key in [PhysicalKey::KeyN, PhysicalKey::KeyF, PhysicalKey::KeyR] {
+                tracker.observe(PhysicalKeyEvent {
+                    key,
+                    shifted: false,
+                });
+            }
+            let sample = tracker
+                .observe(PhysicalKeyEvent {
+                    key: PhysicalKey::Space,
+                    shifted: false,
+                })
+                .expect("the first clean word after a modifier must be captured");
+            assert_eq!(sample.physical_word, "nfr");
+            assert_eq!(sample.physical_context, "nfr ");
+        }
     }
 
     #[test]

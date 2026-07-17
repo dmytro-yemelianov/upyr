@@ -36,9 +36,9 @@ pub fn run() -> Result<()> {
     }
 
     let config = Config::load()?;
-    let launch_at_login = autostart::status()?.enabled;
+    let autostart_status = autostart::status()?;
     #[cfg(target_os = "macos")]
-    return macos::run(config, launch_at_login);
+    return macos::run(config, autostart_status);
 
     #[cfg(not(target_os = "macos"))]
     {
@@ -52,10 +52,59 @@ pub fn run() -> Result<()> {
         eframe::run_native(
             "Upyr Settings",
             options,
-            Box::new(move |_context| Ok(Box::new(SettingsApp::new(config, launch_at_login)))),
+            Box::new(move |_context| Ok(Box::new(SettingsApp::new(config, autostart_status)))),
         )
         .map_err(|error| anyhow!(error.to_string()))
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutostartTransition {
+    None,
+    Enable,
+    Disable,
+    NeedsExplicitRemoval,
+}
+
+fn autostart_transition(desired: bool, state: autostart::AutostartState) -> AutostartTransition {
+    use autostart::AutostartState::{Broken, Disabled, Enabled, Stale};
+
+    match (desired, state) {
+        (true, Disabled | Stale) => AutostartTransition::Enable,
+        (false, Enabled) => AutostartTransition::Disable,
+        (true, Broken) => AutostartTransition::NeedsExplicitRemoval,
+        (true, Enabled) | (false, Disabled | Stale | Broken) => AutostartTransition::None,
+    }
+}
+
+fn sync_launch_at_login(desired: bool) -> Result<autostart::AutostartStatus> {
+    let status = autostart::status()?;
+    match autostart_transition(desired, status.state) {
+        AutostartTransition::None => Ok(status),
+        AutostartTransition::Enable => autostart::enable(),
+        AutostartTransition::Disable => autostart::disable(),
+        AutostartTransition::NeedsExplicitRemoval => {
+            bail!(
+                "the existing launch-at-login entry is broken and will not be overwritten; choose Remove Entry explicitly, then enable it again"
+            )
+        }
+    }
+}
+
+fn autostart_attention(status: &autostart::AutostartStatus) -> Option<String> {
+    let action = match status.state {
+        autostart::AutostartState::Stale => {
+            "Launch at login points to another Upyr installation. Choose Repair Entry to update it, or Remove Entry to disable it."
+        }
+        autostart::AutostartState::Broken => {
+            "The launch-at-login entry needs attention and Upyr will not overwrite it. Choose Remove Entry explicitly before enabling it again."
+        }
+        autostart::AutostartState::Disabled | autostart::AutostartState::Enabled => return None,
+    };
+    Some(match status.detail.as_deref() {
+        Some(detail) => format!("{action} {detail}"),
+        None => action.to_owned(),
+    })
 }
 
 fn settings_instance_key() -> Result<String> {
@@ -297,6 +346,7 @@ struct SettingsApp {
     config: Config,
     exceptions: String,
     launch_at_login: bool,
+    autostart_status: autostart::AutostartStatus,
     status: Option<(bool, String)>,
     style_applied: bool,
     tab: SettingsTab,
@@ -307,12 +357,14 @@ struct SettingsApp {
 
 #[cfg(not(target_os = "macos"))]
 impl SettingsApp {
-    fn new(config: Config, launch_at_login: bool) -> Self {
+    fn new(config: Config, autostart_status: autostart::AutostartStatus) -> Self {
         let exceptions = config.auto_correct_exceptions.join("\n");
+        let launch_at_login = autostart_status.enabled;
         Self {
             config,
             exceptions,
             launch_at_login,
+            autostart_status,
             status: None,
             style_applied: false,
             tab: SettingsTab::General,
@@ -325,24 +377,60 @@ impl SettingsApp {
     fn save(&mut self) {
         self.config.auto_correct_exceptions = parse_exceptions(&self.exceptions);
         self.exceptions = self.config.auto_correct_exceptions.join("\n");
-        let result = self.config.write(true).and_then(|_| {
-            let enabled = autostart::status()?.enabled;
-            if enabled != self.launch_at_login {
-                if self.launch_at_login {
-                    autostart::enable()?;
-                } else {
-                    autostart::disable()?;
-                }
+        if let Err(error) = self.config.write(true) {
+            self.status = Some((false, format!("Could not save settings: {error:#}")));
+            return;
+        }
+
+        match sync_launch_at_login(self.launch_at_login) {
+            Ok(status) => {
+                self.launch_at_login = status.enabled;
+                self.autostart_status = status;
+                self.status = Some(match autostart_attention(&self.autostart_status) {
+                    Some(attention) => (false, format!("Settings saved. {attention}")),
+                    None => (
+                        true,
+                        "Saved. The running background app will reload these settings.".to_owned(),
+                    ),
+                });
             }
-            Ok(())
-        });
-        self.status = Some(match result {
-            Ok(()) => (
-                true,
-                "Saved. The running background app will reload these settings.".to_owned(),
-            ),
-            Err(error) => (false, format!("Could not save: {error:#}")),
-        });
+            Err(error) => {
+                if let Ok(status) = autostart::status() {
+                    self.launch_at_login = status.enabled;
+                    self.autostart_status = status;
+                }
+                self.status = Some((
+                    false,
+                    format!("Settings saved, but launch at login was not changed: {error:#}"),
+                ));
+            }
+        }
+    }
+
+    fn repair_autostart(&mut self) {
+        match autostart::enable() {
+            Ok(status) => {
+                self.launch_at_login = status.enabled;
+                self.autostart_status = status;
+                self.status = Some((true, "Launch-at-login entry repaired.".to_owned()));
+            }
+            Err(error) => {
+                self.status = Some((false, format!("Could not repair entry: {error:#}")));
+            }
+        }
+    }
+
+    fn remove_autostart(&mut self) {
+        match autostart::disable() {
+            Ok(status) => {
+                self.launch_at_login = status.enabled;
+                self.autostart_status = status;
+                self.status = Some((true, "Launch-at-login entry removed.".to_owned()));
+            }
+            Err(error) => {
+                self.status = Some((false, format!("Could not remove entry: {error:#}")));
+            }
+        }
     }
 
     fn reset(&mut self) {
@@ -450,6 +538,19 @@ impl SettingsApp {
             "Restore clipboard contents after conversion",
         );
         ui.checkbox(&mut self.launch_at_login, "Launch Upyr at login");
+        if let Some(attention) = autostart_attention(&self.autostart_status) {
+            ui.colored_label(egui::Color32::from_rgb(180, 105, 20), attention);
+            ui.horizontal(|ui| {
+                if self.autostart_status.state == autostart::AutostartState::Stale
+                    && ui.button("Repair Entry").clicked()
+                {
+                    self.repair_autostart();
+                }
+                if ui.button("Remove Entry").clicked() {
+                    self.remove_autostart();
+                }
+            });
+        }
     }
 
     fn draw_automatic(&mut self, ui: &mut egui::Ui) {
@@ -1059,6 +1160,36 @@ mod tests {
         assert_eq!(
             pretty_hotkey("Ctrl+Alt+Space").as_deref(),
             Some("Ctrl + Alt + Space")
+        );
+    }
+
+    #[test]
+    fn exceptional_autostart_entries_require_explicit_actions() {
+        use autostart::AutostartState::{Broken, Disabled, Enabled, Stale};
+
+        assert_eq!(
+            autostart_transition(true, Stale),
+            AutostartTransition::Enable
+        );
+        assert_eq!(
+            autostart_transition(false, Stale),
+            AutostartTransition::None
+        );
+        assert_eq!(
+            autostart_transition(true, Broken),
+            AutostartTransition::NeedsExplicitRemoval
+        );
+        assert_eq!(
+            autostart_transition(false, Broken),
+            AutostartTransition::None
+        );
+        assert_eq!(
+            autostart_transition(true, Disabled),
+            AutostartTransition::Enable
+        );
+        assert_eq!(
+            autostart_transition(false, Enabled),
+            AutostartTransition::Disable
         );
     }
 

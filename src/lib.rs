@@ -1,7 +1,7 @@
 #![deny(unsafe_code)]
 
 #[cfg(target_os = "macos")]
-mod accessibility;
+pub mod accessibility;
 pub mod app;
 mod auto_correct;
 mod auto_correct_monitor;

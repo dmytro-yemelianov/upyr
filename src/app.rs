@@ -4,7 +4,7 @@ use std::fs;
 use anyhow::{Context, Result, bail};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState, hotkey::HotKey};
 use single_instance::SingleInstance;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use tray_icon::menu::MenuEvent;
 use winit::{
     application::ApplicationHandler,
@@ -565,10 +565,19 @@ impl App {
 
     fn toggle_autostart(&self) -> Result<()> {
         let status = autostart::status()?;
-        let status = if status.enabled {
-            autostart::disable()?
-        } else {
-            autostart::enable()?
+        let status = match status.state {
+            autostart::AutostartState::Enabled => autostart::disable()?,
+            autostart::AutostartState::Disabled | autostart::AutostartState::Stale => {
+                autostart::enable()?
+            }
+            autostart::AutostartState::Broken => {
+                warn!(
+                    detail = status.detail.as_deref().unwrap_or("no detail available"),
+                    "launch-at-login entry needs attention; opening settings"
+                );
+                settings::spawn()?;
+                return Ok(());
+            }
         };
         self.update_tray()?;
         info!(

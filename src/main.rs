@@ -143,6 +143,15 @@ fn doctor() -> Result<()> {
     );
     println!("Layout following: {}", config.switch_layout);
     println!("Config schema: {}", config.config_version);
+    #[cfg(target_os = "macos")]
+    println!(
+        "Accessibility access: {}",
+        if upyr::accessibility::is_trusted() {
+            "granted"
+        } else {
+            "not granted"
+        }
+    );
     println!(
         "Automatic correction: {} ({:?}, minimum {} characters)",
         if config.auto_correct {
@@ -165,13 +174,17 @@ fn doctor() -> Result<()> {
     let startup = autostart::status()?;
     println!(
         "Launch at login: {} ({})",
-        if startup.enabled {
-            "enabled"
-        } else {
-            "disabled"
+        match startup.state {
+            autostart::AutostartState::Disabled => "disabled",
+            autostart::AutostartState::Enabled => "enabled",
+            autostart::AutostartState::Stale => "stale",
+            autostart::AutostartState::Broken => "broken",
         },
         startup.location
     );
+    if let Some(detail) = startup.detail {
+        println!("Launch at login detail: {detail}");
+    }
 
     match system_layout::current() {
         Ok(Some(source)) => println!(
@@ -196,13 +209,17 @@ fn manage_autostart(action: AutostartAction) -> Result<()> {
     };
     println!(
         "Launch at login is {} ({})",
-        if status.enabled {
-            "enabled"
-        } else {
-            "disabled"
+        match status.state {
+            autostart::AutostartState::Disabled => "disabled",
+            autostart::AutostartState::Enabled => "enabled",
+            autostart::AutostartState::Stale => "stale",
+            autostart::AutostartState::Broken => "broken",
         },
         status.location
     );
+    if let Some(detail) = status.detail {
+        println!("Launch at login detail: {detail}");
+    }
     Ok(())
 }
 

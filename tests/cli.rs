@@ -65,6 +65,8 @@ fn init_and_doctor_report_current_configuration() {
     let report = String::from_utf8(doctor.stdout).unwrap();
     assert!(report.contains("Config schema: 4"));
     assert!(report.contains("Modifier gesture: Disabled"));
+    #[cfg(target_os = "macos")]
+    assert!(report.contains("Accessibility access: "));
 
     let _ = fs::remove_dir_all(config.parent().unwrap());
 }

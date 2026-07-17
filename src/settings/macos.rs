@@ -20,7 +20,10 @@ use objc2_foundation::{
     NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
 };
 
-use super::{SEARCH_PARAMETERS, SettingsTab, parse_exceptions, pretty_hotkey, sensitivity_label};
+use super::{
+    SEARCH_PARAMETERS, SettingsTab, autostart_attention, parse_exceptions, pretty_hotkey,
+    sensitivity_label, sync_launch_at_login,
+};
 use crate::{
     autostart,
     config::{AutoCorrectSensitivity, Config, GestureAction, ModifierGesture},
@@ -34,6 +37,7 @@ const PAGE_HEIGHT: f64 = 456.0;
 
 struct ControllerIvars {
     config: RefCell<Config>,
+    autostart_status: RefCell<autostart::AutostartStatus>,
     controls: OnceCell<Controls>,
 }
 
@@ -46,6 +50,8 @@ struct Controls {
     switch_layout: Retained<NSButton>,
     restore_clipboard: Retained<NSButton>,
     launch_at_login: Retained<NSButton>,
+    repair_autostart: Retained<NSButton>,
+    remove_autostart: Retained<NSButton>,
     auto_correct: Retained<NSButton>,
     sensitivity: Retained<NSPopUpButton>,
     minimum_word_length: Retained<NSTextField>,
@@ -82,33 +88,74 @@ define_class!(
     impl NativeController {
         #[unsafe(method(saveSettings:))]
         fn save_settings(&self, _sender: &AnyObject) {
-            match self.collect_config().and_then(|config| {
-                config.write(true)?;
-                let launch_at_login = is_checked(&self.controls().launch_at_login);
-                let enabled = autostart::status()?.enabled;
-                if launch_at_login != enabled {
-                    if launch_at_login {
-                        autostart::enable()?;
-                    } else {
-                        autostart::disable()?;
+            let config = match self.collect_config() {
+                Ok(config) => config,
+                Err(error) => {
+                    self.set_status(false, &format!("Could not save settings: {error:#}"));
+                    return;
+                }
+            };
+            if let Err(error) = config.write(true) {
+                self.set_status(false, &format!("Could not save settings: {error:#}"));
+                return;
+            }
+            self.ivars().config.replace(config);
+
+            let desired = is_checked(&self.controls().launch_at_login);
+            match sync_launch_at_login(desired) {
+                Ok(status) => {
+                    self.set_autostart_status(status);
+                    if !self.show_autostart_attention("Settings saved. ") {
+                        self.set_status(
+                            true,
+                            "Saved. The running Upyr process will reload these settings.",
+                        );
                     }
                 }
-                Ok(config)
-            }) {
-                Ok(config) => {
-                    self.ivars().config.replace(config);
+                Err(error) => {
+                    if let Ok(status) = autostart::status() {
+                        self.set_autostart_status(status);
+                    }
                     self.set_status(
-                        true,
-                        "Saved. The running Upyr process will reload these settings.",
+                        false,
+                        &format!(
+                            "Settings saved, but launch at login was not changed: {error:#}"
+                        ),
                     );
                 }
-                Err(error) => self.set_status(false, &format!("Could not save: {error:#}")),
+            }
+        }
+
+        #[unsafe(method(repairAutostart:))]
+        fn repair_autostart(&self, _sender: &AnyObject) {
+            match autostart::enable() {
+                Ok(status) => {
+                    self.set_autostart_status(status);
+                    self.set_status(true, "Launch-at-login entry repaired.");
+                }
+                Err(error) => {
+                    self.set_status(false, &format!("Could not repair entry: {error:#}"));
+                }
+            }
+        }
+
+        #[unsafe(method(removeAutostart:))]
+        fn remove_autostart(&self, _sender: &AnyObject) {
+            match autostart::disable() {
+                Ok(status) => {
+                    self.set_autostart_status(status);
+                    self.set_status(true, "Launch-at-login entry removed.");
+                }
+                Err(error) => {
+                    self.set_status(false, &format!("Could not remove entry: {error:#}"));
+                }
             }
         }
 
         #[unsafe(method(resetSettings:))]
         fn reset_settings(&self, _sender: &AnyObject) {
-            self.apply_config(&Config::default(), false);
+            self.apply_config(&Config::default());
+            set_checked(&self.controls().launch_at_login, false);
             self.set_status(true, "Defaults restored in the form. Choose Save to apply them.");
         }
 
@@ -204,9 +251,14 @@ define_class!(
 );
 
 impl NativeController {
-    fn new(config: Config, mtm: MainThreadMarker) -> Retained<Self> {
+    fn new(
+        config: Config,
+        autostart_status: autostart::AutostartStatus,
+        mtm: MainThreadMarker,
+    ) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(ControllerIvars {
             config: RefCell::new(config),
+            autostart_status: RefCell::new(autostart_status),
             controls: OnceCell::new(),
         });
         unsafe { msg_send![super(this), init] }
@@ -219,7 +271,7 @@ impl NativeController {
             .expect("native settings controls must be initialized")
     }
 
-    fn build_window(&self, launch_at_login: bool) -> Retained<NSWindow> {
+    fn build_window(&self) -> Retained<NSWindow> {
         let mtm = self.mtm();
         let window = unsafe {
             NSWindow::initWithContentRect_styleMask_backing_defer(
@@ -262,7 +314,15 @@ impl NativeController {
         content.addSubview(&search);
 
         let tabs = NSTabView::initWithFrame(NSTabView::alloc(mtm), rect(18.0, 106.0, 684.0, 492.0));
-        let (general, direction, switch_layout, restore_clipboard, login) = make_general_page(mtm);
+        let (
+            general,
+            direction,
+            switch_layout,
+            restore_clipboard,
+            login,
+            repair_autostart,
+            remove_autostart,
+        ) = make_general_page(self, mtm);
         add_tab(&tabs, "General", &general, mtm);
         let (automatic, auto_correct, sensitivity, minimum_word_length, auto_delay, exceptions) =
             make_automatic_page(mtm);
@@ -283,7 +343,9 @@ impl NativeController {
         add_tab(&tabs, "Advanced", &advanced, mtm);
         content.addSubview(&tabs);
 
-        let status = label("", rect(24.0, 72.0, 672.0, 24.0), mtm);
+        let status = label("", rect(24.0, 60.0, 672.0, 40.0), mtm);
+        status.setMaximumNumberOfLines(2);
+        status.setUsesSingleLineMode(false);
         content.addSubview(&status);
         content.addSubview(&action_button(
             "Save",
@@ -318,6 +380,8 @@ impl NativeController {
                 switch_layout,
                 restore_clipboard,
                 launch_at_login: login,
+                repair_autostart,
+                remove_autostart,
                 auto_correct,
                 sensitivity,
                 minimum_word_length,
@@ -338,7 +402,10 @@ impl NativeController {
             .ok()
             .expect("native settings controls must only be initialized once");
         let config = self.ivars().config.borrow().clone();
-        self.apply_config(&config, launch_at_login);
+        self.apply_config(&config);
+        let autostart_status = self.ivars().autostart_status.borrow().clone();
+        self.set_autostart_status(autostart_status);
+        self.show_autostart_attention("");
         window
     }
 
@@ -400,7 +467,7 @@ impl NativeController {
         Ok(config)
     }
 
-    fn apply_config(&self, config: &Config, launch_at_login: bool) {
+    fn apply_config(&self, config: &Config) {
         let controls = self.controls();
         controls
             .direction
@@ -411,7 +478,6 @@ impl NativeController {
             });
         set_checked(&controls.switch_layout, config.switch_layout);
         set_checked(&controls.restore_clipboard, config.restore_clipboard);
-        set_checked(&controls.launch_at_login, launch_at_login);
         set_checked(&controls.auto_correct, config.auto_correct);
         controls
             .sensitivity
@@ -481,9 +547,38 @@ impl NativeController {
         }
     }
 
+    fn set_autostart_status(&self, status: autostart::AutostartStatus) {
+        let controls = self.controls();
+        let stale = status.state == autostart::AutostartState::Stale;
+        let exceptional = matches!(
+            status.state,
+            autostart::AutostartState::Stale | autostart::AutostartState::Broken
+        );
+        set_checked(&controls.launch_at_login, status.enabled);
+        controls.repair_autostart.setEnabled(stale);
+        controls.repair_autostart.setHidden(!stale);
+        controls.remove_autostart.setEnabled(exceptional);
+        controls.remove_autostart.setHidden(!exceptional);
+        self.ivars().autostart_status.replace(status);
+    }
+
+    fn show_autostart_attention(&self, prefix: &str) -> bool {
+        let message = {
+            let status = self.ivars().autostart_status.borrow();
+            autostart_attention(&status).map(|attention| format!("{prefix}{attention}"))
+        };
+        if let Some(message) = message {
+            self.set_status(false, &message);
+            true
+        } else {
+            false
+        }
+    }
+
     fn set_status(&self, success: bool, message: &str) {
         let status = &self.controls().status;
         status.setStringValue(&NSString::from_str(message));
+        status.setToolTip(Some(&NSString::from_str(message)));
         let color = if success {
             NSColor::systemGreenColor()
         } else {
@@ -613,13 +708,13 @@ impl ShortcutRecorder {
     }
 }
 
-pub(super) fn run(config: Config, launch_at_login: bool) -> Result<()> {
+pub(super) fn run(config: Config, autostart_status: autostart::AutostartStatus) -> Result<()> {
     let mtm =
         MainThreadMarker::new().context("Upyr Settings must start on the macOS main thread")?;
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
-    let controller = NativeController::new(config, mtm);
-    let window = controller.build_window(launch_at_login);
+    let controller = NativeController::new(config, autostart_status, mtm);
+    let window = controller.build_window();
     window.makeKeyAndOrderFront(None);
     #[allow(deprecated)]
     app.activateIgnoringOtherApps(true);
@@ -629,10 +724,13 @@ pub(super) fn run(config: Config, launch_at_login: bool) -> Result<()> {
 
 #[allow(clippy::type_complexity)]
 fn make_general_page(
+    controller: &NativeController,
     mtm: MainThreadMarker,
 ) -> (
     Retained<NSView>,
     Retained<NSPopUpButton>,
+    Retained<NSButton>,
+    Retained<NSButton>,
     Retained<NSButton>,
     Retained<NSButton>,
     Retained<NSButton>,
@@ -670,10 +768,38 @@ fn make_general_page(
         mtm,
     );
     let login = checkbox("Launch Upyr at login", rect(24.0, 184.0, 430.0, 26.0), mtm);
+    let repair_autostart = action_button(
+        "Repair Entry",
+        rect(24.0, 132.0, 126.0, 32.0),
+        controller,
+        sel!(repairAutostart:),
+        mtm,
+    );
+    let remove_autostart = action_button(
+        "Remove Entry",
+        rect(160.0, 132.0, 126.0, 32.0),
+        controller,
+        sel!(removeAutostart:),
+        mtm,
+    );
+    repair_autostart.setEnabled(false);
+    repair_autostart.setHidden(true);
+    remove_autostart.setEnabled(false);
+    remove_autostart.setHidden(true);
     page.addSubview(&switch_layout);
     page.addSubview(&restore);
     page.addSubview(&login);
-    (page, direction, switch_layout, restore, login)
+    page.addSubview(&repair_autostart);
+    page.addSubview(&remove_autostart);
+    (
+        page,
+        direction,
+        switch_layout,
+        restore,
+        login,
+        repair_autostart,
+        remove_autostart,
+    )
 }
 
 #[allow(clippy::type_complexity)]

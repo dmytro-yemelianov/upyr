@@ -10,6 +10,8 @@
     <string>upyr-settings</string>
     <key>CFBundleIdentifier</key>
     <string>dev.Upyr.Upyr.Settings</string>
+    <key>CFBundleIconFile</key>
+    <string>Upyr.icns</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
