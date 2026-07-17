@@ -35,6 +35,7 @@ reviews:
     - "!assets/sounds/*.wav"
     - "!crates/upyr-core/assets/models/*.ngm"
     - "!packaging/macos/*.icns"
+    - "!vendor/**"
 
   path_instructions:
     - path: "{src,crates}/**/*.rs"
