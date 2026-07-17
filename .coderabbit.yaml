@@ -103,6 +103,8 @@ reviews:
       enabled: false
 
   pre_merge_checks:
+    docstrings:
+      mode: off
     title:
       mode: warning
       requirements: "Use a concise imperative title that describes the user-visible outcome."

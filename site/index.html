@@ -28,7 +28,7 @@
 
     <header class="site-header">
       <div class="shell header-inner">
-        <a class="brand" href="#top" aria-label="Upyr home">
+        <a class="brand" href="#top" aria-label="Upyr home" data-i18n-aria="homeLabel">
           <img src="favicon.svg" width="36" height="36" alt="">
           <span>Upyr</span>
         </a>
@@ -77,7 +77,7 @@
               </a>
             </div>
             <p class="release-note" data-i18n="releaseNote">
-              Universal for Apple Silicon and Intel · macOS 11+ · signing status shown per release
+              Universal for Apple Silicon and Intel · macOS 11+ · current preview is ad-hoc signed and not Apple-notarized
             </p>
           </div>
 
@@ -103,7 +103,7 @@
               <div class="physical-example">
                 <code>[];'\,./</code>
                 <span aria-hidden="true">↔</span>
-                <code>хїжєʼбю.</code>
+                <code>хїжєґбю.</code>
               </div>
               <div class="decision-chip">
                 <span class="decision-icon" aria-hidden="true">✓</span>
@@ -276,7 +276,7 @@
 
       <section class="section about-section" id="about">
         <div class="shell about-grid">
-          <div class="about-mark"><img src="favicon.svg" width="112" height="112" alt="Upyr mascot"></div>
+          <div class="about-mark" aria-hidden="true"><img src="favicon.svg" width="112" height="112" alt=""></div>
           <div>
             <p class="kicker" data-i18n="aboutKicker">About the name</p>
             <h2 data-i18n="aboutTitle">Made to switch.</h2>
@@ -295,7 +295,7 @@
           <div>
             <p class="kicker" data-i18n="downloadKicker">Public preview</p>
             <h2 data-i18n="downloadTitle">Keep typing. Upyr will flip the rest.</h2>
-            <p data-i18n="downloadCopy">Download the newest available macOS preview after checking its signing status in the release notes, or inspect and build every line yourself.</p>
+            <p data-i18n="downloadCopy">The current macOS preview is ad-hoc signed and not Apple-notarized, so Gatekeeper may block it. You can also inspect and build every line yourself.</p>
           </div>
           <div class="download-actions">
             <a class="button button-light" href="https://github.com/dmytro-yemelianov/upyr/releases"><span data-i18n="downloadButton">Download for macOS</span><span aria-hidden="true">↓</span></a>

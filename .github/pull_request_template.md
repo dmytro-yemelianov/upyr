@@ -1,4 +1,4 @@
-## What changed
+# What changed
 
 <!-- Describe the user-visible outcome and why this approach was chosen. -->
 

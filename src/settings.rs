@@ -1,7 +1,18 @@
-use std::{collections::HashSet, env, path::PathBuf, process::Command};
+use std::{
+    collections::HashSet,
+    env,
+    fs::{self, OpenOptions},
+    io::Write,
+    path::PathBuf,
+    process::Command,
+    sync::atomic::{AtomicU64, Ordering},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
-#[cfg(target_os = "macos")]
-use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+#[cfg(not(target_os = "macos"))]
+use std::time::Instant;
 
 #[cfg(not(target_os = "macos"))]
 use anyhow::anyhow;
@@ -13,16 +24,13 @@ use single_instance::SingleInstance;
 
 use crate::{
     autostart,
-    config::{AutoCorrectSensitivity, Config},
+    config::{AutoCorrectSensitivity, Config, config_path},
 };
 #[cfg(not(target_os = "macos"))]
 use crate::{
     config::{GestureAction, ModifierGesture, SoundEvent},
     layout::Direction,
 };
-
-#[cfg(target_os = "macos")]
-use crate::config::config_path;
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -32,24 +40,146 @@ const PROJECT_WEBSITE_URL: &str = "https://dmytro-yemelianov.github.io/upyr/";
 const REPOSITORY_URL: &str = "https://github.com/dmytro-yemelianov/upyr";
 const PRIVACY_SUMMARY: &str = "Local-only by design: no accounts, analytics, telemetry, ads, or text uploads. Typed text and clipboard contents stay on this device.";
 const IMPLEMENTATION_SUMMARY: &str = "Upyr is written in Rust. It maps physical English and Ukrainian keys, then uses a bundled compact character n-gram model to score language candidates locally; no cloud inference is involved.";
+const ACTIVATION_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const ACTIVATION_TTL: Duration = Duration::from_secs(30);
+
+static ACTIVATION_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// A bounded, per-user command queue used to focus the already-running
+/// settings process without opening a network socket or sending user text.
+#[derive(Debug, Clone)]
+struct ActivationInbox {
+    directory: PathBuf,
+}
+
+impl ActivationInbox {
+    fn open() -> Result<Self> {
+        let directory = config_path()?.with_file_name("upyr-settings-activation");
+        Self::at(directory)
+    }
+
+    fn at(directory: PathBuf) -> Result<Self> {
+        fs::create_dir_all(&directory).with_context(|| {
+            format!(
+                "failed to create settings activation directory {}",
+                directory.display()
+            )
+        })?;
+        #[cfg(unix)]
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).with_context(|| {
+            format!(
+                "failed to secure settings activation directory {}",
+                directory.display()
+            )
+        })?;
+        Ok(Self { directory })
+    }
+
+    fn send(&self, tab: SettingsTab) -> Result<()> {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let sequence = ACTIVATION_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let stem = format!("{timestamp:020}-{:010}-{sequence:020}", std::process::id());
+        let temporary = self.directory.join(format!(".{stem}.tmp"));
+        let command = self.directory.join(format!("{stem}.cmd"));
+
+        let result = (|| -> Result<()> {
+            let mut options = OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            options.mode(0o600);
+            let mut file = options.open(&temporary).with_context(|| {
+                format!(
+                    "failed to create settings activation command {}",
+                    temporary.display()
+                )
+            })?;
+            file.write_all(tab.command().as_bytes())
+                .context("failed to write settings activation command")?;
+            file.sync_all()
+                .context("failed to persist settings activation command")?;
+            drop(file);
+            fs::rename(&temporary, &command).with_context(|| {
+                format!(
+                    "failed to publish settings activation command {}",
+                    command.display()
+                )
+            })?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result
+    }
+
+    fn drain(&self) -> Result<Option<SettingsTab>> {
+        let mut commands = Vec::new();
+        for entry in fs::read_dir(&self.directory).with_context(|| {
+            format!(
+                "failed to read settings activation directory {}",
+                self.directory.display()
+            )
+        })? {
+            let entry = entry.context("failed to inspect a settings activation command")?;
+            if entry.path().extension().and_then(|value| value.to_str()) != Some("cmd")
+                || !entry
+                    .file_type()
+                    .context("failed to inspect a settings activation command type")?
+                    .is_file()
+            {
+                continue;
+            }
+            commands.push(entry.path());
+        }
+        commands.sort_unstable();
+
+        let now = SystemTime::now();
+        let mut requested_tab = None;
+        for command in commands {
+            let metadata = fs::metadata(&command).ok();
+            let is_fresh = metadata
+                .as_ref()
+                .and_then(|metadata| metadata.modified().ok())
+                .is_some_and(|modified| match now.duration_since(modified) {
+                    Ok(age) => age <= ACTIVATION_TTL,
+                    Err(_) => true,
+                });
+            let value = if is_fresh && metadata.is_some_and(|metadata| metadata.len() <= 32) {
+                fs::read_to_string(&command).ok()
+            } else {
+                None
+            };
+            let _ = fs::remove_file(&command);
+            if let Some(tab) = value
+                .as_deref()
+                .map(str::trim)
+                .and_then(SettingsTab::from_command)
+            {
+                requested_tab = Some(tab);
+            }
+        }
+        Ok(requested_tab)
+    }
+}
 
 pub fn run() -> Result<()> {
+    let requested_tab = requested_tab();
     let instance_key = settings_instance_key()?;
     let instance = SingleInstance::new(&instance_key)
         .context("failed to create the settings single-instance guard")?;
     if !instance.is_single() {
-        bail!("Upyr Settings is already open");
+        return ActivationInbox::open()?.send(requested_tab);
     }
 
+    let activation = ActivationInbox::open()?;
     let config = Config::load()?;
     let autostart_status = autostart::status()?;
-    let initial_tab = if env::args_os().any(|argument| argument == "--about") {
-        SettingsTab::About
-    } else {
-        SettingsTab::General
-    };
+    let initial_tab = activation.drain()?.unwrap_or(requested_tab);
     #[cfg(target_os = "macos")]
-    return macos::run(config, autostart_status, initial_tab);
+    return macos::run(config, autostart_status, initial_tab, activation);
 
     #[cfg(not(target_os = "macos"))]
     {
@@ -68,6 +198,7 @@ pub fn run() -> Result<()> {
                     config,
                     autostart_status,
                     initial_tab,
+                    activation,
                 )))
             }),
         )
@@ -159,14 +290,19 @@ fn instance_is_held(key: &str) -> bool {
 }
 
 pub fn spawn() -> Result<()> {
-    spawn_tab(None)
+    spawn_tab(SettingsTab::General)
 }
 
 pub fn spawn_about() -> Result<()> {
-    spawn_tab(Some("--about"))
+    spawn_tab(SettingsTab::About)
 }
 
-fn spawn_tab(argument: Option<&str>) -> Result<()> {
+fn spawn_tab(tab: SettingsTab) -> Result<()> {
+    if is_open() {
+        return ActivationInbox::open()?.send(tab);
+    }
+
+    let argument = tab.cli_argument();
     #[cfg(target_os = "macos")]
     if let Some(bundle) = packaged_macos_bundle()? {
         let mut command = Command::new("open");
@@ -258,6 +394,46 @@ impl SettingsTab {
             Self::Advanced => "Advanced",
             Self::About => "About",
         }
+    }
+
+    const fn command(self) -> &'static str {
+        match self {
+            Self::General => "general",
+            Self::Automatic => "automatic",
+            Self::Shortcuts => "shortcuts",
+            Self::Feedback => "feedback",
+            Self::Advanced => "advanced",
+            Self::About => "about",
+        }
+    }
+
+    fn from_command(command: &str) -> Option<Self> {
+        match command {
+            "general" => Some(Self::General),
+            "automatic" => Some(Self::Automatic),
+            "shortcuts" => Some(Self::Shortcuts),
+            "feedback" => Some(Self::Feedback),
+            "advanced" => Some(Self::Advanced),
+            "about" => Some(Self::About),
+            _ => None,
+        }
+    }
+
+    const fn cli_argument(self) -> Option<&'static str> {
+        match self {
+            Self::About => Some("--about"),
+            Self::General | Self::Automatic | Self::Shortcuts | Self::Feedback | Self::Advanced => {
+                None
+            }
+        }
+    }
+}
+
+fn requested_tab() -> SettingsTab {
+    if env::args_os().any(|argument| argument == "--about") {
+        SettingsTab::About
+    } else {
+        SettingsTab::General
     }
 }
 
@@ -403,6 +579,8 @@ struct SettingsApp {
     exceptions: String,
     launch_at_login: bool,
     autostart_status: autostart::AutostartStatus,
+    activation: ActivationInbox,
+    next_activation_poll: Instant,
     status: Option<(bool, String)>,
     style_applied: bool,
     tab: SettingsTab,
@@ -417,6 +595,7 @@ impl SettingsApp {
         config: Config,
         autostart_status: autostart::AutostartStatus,
         initial_tab: SettingsTab,
+        activation: ActivationInbox,
     ) -> Self {
         let exceptions = config.auto_correct_exceptions.join("\n");
         let launch_at_login = autostart_status.enabled;
@@ -425,12 +604,39 @@ impl SettingsApp {
             exceptions,
             launch_at_login,
             autostart_status,
+            activation,
+            next_activation_poll: Instant::now(),
             status: None,
             style_applied: false,
             tab: initial_tab,
             search: String::new(),
             recording: None,
             shortcut_error: None,
+        }
+    }
+
+    fn poll_activation(&mut self, context: &egui::Context) {
+        let now = Instant::now();
+        if now < self.next_activation_poll {
+            return;
+        }
+        self.next_activation_poll = now + ACTIVATION_POLL_INTERVAL;
+
+        match self.activation.drain() {
+            Ok(Some(tab)) => {
+                self.tab = tab;
+                self.search.clear();
+                context.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                context.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                context.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.status = Some((
+                    false,
+                    format!("Could not activate the settings window: {error:#}"),
+                ));
+            }
         }
     }
 
@@ -931,6 +1137,8 @@ impl SettingsApp {
 #[cfg(not(target_os = "macos"))]
 impl eframe::App for SettingsApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_activation(context);
+        context.request_repaint_after(ACTIVATION_POLL_INTERVAL);
         if !self.style_applied {
             let mut style = (*context.style()).clone();
             style.spacing.item_spacing = egui::vec2(10.0, 8.0);
@@ -1271,6 +1479,56 @@ mod tests {
             parse_exceptions("GitHub, codex\ngithub\n  Upyr "),
             vec!["GitHub", "codex", "Upyr"]
         );
+    }
+
+    #[test]
+    fn activation_queue_delivers_the_latest_valid_tab() {
+        let unique = ACTIVATION_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let directory = std::env::temp_dir().join(format!(
+            "upyr-settings-activation-test-{}-{unique}",
+            std::process::id()
+        ));
+        let inbox = ActivationInbox::at(directory.clone()).unwrap();
+
+        inbox.send(SettingsTab::General).unwrap();
+        inbox.send(SettingsTab::About).unwrap();
+        fs::write(
+            directory.join("99999999999999999999-invalid.cmd"),
+            "invalid",
+        )
+        .unwrap();
+
+        #[cfg(unix)]
+        for entry in fs::read_dir(&directory).unwrap() {
+            let entry = entry.unwrap();
+            if entry.path().extension().and_then(|value| value.to_str()) == Some("cmd")
+                && entry.file_name() != "99999999999999999999-invalid.cmd"
+            {
+                assert_eq!(
+                    entry.metadata().unwrap().permissions().mode() & 0o777,
+                    0o600
+                );
+            }
+        }
+
+        assert_eq!(inbox.drain().unwrap(), Some(SettingsTab::About));
+        assert_eq!(inbox.drain().unwrap(), None);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn settings_tab_activation_commands_round_trip() {
+        for tab in [
+            SettingsTab::General,
+            SettingsTab::Automatic,
+            SettingsTab::Shortcuts,
+            SettingsTab::Feedback,
+            SettingsTab::Advanced,
+            SettingsTab::About,
+        ] {
+            assert_eq!(SettingsTab::from_command(tab.command()), Some(tab));
+        }
+        assert_eq!(SettingsTab::from_command("not-a-tab"), None);
     }
 
     #[test]

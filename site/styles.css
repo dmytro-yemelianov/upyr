@@ -44,7 +44,7 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 16px;
   line-height: 1.6;
-  text-rendering: optimizeLegibility;
+  text-rendering: optimizelegibility;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -69,7 +69,7 @@ button {
 }
 
 code {
-  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
 }
 
 ::selection {
@@ -217,7 +217,7 @@ code {
 
 .github-link svg {
   width: 19px;
-  fill: currentColor;
+  fill: currentcolor;
 }
 
 .hero {
@@ -356,7 +356,7 @@ code {
 .button svg {
   width: 20px;
   fill: none;
-  stroke: currentColor;
+  stroke: currentcolor;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.8;
@@ -709,7 +709,7 @@ code {
   border-radius: 13px;
   color: var(--muted-strong);
   background: rgba(255, 255, 255, 0.04);
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 1.1rem;
   font-weight: 700;
 }
@@ -798,7 +798,7 @@ code {
   display: inline-flex;
   margin-bottom: 60px;
   color: var(--accent);
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 0.72rem;
   font-weight: 750;
   letter-spacing: 0.1em;
@@ -830,7 +830,7 @@ code {
   border-radius: 7px;
   color: #abc3ff;
   background: rgba(124, 166, 255, 0.08);
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 0.67rem;
   font-weight: 750;
   letter-spacing: 0.08em;
@@ -875,7 +875,7 @@ code {
   justify-content: space-between;
   margin-bottom: 21px;
   color: var(--muted);
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 0.58rem;
   letter-spacing: 0.03em;
 }
@@ -924,7 +924,7 @@ code {
 
 .gram-row strong {
   color: var(--muted-strong);
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 0.68rem;
   text-align: right;
 }
@@ -942,7 +942,7 @@ code {
   border-radius: 7px 2px 2px 7px;
   color: var(--muted);
   background: rgba(124, 166, 255, 0.07);
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 0.58rem;
   text-align: center;
 }
@@ -1077,7 +1077,7 @@ code {
 }
 
 .platform-wasm {
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-weight: 800;
 }
 
@@ -1086,7 +1086,7 @@ code {
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--muted);
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-size: 0.55rem;
   font-weight: 780;
   letter-spacing: 0.08em;

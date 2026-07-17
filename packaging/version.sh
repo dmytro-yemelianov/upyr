@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 PACKAGE_ID=$(cargo pkgid --quiet --manifest-path "$ROOT/Cargo.toml" -p upyr)
 VERSION=${PACKAGE_ID##*@}
 

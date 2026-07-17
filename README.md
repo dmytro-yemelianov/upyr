@@ -6,7 +6,7 @@
 
 Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in Rust. It turns text typed on the wrong physical layout into what you meant: `ghbdsn` → `привіт`, `руддщ` → `hello`.
 
-**Release status:** v0.1.0 public preview. macOS is the primary supported desktop target. Release CI is configured to build and smoke-test Windows and Linux/X11 packages, but those platforms remain preview targets. Upyr follows [Semantic Versioning](#versioning-and-releases); compatibility may change before 1.0.
+**Release status:** v0.1.0 public preview. **The current preview download is not Apple Developer ID signed and is not notarized; its macOS bundle is ad-hoc signed only, so Gatekeeper may block it.** macOS is the primary supported desktop target. Release CI is configured to build and smoke-test Windows and Linux/X11 packages, but those platforms remain preview targets. Upyr follows [Semantic Versioning](#versioning-and-releases); compatibility may change before 1.0.
 
 [Download from GitHub Releases](https://github.com/dmytro-yemelianov/upyr/releases) · [Product page](https://dmytro-yemelianov.github.io/upyr/) · [Report an issue](https://github.com/dmytro-yemelianov/upyr/issues/new/choose)
 
@@ -16,7 +16,7 @@ Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in
 - Fixes the word before the caret with `CmdOrCtrl+Alt+Backspace`.
 - Optionally corrects a confidently mistyped word after Space; automatic correction is off by default.
 - Detects and switches between installed English and Ukrainian input sources.
-- Uses the physical keys, including the standard Ukrainian punctuation row: `[];'\,./` ↔ `хїжєʼбю.`.
+- Uses the physical keys, including the standard Ukrainian punctuation row: `[];'\,./` ↔ `хїжєґбю.`.
 - Protects intentional technical text such as `FAANG`, `SaaS`, `NASDAQ`, `iPhone`, URLs, paths, and configured exceptions.
 - Provides searchable, tabbed settings, press-to-record shortcuts, an optional pointer-side language flag, and per-event sounds with volume control.
 - By default, snapshots supported clipboard formats and attempts to restore them after conversion; temporary conversion content is concealed from supported clipboard-history systems.
@@ -73,7 +73,12 @@ Upyr does not translate words. It reconstructs the characters produced by the sa
 
 The embedded model is a **signed character n-gram index**, not a general language model. It contains 173,964 packed 2–5-character records in about 2.8 MiB. Each record stores a character-sequence key and one signed confidence byte: negative for English, positive for Ukrainian. Evidence from the typed candidate is accumulated locally and looked up with binary search.
 
-The index is generated from pinned, checksum-verified English and Ukrainian Leipzig news corpora of equal size. Training tokens are alphabet-filtered and split into character n-grams; corpus sentences and word-frequency tables are not embedded in the app. The generator is reproducible:
+The index is generated from these pinned, checksum-verified Leipzig Corpora Collection inputs, each distributed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/):
+
+- English: [`eng_news_2023_1M`](https://downloads.wortschatz-leipzig.de/corpora/eng_news_2023_1M.tar.gz), the 2023 English news snapshot with 1,000,000 sentences; SHA-256 `c8a5a5e72897aa5e367b0319c1884831c02aaf29bf81342de31ca1b1cc8f3e4c`.
+- Ukrainian: [`ukr_news_2023_1M`](https://downloads.wortschatz-leipzig.de/corpora/ukr_news_2023_1M.tar.gz), the 2023 Ukrainian news snapshot with 1,000,000 sentences; SHA-256 `0901bff8b3fdb3a8c657137754b4214b8ea6f241572d3ff9b2ae718487412383`.
+
+The provider terms and requested attribution are recorded in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). Training tokens are alphabet-filtered and split into character n-grams; corpus sentences and word-frequency tables are not embedded in the app. The generator is reproducible:
 
 ```sh
 python3 tools/generate_ngram_model.py

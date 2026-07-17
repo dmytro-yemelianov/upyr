@@ -378,12 +378,50 @@ fn replace_config_file(temporary: &Path, path: &Path) -> Result<()> {
     fs::rename(temporary, path).context("failed to atomically replace the configuration file")
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+#[allow(unsafe_code)]
 fn replace_config_file(temporary: &Path, path: &Path) -> Result<()> {
-    if path.exists() {
-        fs::remove_file(path).context("failed to replace the existing configuration file")?;
+    use std::os::windows::ffi::OsStrExt;
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    fn wide_path(path: &Path) -> Result<Vec<u16>> {
+        let mut encoded: Vec<u16> = path.as_os_str().encode_wide().collect();
+        if encoded.contains(&0) {
+            bail!("Windows configuration path contains an embedded NUL");
+        }
+        encoded.push(0);
+        Ok(encoded)
     }
-    fs::rename(temporary, path).context("failed to install the new configuration file")
+
+    let temporary = wide_path(temporary)?;
+    let path = wide_path(path)?;
+    // SAFETY: both buffers are NUL-terminated and remain alive for the call.
+    // The temporary file is created beside the destination, so this is a
+    // same-volume rename. MOVEFILE_REPLACE_EXISTING lets Windows perform the
+    // replacement as one operation; unlike delete-then-rename, a failed call
+    // leaves the destination name intact.
+    let replaced = unsafe {
+        MoveFileExW(
+            temporary.as_ptr(),
+            path.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        return Err(std::io::Error::last_os_error())
+            .context("failed to atomically replace the Windows configuration file");
+    }
+    Ok(())
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn replace_config_file(temporary: &Path, path: &Path) -> Result<()> {
+    fs::rename(temporary, path).context(
+        "failed to replace the configuration file without deleting the existing file first",
+    )
 }
 
 fn migrate(value: &mut toml::Value) -> Result<()> {
@@ -570,6 +608,39 @@ mod tests {
 
         write_config_file(&path, b"second", true).unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"second");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn failed_windows_replace_preserves_the_existing_config() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
+
+        let directory =
+            env::temp_dir().join(format!("upyr-windows-replace-test-{}", process::id()));
+        let path = directory.join("config.toml");
+        let temporary = directory.join("config.toml.tmp");
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(&path, b"valid config").unwrap();
+        fs::write(&temporary, b"new config").unwrap();
+
+        // Denying FILE_SHARE_DELETE makes the rename fail deterministically.
+        // The failed atomic replacement must leave both files untouched.
+        let existing = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(&path)
+            .unwrap();
+        assert!(replace_config_file(&temporary, &path).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"valid config");
+        assert_eq!(fs::read(&temporary).unwrap(), b"new config");
+
+        drop(existing);
+        replace_config_file(&temporary, &path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"new config");
         fs::remove_dir_all(directory).unwrap();
     }
 

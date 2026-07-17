@@ -31,6 +31,8 @@ jobs:
           persist-credentials: false
       - name: Verify offline and non-tracking invariants
         run: python3 tools/check_privacy.py
+      - name: Test privacy guard fail-closed cases
+        run: python3 -m unittest tools.test_check_privacy
 
   codeql:
     name: CodeQL (Rust)

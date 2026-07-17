@@ -64,13 +64,13 @@ EXTERNAL_CSS_RESOURCE = re.compile(
 LOG_MACRO = re.compile(r"\b(?:trace|debug|info|warn|error)!\s*\(")
 SENSITIVE_LOG_FIELD = re.compile(r"(?<![A-Za-z0-9_])(?:text|word|source|replacement|prefix|token|clipboard)(?![A-Za-z0-9_])")
 STRING_LITERAL = re.compile(r'"(?:\\.|[^"\\])*"')
-REQUIRED_CSP = (
-    "default-src 'self'",
-    "connect-src 'none'",
-    "object-src 'none'",
-    "base-uri 'none'",
-    "form-action 'none'",
-)
+REQUIRED_CSP = {
+    "default-src": ("'self'",),
+    "connect-src": ("'none'",),
+    "object-src": ("'none'",),
+    "base-uri": ("'none'",),
+    "form-action": ("'none'",),
+}
 
 
 class SiteParser(HTMLParser):
@@ -155,6 +155,40 @@ def check_runtime_source(errors: list[str]) -> None:
             index = end + 1
 
 
+def validate_csp(policy: str, relative: Path) -> list[str]:
+    """Require exact source lists for privacy-critical CSP directives."""
+    errors: list[str] = []
+    directives: dict[str, tuple[str, ...]] = {}
+    duplicates: set[str] = set()
+
+    for raw_directive in policy.split(";"):
+        parts = raw_directive.split()
+        if not parts:
+            continue
+        name = parts[0].lower()
+        if name in directives:
+            duplicates.add(name)
+            continue
+        directives[name] = tuple(parts[1:])
+
+    for name in sorted(duplicates):
+        errors.append(f"{relative}: CSP contains duplicate `{name}` directives")
+
+    for name, required_sources in REQUIRED_CSP.items():
+        actual_sources = directives.get(name)
+        expected = f"{name} {' '.join(required_sources)}"
+        if actual_sources is None:
+            errors.append(f"{relative}: CSP is missing `{expected}`")
+        elif actual_sources != required_sources:
+            actual = " ".join(actual_sources) or "<empty>"
+            errors.append(
+                f"{relative}: CSP `{name}` must be exactly `{' '.join(required_sources)}`; "
+                f"found `{actual}`"
+            )
+
+    return errors
+
+
 def check_site(errors: list[str]) -> None:
     site = ROOT / "site"
     html_files = sorted(site.rglob("*.html")) if site.exists() else []
@@ -172,10 +206,7 @@ def check_site(errors: list[str]) -> None:
         if len(parser.csp) != 1:
             errors.append(f"{relative}: expected exactly one Content-Security-Policy meta tag")
         else:
-            normalized = " ".join(parser.csp[0].split())
-            for directive in REQUIRED_CSP:
-                if directive not in normalized:
-                    errors.append(f"{relative}: CSP is missing `{directive}`")
+            errors.extend(validate_csp(parser.csp[0], relative))
         for label, pattern in WEB_CODE_PATTERNS.items():
             match = pattern.search(source)
             if match:

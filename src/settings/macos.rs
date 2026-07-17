@@ -24,9 +24,9 @@ use objc2_foundation::{
 };
 
 use super::{
-    APP_VERSION, IMPLEMENTATION_SUMMARY, PRIVACY_SUMMARY, PROJECT_WEBSITE_URL, REPOSITORY_URL,
-    SEARCH_PARAMETERS, SettingsTab, autostart_attention, parse_exceptions, pretty_hotkey,
-    sensitivity_label, sync_launch_at_login,
+    ACTIVATION_POLL_INTERVAL, APP_VERSION, ActivationInbox, IMPLEMENTATION_SUMMARY,
+    PRIVACY_SUMMARY, PROJECT_WEBSITE_URL, REPOSITORY_URL, SEARCH_PARAMETERS, SettingsTab,
+    autostart_attention, parse_exceptions, pretty_hotkey, sensitivity_label, sync_launch_at_login,
 };
 use crate::{
     autostart,
@@ -42,6 +42,7 @@ const PAGE_HEIGHT: f64 = 456.0;
 struct ControllerIvars {
     config: RefCell<Config>,
     autostart_status: RefCell<autostart::AutostartStatus>,
+    activation: ActivationInbox,
     controls: OnceCell<Controls>,
 }
 
@@ -335,6 +336,19 @@ define_class!(
             crate::feedback::hide_layout_indicator();
         }
 
+        #[unsafe(method(checkSettingsActivation:))]
+        fn check_settings_activation(&self, _sender: Option<&AnyObject>) {
+            match self.ivars().activation.drain() {
+                Ok(Some(tab)) => self.activate_tab(tab),
+                Ok(None) => {}
+                Err(error) => self.set_status(
+                    false,
+                    &format!("Could not activate the settings window: {error:#}"),
+                ),
+            }
+            self.schedule_activation_poll();
+        }
+
     }
 );
 
@@ -379,14 +393,37 @@ impl NativeController {
     fn new(
         config: Config,
         autostart_status: autostart::AutostartStatus,
+        activation: ActivationInbox,
         mtm: MainThreadMarker,
     ) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(ControllerIvars {
             config: RefCell::new(config),
             autostart_status: RefCell::new(autostart_status),
+            activation,
             controls: OnceCell::new(),
         });
         unsafe { msg_send![super(this), init] }
+    }
+
+    fn activate_tab(&self, tab: SettingsTab) {
+        self.controls()
+            .tabs
+            .selectTabViewItemAtIndex(tab_index(tab));
+        self.controls().window.deminiaturize(None);
+        self.controls().window.makeKeyAndOrderFront(None);
+        #[allow(deprecated)]
+        NSApplication::sharedApplication(self.mtm()).activateIgnoringOtherApps(true);
+    }
+
+    fn schedule_activation_poll(&self) {
+        unsafe {
+            let _: () = msg_send![
+                self,
+                performSelector: sel!(checkSettingsActivation:),
+                withObject: None::<&AnyObject>,
+                afterDelay: ACTIVATION_POLL_INTERVAL.as_secs_f64()
+            ];
+        }
     }
 
     fn controls(&self) -> &Controls {
@@ -865,12 +902,13 @@ pub(super) fn run(
     config: Config,
     autostart_status: autostart::AutostartStatus,
     initial_tab: SettingsTab,
+    activation: ActivationInbox,
 ) -> Result<()> {
     let mtm =
         MainThreadMarker::new().context("Upyr Settings must start on the macOS main thread")?;
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
-    let controller = NativeController::new(config, autostart_status, mtm);
+    let controller = NativeController::new(config, autostart_status, activation, mtm);
     let window = controller.build_window();
     controller
         .controls()
@@ -879,6 +917,7 @@ pub(super) fn run(
     window.makeKeyAndOrderFront(None);
     #[allow(deprecated)]
     app.activateIgnoringOtherApps(true);
+    controller.schedule_activation_poll();
     app.run();
     Ok(())
 }

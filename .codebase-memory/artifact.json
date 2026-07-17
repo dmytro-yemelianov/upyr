@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "36ee3b5bba6e50ef8a1e2f30f111c2ea8a93cecf",
-    "indexed_at": "2026-07-17T09:54:19Z",
+    "commit": "069bd16c35702a11988b656ab996d277096cb718",
+    "indexed_at": "2026-07-17T10:22:16Z",
     "project": "Users-dmytro-Documents-Witcher-S",
-    "nodes": 1586,
-    "edges": 5869,
-    "original_size": 7733248,
-    "compressed_size": 1452767,
+    "nodes": 1610,
+    "edges": 6008,
+    "original_size": 7798784,
+    "compressed_size": 1481539,
     "compression_level": 3
 }
