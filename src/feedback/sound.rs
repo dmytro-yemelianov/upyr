@@ -34,7 +34,49 @@ pub(super) struct SoundAsset {
     keyboard: bool,
 }
 
+/// Anime Reactions uses ElevenLabs-rendered event cues instead of the pfxr
+/// synthesizer. They are pre-generated offline by
+/// `tools/generate_event_sound_pack.py` and bundled the same way the
+/// Original pack's cues used to be; Upyr never calls ElevenLabs at runtime.
+fn anime_event_asset(event: SoundEvent) -> SoundAsset {
+    let (slug, bytes): (&str, &'static [u8]) = match event {
+        SoundEvent::AutoCorrect => (
+            "anime-auto-correct",
+            include_bytes!("../../assets/sounds/anime/auto-correct.wav"),
+        ),
+        SoundEvent::ManualConversion => (
+            "anime-manual-conversion",
+            include_bytes!("../../assets/sounds/anime/manual-conversion.wav"),
+        ),
+        SoundEvent::LayoutSwitch => (
+            "anime-layout-switch",
+            include_bytes!("../../assets/sounds/anime/layout-switch.wav"),
+        ),
+        SoundEvent::Pause => (
+            "anime-pause",
+            include_bytes!("../../assets/sounds/anime/pause.wav"),
+        ),
+        SoundEvent::Resume => (
+            "anime-resume",
+            include_bytes!("../../assets/sounds/anime/resume.wav"),
+        ),
+        SoundEvent::Error => (
+            "anime-error",
+            include_bytes!("../../assets/sounds/anime/error.wav"),
+        ),
+    };
+    SoundAsset {
+        id: SoundId::Event(SoundPack::Anime, event),
+        slug: slug.to_owned(),
+        bytes: Arc::from(bytes),
+        keyboard: false,
+    }
+}
+
 fn event_asset(event: SoundEvent, pack: SoundPack) -> SoundAsset {
+    if pack == SoundPack::Anime {
+        return anime_event_asset(event);
+    }
     let cue = event_cue(event);
     let seed = 0x5550_5952 ^ event_index(event).wrapping_mul(0x9e37_79b9);
     SoundAsset {
@@ -92,10 +134,12 @@ pub(super) fn prewarm(pack: SoundPack) {
                     generated_sound(id, pack, Cue::Key(cue), key_seed(cue, variant));
                 }
             }
-            for event in SoundEvent::ALL {
-                let id = SoundId::Event(pack, event);
-                let seed = 0x5550_5952 ^ event_index(event).wrapping_mul(0x9e37_79b9);
-                generated_sound(id, pack, Cue::Event(event_cue(event)), seed);
+            if pack != SoundPack::Anime {
+                for event in SoundEvent::ALL {
+                    let id = SoundId::Event(pack, event);
+                    let seed = 0x5550_5952 ^ event_index(event).wrapping_mul(0x9e37_79b9);
+                    generated_sound(id, pack, Cue::Event(event_cue(event)), seed);
+                }
             }
         })
         .is_err()
@@ -561,6 +605,28 @@ mod tests {
         }
 
         assert_eq!(waveforms.len(), packs.len() * expected.len());
+    }
+
+    #[test]
+    fn anime_events_have_distinct_embedded_pcm16_assets() {
+        let expected = [
+            (SoundEvent::AutoCorrect, "anime-auto-correct"),
+            (SoundEvent::ManualConversion, "anime-manual-conversion"),
+            (SoundEvent::LayoutSwitch, "anime-layout-switch"),
+            (SoundEvent::Pause, "anime-pause"),
+            (SoundEvent::Resume, "anime-resume"),
+            (SoundEvent::Error, "anime-error"),
+        ];
+
+        for (event, slug) in expected {
+            let asset = anime_event_asset(event);
+            assert_eq!(asset.id, SoundId::Event(SoundPack::Anime, event));
+            assert_eq!(asset.slug, slug);
+            assert!(asset.bytes.as_ref().len() > 44);
+            let samples = pcm16_data_range(asset.bytes.as_ref()).unwrap();
+            assert!(!samples.is_empty());
+            assert!(samples.len() <= 44_100 * 2 * 350 / 1_000);
+        }
     }
 
     #[test]
