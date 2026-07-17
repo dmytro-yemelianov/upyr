@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="dark">
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'none'; connect-src 'self'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
     >
     <meta
       name="description"
@@ -22,6 +22,7 @@
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="styles.css">
     <script src="app.js" defer></script>
+    <script type="module" src="demo.js"></script>
   </head>
   <body>
     <a class="skip-link" href="#main" data-i18n="skip">Skip to content</a>
@@ -119,6 +120,48 @@
           <div><span class="trust-icon" aria-hidden="true">◉</span><span data-i18n="trustAccount">No account</span></div>
           <div><span class="trust-icon" aria-hidden="true">◌</span><span data-i18n="trustTracking">No telemetry</span></div>
           <div><span class="trust-icon" aria-hidden="true">◇</span><span data-i18n="trustSource">Open source · MIT</span></div>
+        </div>
+      </section>
+
+      <section class="section section-panel" id="try-it">
+        <div class="shell">
+          <div class="section-intro section-intro-wide">
+            <p class="kicker">Try it live</p>
+            <h2>An on-screen Apple keyboard, running real WebAssembly</h2>
+            <p>This runs the same Rust decision engine as the desktop app, compiled to WebAssembly and executed entirely in this page. Nothing typed here leaves your browser.</p>
+          </div>
+
+          <div class="live-demo" id="live-demo">
+            <div class="live-demo-controls">
+              <div class="layout-toggle" role="group" aria-label="Keyboard layout">
+                <button type="button" class="layout-toggle-button" data-manual-layout="english">EN</button>
+                <button type="button" class="layout-toggle-button" data-manual-layout="ukrainian">УК</button>
+                <button type="button" class="layout-toggle-button layout-toggle-auto" data-role="auto-toggle">Auto-follow correction</button>
+              </div>
+              <button type="button" class="text-link demo-intense-button" data-role="intense-toggle">
+                <span aria-hidden="true">▶</span> Play intense switching demo
+              </button>
+            </div>
+
+            <div class="live-demo-keyboard-wrap">
+              <div class="live-demo-layout-badge" data-role="layout-badge" aria-hidden="true">EN</div>
+              <div class="keyboard" data-role="keyboard"></div>
+            </div>
+
+            <div class="live-demo-fields">
+              <div class="live-demo-field-group">
+                <label for="live-demo-field">Type here — click the keys above, or use your real keyboard</label>
+                <textarea id="live-demo-field" data-role="demo-field" rows="3" spellcheck="false" autocomplete="off"></textarea>
+                <p class="live-demo-status" data-role="status" aria-live="polite"></p>
+              </div>
+
+              <div class="live-demo-field-group live-demo-excluded">
+                <label for="live-demo-password">Password field — Upyr never attaches to this</label>
+                <input id="live-demo-password" data-role="password-field" type="password" autocomplete="current-password" placeholder="Try typing here">
+                <p class="live-demo-status" data-role="excluded-note"></p>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 

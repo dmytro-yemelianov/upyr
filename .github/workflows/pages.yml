@@ -10,9 +10,10 @@ on:
       - "tools/check_site_content.py"
       - "tools/test_check_site_content.py"
       - "tools/test_check_privacy.py"
-      - "crates/upyr-core/src/auto_correct.rs"
-      - "crates/upyr-core/assets/dictionaries/*.txt"
-      - "crates/upyr-core/assets/models/language.ngm"
+      - "tools/build_site_wasm.sh"
+      - "crates/upyr-wasm/**"
+      - "crates/upyr-core/**"
+      - "Cargo.lock"
       - ".github/workflows/pages.yml"
   pull_request:
     branches:
@@ -23,9 +24,10 @@ on:
       - "tools/check_site_content.py"
       - "tools/test_check_site_content.py"
       - "tools/test_check_privacy.py"
-      - "crates/upyr-core/src/auto_correct.rs"
-      - "crates/upyr-core/assets/dictionaries/*.txt"
-      - "crates/upyr-core/assets/models/language.ngm"
+      - "tools/build_site_wasm.sh"
+      - "crates/upyr-wasm/**"
+      - "crates/upyr-core/**"
+      - "Cargo.lock"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -48,6 +50,23 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+      - name: Install Rust and WASM target
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: 1.88.0
+          targets: wasm32-unknown-unknown
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - name: Install wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+      - name: Build the live-demo WASM bundle
+        run: sh tools/build_site_wasm.sh
+      - name: Install size-check tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y brotli
+      - name: Enforce WASM size budget for the live demo
+        run: python3 tools/check_wasm_size.py site/wasm/upyr_wasm_bg.wasm
       - name: Verify site entrypoint
         run: test -s site/index.html
       - name: Verify release version synchronization

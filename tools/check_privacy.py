@@ -39,6 +39,11 @@ PRE_RENDERED_AUDIO_SUFFIXES = {
     ".opus",
     ".wav",
 }
+# The Anime pack's six application-event cues are the one documented exception
+# to local-only synthesis (see CHANGELOG.md "Security"): they are rendered
+# offline by a manual, developer-run tool (tools/generate_event_sound_pack.py)
+# and bundled as static assets, never generated or fetched at runtime.
+ALLOWED_PRE_RENDERED_AUDIO_ROOT = ROOT / "assets" / "sounds" / "anime"
 
 NETWORK_CRATES = {
     "awc",
@@ -87,6 +92,12 @@ EXTERNAL_CSS_RESOURCE = re.compile(
     r"(?:@import\s+(?:url\()?\s*['\"]?(?:https?:)?//|url\(\s*['\"]?(?:https?:)?//)",
     re.IGNORECASE,
 )
+EXTERNAL_URL_LITERAL = re.compile(r"""['"](?:https?:)?//""", re.IGNORECASE)
+# The wasm-bindgen `--target web` loader fetches the co-located, same-origin
+# `.wasm` binary via `new URL(<relative path>, import.meta.url)`. That is the
+# one legitimate local fetch on the site, so this directory is the only place
+# `fetch` is allowed, and only as long as it contains no external URL literal.
+WASM_ASSET_ROOT = ROOT / "site" / "wasm"
 LOG_MACRO = re.compile(r"\b(?:trace|debug|info|warn|error)!\s*\(")
 SENSITIVE_LOG_FIELD = re.compile(
     r"(?<![A-Za-z0-9_])(?:text|word|source|replacement|prefix|token|clipboard|key|keycode)(?![A-Za-z0-9_])",
@@ -95,7 +106,10 @@ SENSITIVE_LOG_FIELD = re.compile(
 STRING_LITERAL = re.compile(r'"(?:\\.|[^"\\])*"')
 REQUIRED_CSP = {
     "default-src": ("'self'",),
-    "connect-src": ("'none'",),
+    # 'self' (not 'none') exists solely so the bundled WASM loader under
+    # site/wasm/ can fetch its co-located, same-origin .wasm binary. It does
+    # not permit any cross-origin request.
+    "connect-src": ("'self'",),
     "object-src": ("'none'",),
     "base-uri": ("'none'",),
     "form-action": ("'none'",),
@@ -149,7 +163,9 @@ def pre_rendered_audio_files(roots: tuple[Path, ...]) -> list[Path]:
         for root in roots
         if root.exists()
         for path in root.rglob("*")
-        if path.is_file() and path.suffix.lower() in PRE_RENDERED_AUDIO_SUFFIXES
+        if path.is_file()
+        and path.suffix.lower() in PRE_RENDERED_AUDIO_SUFFIXES
+        and not path.resolve().is_relative_to(ALLOWED_PRE_RENDERED_AUDIO_ROOT)
     )
 
 
@@ -269,11 +285,21 @@ def check_site(errors: list[str]) -> None:
     for path in sorted(site.rglob("*.js")):
         source = path.read_text(encoding="utf-8")
         relative = path.relative_to(ROOT)
+        is_wasm_loader = path.resolve().is_relative_to(WASM_ASSET_ROOT)
         for label, pattern in WEB_CODE_PATTERNS.items():
+            if is_wasm_loader and label == "fetch":
+                continue
             match = pattern.search(source)
             if match:
                 line = source.count("\n", 0, match.start()) + 1
                 errors.append(f"{relative}:{line}: {label} is forbidden on the static site")
+        if is_wasm_loader:
+            match = EXTERNAL_URL_LITERAL.search(source)
+            if match:
+                line = source.count("\n", 0, match.start()) + 1
+                errors.append(
+                    f"{relative}:{line}: external URL literal is forbidden in the WASM loader"
+                )
 
     for path in sorted(site.rglob("*.css")):
         source = path.read_text(encoding="utf-8")

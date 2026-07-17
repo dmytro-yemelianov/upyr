@@ -2347,6 +2347,218 @@ code {
   }
 }
 
+/* Live WASM demo: on-screen keyboard and typing fields */
+
+.live-demo {
+  margin-top: 8px;
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015));
+}
+
+.live-demo-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.layout-toggle {
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+}
+
+.layout-toggle-button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.layout-toggle-button:hover {
+  color: var(--text);
+}
+
+.layout-toggle-button.is-active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.layout-toggle-auto {
+  font-weight: 500;
+}
+
+.demo-intense-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: var(--blue);
+}
+
+.live-demo-keyboard-wrap {
+  position: relative;
+  padding: 20px;
+  border-radius: var(--radius-md);
+  background: var(--bg-deep);
+  border: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+.live-demo-layout-badge {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+}
+
+.keyboard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 640px;
+  width: max-content;
+  margin: 0 auto;
+}
+
+.keyboard-row {
+  display: flex;
+  gap: 6px;
+}
+
+.key {
+  position: relative;
+  min-width: 42px;
+  height: 42px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: linear-gradient(180deg, var(--surface-raised), var(--surface));
+  color: var(--text);
+  font: inherit;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: transform 90ms ease, background 90ms ease, border-color 90ms ease;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+}
+
+.key:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.key:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.key.is-pressed {
+  transform: translateY(2px);
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: none;
+}
+
+.key.is-active {
+  background: var(--blue);
+  color: var(--accent-ink);
+}
+
+.key-wide {
+  min-width: 74px;
+}
+
+.key-space {
+  min-width: 260px;
+}
+
+.key-modifier {
+  min-width: 56px;
+  font-size: 1.1rem;
+}
+
+.key-decorative {
+  opacity: 0.4;
+}
+
+.live-demo-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 22px;
+}
+
+.live-demo-field-group label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted-strong);
+  font-size: 0.92rem;
+}
+
+.live-demo-field-group textarea,
+.live-demo-field-group input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  color: var(--text);
+  font: inherit;
+  font-size: 1rem;
+  resize: vertical;
+}
+
+.live-demo-field-group textarea:focus,
+.live-demo-field-group input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.live-demo-status {
+  margin: 8px 0 0;
+  min-height: 1.4em;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.live-demo-excluded input {
+  border-color: var(--danger);
+}
+
+@media (max-width: 860px) {
+  .live-demo-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .keyboard {
+    min-width: 560px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

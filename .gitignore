@@ -1,6 +1,7 @@
 /target/
 /dist/
 /.cache/
+/site/wasm/
 __pycache__/
 *.log
 .DS_Store

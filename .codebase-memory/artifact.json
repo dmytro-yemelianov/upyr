@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "f8fa20bfdad5d579cd781d52c80b99116e6527a2",
-    "indexed_at": "2026-07-17T17:06:59Z",
-    "project": "upyr-site-features",
-    "nodes": 1683,
-    "edges": 6236,
-    "original_size": 7340032,
-    "compressed_size": 1518224,
-    "compression_level": 3
+    "commit": "1104e139b5ebd73c2a094b3b8b6bc92b056f4bb5",
+    "indexed_at": "2026-07-17T14:52:25Z",
+    "project": "upyr",
+    "nodes": 1663,
+    "edges": 6218,
+    "original_size": 4980736,
+    "compressed_size": 1200636,
+    "compression_level": 9
 }
