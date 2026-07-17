@@ -35,6 +35,16 @@ def count_rows(database: Path, table: str) -> int:
     return int(row[0])
 
 
+def validate_json_properties(connection: sqlite3.Connection, table: str) -> None:
+    for row_id, properties in connection.execute(f"SELECT id, properties FROM {table}"):
+        try:
+            json.loads(properties)
+        except (TypeError, json.JSONDecodeError) as error:
+            raise SystemExit(
+                f"{table} row {row_id} contains non-portable JSON properties: {error}"
+            ) from error
+
+
 def main() -> None:
     args = parse_args()
     if shutil.which("zstd") is None:
@@ -71,6 +81,8 @@ def main() -> None:
             )
 
         with sqlite3.connect(f"file:{database}?mode=ro", uri=True) as connection:
+            validate_json_properties(connection, "nodes")
+            validate_json_properties(connection, "edges")
             integrity = [row[0] for row in connection.execute("PRAGMA integrity_check")]
         if integrity != ["ok"]:
             raise SystemExit(f"persisted code graph failed SQLite integrity check: {integrity}")
