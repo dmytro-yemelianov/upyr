@@ -367,6 +367,10 @@ mod tests {
         }
         assert!(!sound_pack_needs_prewarm(&settings));
 
+        settings.set_event_selected(SoundEvent::Error, true);
+        assert!(sound_pack_needs_prewarm(&settings));
+        settings.set_event_selected(SoundEvent::Error, false);
+
         settings.key_clicks = true;
         assert!(sound_pack_needs_prewarm(&settings));
 
