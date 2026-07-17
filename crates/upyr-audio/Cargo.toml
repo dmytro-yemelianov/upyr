@@ -1,0 +1,12 @@
+[package]
+name = "upyr-audio"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Dependency-free procedural sound packs for Upyr"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+

@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-WORKSPACE_PACKAGES = ("upyr", "upyr-core", "upyr-wasm")
+WORKSPACE_PACKAGES = ("upyr", "upyr-audio", "upyr-core", "upyr-wasm")
 
 
 def read(path: str) -> str:
@@ -32,7 +32,11 @@ def main() -> int:
         return 1
     version = version_match.group(1)
 
-    for path in ("crates/upyr-core/Cargo.toml", "crates/upyr-wasm/Cargo.toml"):
+    for path in (
+        "crates/upyr-audio/Cargo.toml",
+        "crates/upyr-core/Cargo.toml",
+        "crates/upyr-wasm/Cargo.toml",
+    ):
         if not re.search(r"(?m)^version\.workspace\s*=\s*true\s*$", read(path)):
             errors.append(f"{path}: package version must inherit workspace.package.version")
 

@@ -88,7 +88,7 @@ body:
     id: version-platform
     attributes:
       label: Upyr version and platform
-      placeholder: "0.1.0 on macOS 15.5 (Apple silicon)"
+      placeholder: "0.2.0 on macOS 15.5 (Apple silicon)"
     validations:
       required: true
 

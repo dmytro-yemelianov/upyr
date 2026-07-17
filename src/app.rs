@@ -6,6 +6,7 @@ use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState, hotkey:
 use single_instance::SingleInstance;
 use tracing::{debug, error, info, warn};
 use tray_icon::menu::MenuEvent;
+use upyr_audio::KeyCue;
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -36,6 +37,7 @@ enum AppEvent {
     Menu(MenuEvent),
     ModifierGesture(GestureAction),
     AutoKey(AutoKeyEvent),
+    KeySound(KeyCue),
     ApplyAutoCorrection {
         generation: u64,
         correction: AutoCorrection,
@@ -168,12 +170,23 @@ fn create_auto_monitor(
     config: &Config,
     event_proxy: &EventLoopProxy<AppEvent>,
 ) -> Result<Option<AutoCorrectMonitor>> {
+    crate::feedback::prewarm_sound_pack(&config.sounds);
     let proxy = event_proxy.clone();
-    AutoCorrectMonitor::start(config.auto_correct, move |event| {
-        if let Err(error) = proxy.send_event(AppEvent::AutoKey(event)) {
-            error!(%error, "failed to forward an automatic-correction key event");
-        }
-    })
+    let sound_proxy = event_proxy.clone();
+    AutoCorrectMonitor::start(
+        config.auto_correct,
+        config.sounds.key_clicks_enabled(),
+        move |event| {
+            if let Err(error) = proxy.send_event(AppEvent::AutoKey(event)) {
+                error!(%error, "failed to forward an automatic-correction key event");
+            }
+        },
+        move |cue| {
+            if let Err(error) = sound_proxy.send_event(AppEvent::KeySound(cue)) {
+                error!(%error, "failed to forward a keyboard sound event");
+            }
+        },
+    )
 }
 
 fn create_auto_monitor_or_log(
@@ -181,7 +194,7 @@ fn create_auto_monitor_or_log(
     event_proxy: &EventLoopProxy<AppEvent>,
 ) -> Option<AutoCorrectMonitor> {
     #[cfg(target_os = "macos")]
-    if config.auto_correct && !accessibility::is_trusted() {
+    if (config.auto_correct || config.sounds.key_clicks_enabled()) && !accessibility::is_trusted() {
         return None;
     }
     match create_auto_monitor(config, event_proxy) {
@@ -340,6 +353,13 @@ impl App {
                 self.auto_tracker.clear();
             }
         }
+    }
+
+    fn handle_key_sound(&self, cue: KeyCue) {
+        if self.paused || self.processing {
+            return;
+        }
+        crate::feedback::play_key_sound(cue, &self.config);
     }
 
     fn schedule_auto_correction(&self, correction: AutoCorrection) {
@@ -732,6 +752,7 @@ impl ApplicationHandler<AppEvent> for App {
                 self.perform_conversion(action == GestureAction::PreviousWord);
             }
             AppEvent::AutoKey(event) => self.handle_auto_key(event),
+            AppEvent::KeySound(cue) => self.handle_key_sound(cue),
             AppEvent::ApplyAutoCorrection {
                 generation,
                 correction,

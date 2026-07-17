@@ -21,6 +21,8 @@ use anyhow::{Context, Result, bail};
 use eframe::egui;
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use single_instance::SingleInstance;
+#[cfg(not(target_os = "macos"))]
+use upyr_audio::KeyCue;
 
 use crate::{
     autostart,
@@ -28,7 +30,7 @@ use crate::{
 };
 #[cfg(not(target_os = "macos"))]
 use crate::{
-    config::{GestureAction, ModifierGesture, SoundEvent},
+    config::{GestureAction, ModifierGesture, SoundEvent, SoundPack},
     layout::Direction,
 };
 
@@ -543,6 +545,16 @@ const SEARCH_PARAMETERS: &[SearchParameter] = &[
     },
     SearchParameter {
         tab: SettingsTab::Feedback,
+        label: "Sound pack",
+        terms: "theme original arcade pfxr anime reactions audio",
+    },
+    SearchParameter {
+        tab: SettingsTab::Feedback,
+        label: "Keyboard sounds",
+        terms: "typing clicks keys space enter escape tab option command control shift caps delete backspace",
+    },
+    SearchParameter {
+        tab: SettingsTab::Feedback,
         label: "Event sounds",
         terms: "automatic correction manual conversion layout switch pause resume error preview",
     },
@@ -994,6 +1006,18 @@ impl SettingsApp {
         ui.small("The shortcut uses physical keys, so it keeps working in either keyboard layout.");
     }
 
+    fn preview_key_sound(&mut self, cue: KeyCue, label: &str) {
+        let mut preview_settings = self.config.sounds;
+        preview_settings.enabled = true;
+        preview_settings.key_clicks = true;
+        self.status = Some(
+            match crate::feedback::preview_key_sound(cue, &preview_settings) {
+                Ok(()) => (true, format!("Previewed {label}.")),
+                Err(error) => (false, format!("Could not preview {label}: {error:#}")),
+            },
+        );
+    }
+
     fn draw_feedback(&mut self, ui: &mut egui::Ui) {
         section_heading(
             ui,
@@ -1025,6 +1049,33 @@ impl SettingsApp {
             ui.label("Volume");
             ui.add(egui::Slider::new(&mut self.config.sounds.volume_percent, 0..=100).suffix("%"));
         });
+        ui.horizontal(|ui| {
+            ui.label("Sound pack");
+            egui::ComboBox::from_id_salt("sound-pack")
+                .selected_text(self.config.sounds.pack.label())
+                .show_ui(ui, |ui| {
+                    for pack in SoundPack::ALL {
+                        ui.selectable_value(&mut self.config.sounds.pack, pack, pack.label());
+                    }
+                });
+        });
+        ui.small(self.config.sounds.pack.description());
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.checkbox(
+                &mut self.config.sounds.key_clicks,
+                "Keyboard sounds (control-key reactions in Anime pack)",
+            );
+            if ui.button("Preview click").clicked() {
+                self.preview_key_sound(KeyCue::Character, "typing click");
+            }
+            if ui.button("Preview control").clicked() {
+                self.preview_key_sound(KeyCue::Space, "control-key reaction");
+            }
+        });
+        ui.small(
+            "Keyboard sounds are opt-in and use only physical key categories; no typed text is retained.",
+        );
         ui.add_space(8.0);
         egui::Grid::new("sound-feedback-grid")
             .num_columns(2)
