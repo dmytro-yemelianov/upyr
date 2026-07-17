@@ -18,7 +18,7 @@ Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in
 - Detects and switches between installed English and Ukrainian input sources.
 - Uses the physical keys, including the standard Ukrainian punctuation row: `[];'\,./` ↔ `хїжєґбю.`.
 - Protects intentional technical text such as `FAANG`, `SaaS`, `NASDAQ`, `iPhone`, URLs, paths, and configured exceptions.
-- Provides searchable, tabbed settings, press-to-record shortcuts, an optional pointer-side language flag, and three locally generated sound packs with event/key controls and master volume.
+- Provides searchable, tabbed settings, press-to-record shortcuts, an optional pointer-side language flag, and three locally synthesized sound packs with event/key controls and master volume.
 - By default, snapshots supported clipboard formats and attempts to restore them after conversion; temporary conversion content is concealed from supported clipboard-history systems.
 
 The menu-bar or system-tray app can convert text, pause or resume correction, open Settings, reload configuration, manage launch at login, and quit.
@@ -129,11 +129,11 @@ upyr autostart enable
 upyr settings
 ```
 
-The settings app exposes General, Automatic, Shortcuts, Feedback, and Advanced tabs. Automatic sensitivity can be conservative, balanced, or aggressive; deliberate strings can be added to `auto_correct_exceptions`. Feedback includes three local sound packs: Upyr Original, Pocket Arcade, and the opt-in Anime Reactions pack. Keyboard feedback crosses into the app as physical key categories only, generates its cues locally, and never stores typed characters. Use `UPYR_CONFIG` to select a different config file.
+The settings app exposes General, Automatic, Shortcuts, Feedback, and Advanced tabs. Automatic sensitivity can be conservative, balanced, or aggressive; deliberate strings can be added to `auto_correct_exceptions`. Feedback includes three local sound packs: Upyr Original, Pocket Arcade, and the opt-in Anime Reactions pack. Every event and key cue is synthesized locally; keyboard feedback crosses into the app as physical key categories only and never stores typed characters. Use `UPYR_CONFIG` to select a different config file.
 
 The versioned TOML schema currently uses `config_version = 6`. Older supported schemas migrate in memory; configurations from a newer unsupported schema are rejected rather than guessed. Keyboard sounds remain disabled during migration and by default. See the generated default file after `upyr init` for every option and its current value.
 
-Sound-pack synthesis is offline and dependency-free in `upyr-audio`. Its pfxr-style engine creates short deterministic variations, while Anime Reactions uses a procedural glottal/formant synthesizer for non-character keys—there are no voice recordings, downloads, microphone access, or remote audio-service calls. Playback uses the operating system's native audio API. Audible feedback can reveal typing rhythm to people nearby, so keyboard sounds are always opt-in; headphones are recommended for the vocal-reaction pack.
+Sound-pack synthesis is offline and dependency-free in `upyr-audio`. Its pfxr-style engine creates short deterministic variations, while Anime Reactions uses a procedural glottal/formant synthesizer for non-character keys. All cues are generated on-device; no recordings or pre-rendered sound files are bundled, and there are no downloads, microphone access, or remote audio-service calls. Playback uses the operating system's native audio API. Audible feedback can reveal typing rhythm to people nearby, so keyboard sounds are always opt-in; headphones are recommended for the vocal-reaction pack.
 
 ## Platform status
 

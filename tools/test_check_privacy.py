@@ -3,8 +3,9 @@
 
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from tools.check_privacy import sensitive_log_field, validate_csp
+from tools.check_privacy import pre_rendered_audio_files, sensitive_log_field, validate_csp
 
 
 VALID_POLICY = (
@@ -43,6 +44,22 @@ class SensitiveLoggingTests(unittest.TestCase):
 
     def test_allows_privacy_preserving_key_categories(self) -> None:
         self.assertIsNone(sensitive_log_field('debug!(?cue, "keyboard sound unavailable");'))
+
+
+class BundledAudioTests(unittest.TestCase):
+    def test_detects_pre_rendered_audio_case_insensitively(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            wav = root / "event.WAV"
+            wav.write_bytes(b"RIFF")
+            (root / "notes.txt").write_text("generated locally", encoding="utf-8")
+
+            self.assertEqual(pre_rendered_audio_files((root,)), [wav])
+
+    def test_accepts_missing_asset_roots(self) -> None:
+        with TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing"
+            self.assertEqual(pre_rendered_audio_files((missing,)), [])
 
 
 if __name__ == "__main__":

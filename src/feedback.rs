@@ -61,9 +61,16 @@ pub fn play_key_sound(cue: KeyCue, config: &Config) -> bool {
 }
 
 pub fn prewarm_sound_pack(settings: &SoundSettings) {
-    if settings.key_clicks_enabled() {
+    if sound_pack_needs_prewarm(settings) {
         sound::prewarm(settings.pack);
     }
+}
+
+fn sound_pack_needs_prewarm(settings: &SoundSettings) -> bool {
+    settings.key_clicks_enabled()
+        || SoundEvent::ALL
+            .into_iter()
+            .any(|event| settings.event_enabled(event))
 }
 
 /// Shows the enabled visual feedback for a confirmed OS input-source change.
@@ -345,5 +352,29 @@ mod tests {
     fn indicator_uses_short_language_labels_and_flags() {
         assert_eq!(indicator_text(SystemLayout::English), "EN  🇬🇧");
         assert_eq!(indicator_text(SystemLayout::Ukrainian), "UK  🇺🇦");
+    }
+
+    #[test]
+    fn prewarms_for_events_or_keyboard_feedback_only_when_audible() {
+        let mut settings = SoundSettings::default();
+        assert!(!sound_pack_needs_prewarm(&settings));
+
+        settings.enabled = true;
+        assert!(sound_pack_needs_prewarm(&settings));
+
+        for event in SoundEvent::ALL {
+            settings.set_event_selected(event, false);
+        }
+        assert!(!sound_pack_needs_prewarm(&settings));
+
+        settings.set_event_selected(SoundEvent::Error, true);
+        assert!(sound_pack_needs_prewarm(&settings));
+        settings.set_event_selected(SoundEvent::Error, false);
+
+        settings.key_clicks = true;
+        assert!(sound_pack_needs_prewarm(&settings));
+
+        settings.volume_percent = 0;
+        assert!(!sound_pack_needs_prewarm(&settings));
     }
 }

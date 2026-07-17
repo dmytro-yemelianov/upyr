@@ -32,7 +32,6 @@ reviews:
     - "!target/**"
     - "!.codebase-memory/**"
     - "!artifacts/**"
-    - "!assets/sounds/*.wav"
     - "!crates/upyr-core/assets/models/*.ngm"
     - "!packaging/macos/*.icns"
     - "!vendor/**"

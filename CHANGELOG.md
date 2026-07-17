@@ -33,12 +33,16 @@ Sound-pack and keyboard-feedback preview.
   preserve the original event theme and keep keyboard monitoring disabled.
 - Keyboard cues branch from raw physical events before autocorrect filtering,
   are cached by pack/cue/variant, and are rate-limited for comfortable typing.
+- Every pack now synthesizes both event and key cues locally. Pre-rendered raw
+  audio assets were removed from the source tree and distributable packages.
 
 ### Security
 
 - Audio synthesis is local-only and receives physical key categories rather
   than rendered text. It uses no recordings, microphone, network service,
   telemetry, or new third-party runtime dependency.
+- Privacy CI and automated review reject pre-rendered audio assets in
+  distributable source paths.
 - Upyr drops keyboard cues while its own synthetic replacement input is active,
   preventing copy, paste, and correction keystrokes from producing feedback.
 
