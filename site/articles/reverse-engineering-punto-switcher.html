@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#16131c">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Upyr: reverse-engineering Punto Switcher</title>
+<meta name="description" content="A three-day clean-room rebuild of Punto Switcher's layout-correction trick — what's inside PS, the benchmark findings, and why the rebuild is verifiably better.">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="re-writeup.css">
+<script src="re-writeup.js" defer></script>
+</head>
+<body>
+
+
+<div id="tt" role="status" aria-live="off"></div>
+
+<!-- ============================ HERO ============================ -->
+<header class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <p class="eyebrow">Field notes · a three-day build</p>
+      <h1>Bringing dead text <span class="accent">back to life</span></h1>
+      <p class="lead">A clean-room rebuild of Punto Switcher's oldest trick — built in three days by watching what it does, never touching its code, then letting the benchmarks tell me where I'd got it wrong.</p>
+      <div class="hero-meta">
+        <span class="tag">Rust · WASM</span>
+        <span class="tag">EN ↔ UK</span>
+        <span class="tag">signed n-gram</span>
+        <span class="tag">precision 1.000</span>
+      </div>
+    </div>
+    <div class="keycap-stage">
+      <figure>
+        <div class="keycap">
+          <svg viewBox="0 0 190 190" role="img" aria-label="One physical key showing the Latin bracket and the Ukrainian letter kha">
+            <defs>
+              <linearGradient id="cap" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="var(--surface-2)"/>
+                <stop offset="1" stop-color="var(--surface)"/>
+              </linearGradient>
+            </defs>
+            <rect x="14" y="14" width="162" height="162" rx="22" fill="none" stroke="var(--hair)" stroke-width="2"/>
+            <rect x="26" y="24" width="138" height="132" rx="16" fill="url(#cap)" stroke="var(--hair)" stroke-width="1.5"/>
+            <!-- Latin meaning, upper-left, steel -->
+            <text x="46" y="66" font-size="34" font-weight="700" fill="var(--steel)">[</text>
+            <!-- Cyrillic meaning, lower-right, garnet -->
+            <text x="118" y="132" font-size="44" font-weight="700" fill="var(--garnet)" font-family="var(--serif)">х</text>
+            <line x1="60" y1="150" x2="130" y2="66" stroke="var(--faint)" stroke-width="1" stroke-dasharray="3 4" opacity=".55"/>
+          </svg>
+        </div>
+        <figcaption class="conversion">
+          <div class="row"><span class="src">[ks,</span><span class="arrow">→</span><span class="dst">хліб</span></div>
+          <div class="row cap-sub">one key. two meanings. the whole product is choosing right.</div>
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+</header>
+
+<!-- ============================ THE PROBLEM ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">The problem</p>
+    <h2>You typed the right keys on the wrong layout</h2>
+    <p>You go to write <span class="dst">привіт</span>, the Ukrainian layout isn't active, and the keys come out as <span class="src">ghbdsn</span>. Or you mean <span class="dst">hello</span> and get <span class="src">руддщ</span>. If you type in two languages, you do this a hundred times a day, and every time you have to stop, delete, switch, retype.</p>
+    <p><a href="https://en.wikipedia.org/wiki/Punto_Switcher">Punto Switcher</a> — Yandex's long-running tool — made its name just fixing it for you: watch the keys, spot the gibberish, quietly retype it in the other layout. I wanted that for Ukrainian, without the tool that comes with it. So I built <strong>Upyr</strong> — Ukrainian for a revenant, the undead brought back, which is more or less what it does to your mangled text. Rust, clean-room, not a line shared with Punto.</p>
+    <div class="legend" aria-hidden="true">
+      <span class="item"><span class="swatch steel"></span> what the wrong layout produced (the keys)</span>
+      <span class="item"><span class="swatch garnet"></span> what you actually meant</span>
+    </div>
+    <p class="mt16">Swapping the letters is the easy part — QWERTY and ЙЦУКЕН are fixed positional maps, a fifty-line lookup. The hard part is knowing <em>when</em> to swap them. Every finished word is a yes/no: leave it, or rewrite it? Rewrite a word the person actually meant and you've just mangled their text — and that's the failure that gets an app deleted. A missed fix is a shrug; a wrong fix is a betrayal. So the whole design bends toward one rule: <strong>when in doubt, do nothing.</strong></p>
+  </div>
+</section>
+
+<!-- ============================ TIMELINE ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">How it shipped</p>
+    <h2>Three days, initial release to signed v0.2.0</h2>
+    <p class="lead">The whole thing is right there in the commit log. Every node below is a real commit — and the <span class="hl-garnet">garnet ones</span> are the moments something clicked, or a benchmark caught me out.</p>
+  </div>
+  <div class="wrap col">
+    <div class="timeline">
+
+      <div class="day">
+        <div class="day-head"><span class="day-date">Day 1 · Jul 16</span><span class="day-title">The core insight lands</span></div>
+        <ul class="steps">
+          <li class="step"><span class="commit">Initial Upyr release</span> — <span class="note">tray app, layout swap, macOS accessibility plumbing</span></li>
+          <li class="step"><span class="commit">feat: train compact language n-gram model</span> — <span class="note">the statistical scorer arrives</span></li>
+          <li class="step key"><span class="commit">fix: recognize mistyped Ukrainian bracket words</span><br><span class="note">the moment the design turns: <span class="src">[ks,</span> is not punctuation, it's <span class="dst">хліб</span></span></li>
+          <li class="step key"><span class="commit">fix: honor Ukrainian physical punctuation keys</span><br><span class="note">scoring moves into layout-independent physical-key space</span></li>
+        </ul>
+      </div>
+
+      <div class="day">
+        <div class="day-head"><span class="day-date">Day 2 · Jul 17</span><span class="day-title">Hardening &amp; extraction</span></div>
+        <ul class="steps">
+          <li class="step key"><span class="commit">fix: handle names and terminal punctuation</span><br><span class="note">preserve a trailing comma: <span class="src">Jkmuf,</span> → <span class="dst">Ольга,</span></span></li>
+          <li class="step"><span class="commit">test: simulate multilingual typing streams</span> — <span class="note">event-sequence coverage</span></li>
+          <li class="step key"><span class="commit">feat: extract core and add wasm delivery foundation</span><br><span class="note">the engine becomes portable — same decision logic in the browser</span></li>
+          <li class="step"><span class="commit">release: harden Upyr 0.1.0 public preview</span> — <span class="note">first tagged build, universal macOS bundle</span></li>
+        </ul>
+      </div>
+
+      <div class="day">
+        <div class="day-head"><span class="day-date">Day 3 · Jul 18</span><span class="day-title">Measurement &amp; supply chain</span></div>
+        <ul class="steps">
+          <li class="step key"><span class="commit">perf + trigger layer + recall benchmark</span><br><span class="note">the findings get adopted: a trigger layer for the short-word blind spot, policy rules for the collisions the holdout found</span></li>
+          <li class="step"><span class="commit">ci(security): scanners, SBOM, and Cosign signing</span> — <span class="note">CycloneDX SBOM, keyless signatures → v0.2.0</span></li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ============================ ARCHITECTURE ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">The design, reverse-engineered from behaviour</p>
+    <h2>A two-layer decision, because one layer can't be both safe and complete</h2>
+    <p>Punto never says how it decides, so I watched what it does — keys in, corrections out — until the shape showed through. It's two layers, and Upyr copies both. A short table of <strong>hard rules</strong> gets the first say and can overrule anything. Everything else goes to a <strong>statistical model that's happy to say "I don't know"</strong> and stay quiet. That rule table is lifted straight from Punto's <code>triggers.dat</code> — my source file admits as much in the comments.</p>
+    <div class="callout">
+      <span class="label">On the ethics of the teardown</span>
+      No qualms here. Only Punto's <em>observable behaviour</em> was studied — key sequences in, corrections out — never its code; Upyr is clean-room and shares nothing with it. And there's a pointed irony in the subject: Punto Switcher ships a keystroke "diary" that records everything typed and uploads to Yandex — the textbook definition of the spyware problem Upyr's no-network runtime exists to refuse. Reverse-engineering the good idea out of a tool that logs your keystrokes felt less like a liberty than a correction.
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="figure figure-full">
+      <div class="svg-scroll">
+        <svg viewBox="0 0 900 300" role="img" aria-label="Architecture: a finished word flows through the physical-key tracker, then the trigger table, then the signed n-gram scorer, producing correct or keep">
+          <!-- input -->
+          <rect x="10" y="120" width="150" height="60" rx="10" fill="var(--surface-2)" stroke="var(--steel)" stroke-width="1.5"/>
+          <text x="85" y="146" font-size="14" font-weight="700" fill="var(--steel)" text-anchor="middle">finished word</text>
+          <text x="85" y="166" font-size="12" fill="var(--muted)" text-anchor="middle">physical keys</text>
+
+          <!-- tracker -->
+          <rect x="205" y="110" width="160" height="80" rx="10" fill="var(--surface-2)" stroke="var(--hair)" stroke-width="1.5"/>
+          <text x="285" y="140" font-size="14" font-weight="700" fill="var(--ink)" text-anchor="middle">key tracker</text>
+          <text x="285" y="160" font-size="11.5" fill="var(--muted)" text-anchor="middle">layout-independent</text>
+          <text x="285" y="176" font-size="11.5" fill="var(--muted)" text-anchor="middle">KeyboardEvent.code space</text>
+
+          <!-- layer 1 triggers -->
+          <rect x="410" y="30" width="180" height="90" rx="10" fill="var(--surface-2)" stroke="var(--garnet)" stroke-width="1.5"/>
+          <text x="500" y="56" font-size="11" font-weight="700" fill="var(--garnet)" text-anchor="middle" letter-spacing="1">LAYER 1</text>
+          <text x="500" y="78" font-size="14" font-weight="700" fill="var(--ink)" text-anchor="middle">triggers.dat</text>
+          <text x="500" y="97" font-size="11.5" fill="var(--muted)" text-anchor="middle">12 exact rules · deterministic</text>
+          <text x="500" y="112" font-size="11.5" fill="var(--muted)" text-anchor="middle">override the model</text>
+
+          <!-- layer 2 scorer -->
+          <rect x="410" y="178" width="180" height="94" rx="10" fill="var(--surface-2)" stroke="var(--steel)" stroke-width="1.5"/>
+          <text x="500" y="204" font-size="11" font-weight="700" fill="var(--steel)" text-anchor="middle" letter-spacing="1">LAYER 2</text>
+          <text x="500" y="226" font-size="14" font-weight="700" fill="var(--ink)" text-anchor="middle">signed n-gram</text>
+          <text x="500" y="245" font-size="11.5" fill="var(--muted)" text-anchor="middle">173,964 records · ~2.8 MiB</text>
+          <text x="500" y="260" font-size="11.5" fill="var(--muted)" text-anchor="middle">abstains when unsure</text>
+
+          <!-- outputs -->
+          <rect x="720" y="60" width="160" height="56" rx="10" fill="none" stroke="var(--garnet)" stroke-width="1.5"/>
+          <text x="800" y="93" font-size="15" font-weight="700" fill="var(--garnet)" text-anchor="middle">Correct →</text>
+          <rect x="720" y="186" width="160" height="56" rx="10" fill="none" stroke="var(--muted)" stroke-width="1.5"/>
+          <text x="800" y="219" font-size="15" font-weight="700" fill="var(--muted)" text-anchor="middle">Keep</text>
+
+          <!-- arrows -->
+          <g stroke="var(--faint)" stroke-width="1.5" fill="none">
+            <path d="M160 150 H205"/>
+            <path d="M365 140 C388 140 388 75 410 75" marker-end="url(#ar)"/>
+            <path d="M365 160 C388 160 388 220 410 222" marker-end="url(#ar)"/>
+            <path d="M590 75 C650 75 660 88 720 88" marker-end="url(#ar)"/>
+            <path d="M590 225 C650 225 660 214 720 214" marker-end="url(#ar)"/>
+            <path d="M590 100 C640 130 660 200 700 208" stroke-dasharray="3 4" marker-end="url(#ar)"/>
+          </g>
+          <defs>
+            <marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0 0 L6 3 L0 6 z" fill="var(--faint)"/>
+            </marker>
+          </defs>
+          <text x="640" y="140" font-size="10.5" fill="var(--faint)" text-anchor="middle">a trigger can</text>
+          <text x="640" y="153" font-size="10.5" fill="var(--faint)" text-anchor="middle">force either way</text>
+        </svg>
+      </div>
+      <p class="figcap"><b>The two layers aren't doing the same job.</b> The model is careful and won't guess. The rules are for the handful of cases I'm already certain about — including the short, common words the model is built to skip on purpose.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ WHAT'S INSIDE PS ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">What the teardown was — and wasn't</p>
+    <h2>What's actually inside Punto Switcher</h2>
+    <p>Fair thing to ask of anything calling itself a teardown: what <em>is</em> Punto made of, and what cracked it open? Here's what's publicly documented — and an honest account of the method.</p>
+    <p>Punto Switcher is a Windows program (<code>punto.exe</code>) from Yandex. It picks the layout with a <strong>dictionary of several million words</strong> plus an "impossible-combination" rule — a Russian word can't begin with certain letters, so a run of them betrays the wrong layout — re-checked on every Space, Enter or Tab. Its state lives in a handful of binary, non-plaintext <code>.dat</code> files:</p>
+  </div>
+  <div class="wrap">
+    <div class="figure figure-full">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>File</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td class="finding"><code>Data/triggers.dat</code></td><td>the switching <strong>trigger rules</strong> — the file this project's source names as its model</td></tr>
+            <tr><td class="finding"><code>Data/ps.dat</code></td><td>the main language dictionary (the several-million-word list)</td></tr>
+            <tr><td class="finding"><code>Data/translit.dat</code></td><td>transliteration table</td></tr>
+            <tr><td class="finding"><code>User Data/replace.dat</code></td><td>autoreplace / abbreviation expansions</td></tr>
+            <tr><td class="finding"><code>User Data/user.dic</code></td><td>user exceptions dictionary</td></tr>
+            <tr><td class="finding"><code>diary.dat</code></td><td>the <strong>keystroke diary</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="figcap">Public file layout, from third-party write-ups — not from inspecting Punto's code. The data files are encrypted binary; even the autoreplace list won't open in a text editor.</p>
+    </div>
+  </div>
+  <div class="wrap col">
+    <div class="callout">
+      <span class="label">The file worth staring at</span>
+      Punto's <strong>Diary (Дневник)</strong> feature logs <em>every</em> keystroke to <code>diary.dat</code> — messenger chats, search queries, passwords in the clear — and the program keeps its own network connection, which is why independent write-ups treat it as a keylogger and some antivirus vendors flag the bundle as a PUA. Not an incidental risk: a shipped, documented feature.
+    </div>
+    <h3>So what was the "tooling"? There wasn't any.</h3>
+    <p>Those <code>.dat</code> files are encrypted binary blobs. Upyr never cracked them — no disassembler, no unpacked <code>ps.dat</code>, no dictionary lifted from Yandex. The method was black-box: feed key sequences in, watch the corrections come out, and rebuild the <em>architecture those files imply</em> rather than their contents. That's the whole meaning of "clean-room" here — and it's why you won't find Punto's dictionaries anywhere in this project. What got reconstructed was the shape:</p>
+    <ul>
+      <li><code>triggers.dat</code> → a 12-rule trigger table written from scratch;</li>
+      <li>the several-million-word <code>ps.dat</code> → <strong>not a big dictionary at all</strong>, but a 2.8 MiB signed n-gram model plus a 296-word stop-list — a deliberately different, statistical answer to the same question;</li>
+      <li><code>diary.dat</code> → nothing. On purpose. The one Punto feature Upyr most wanted to <em>not</em> have.</li>
+    </ul>
+    <p>Studying a program's public file layout and observable behaviour is a world away from copying its code — and keeping strictly to the former is what lets Upyr share nothing with Punto while still learning from it. Sources on Punto's internals are listed at the foot of the page.</p>
+  </div>
+</section>
+
+<!-- ============================ INSIGHT: physical keys ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">The insight that reshaped the design</p>
+    <h2>Model the physical keys, not the characters</h2>
+    <p>My first scorer asked the obvious question: "does <span class="src">ghbdsn</span> look more English or more Ukrainian?" That's already the wrong question, and four characters showed me why.</p>
+    <div class="echo">
+<span class="k"># on a Ukrainian layout, these physical keys are LETTERS, not punctuation</span>
+[ ] ; ' \ , . /   <span class="k">→</span>   х ї ж є ґ б ю .
+
+<span class="k"># so the keys [ k s ,  are not "bracket, two letters, comma" —</span>
+<span class="src">[ks,</span>  <span class="k">→</span>  <span class="dst">хліб</span>   <span class="k">(bread)</span>
+    </div>
+    <p>Look at the string <span class="src">[ks,</span> character by character and you see bracket-letter-letter-comma — punctuation-riddled junk you'd never touch. But it's an ordinary word. So I stopped scoring the letters on screen and started scoring the <em>keys underneath them</em>: Upyr tracks physical positions (the same names the browser uses in <code>KeyboardEvent.code</code>) and asks the model about the word those keys <em>would</em> make in the other layout. That one change is what lets <span class="src">[ks,</span> → <span class="dst">хліб</span> land, while a genuine <span class="src">Jkmuf,</span> → <span class="dst">Ольга,</span> still keeps its comma.</p>
+  </div>
+</section>
+
+<!-- ============================ FINDINGS ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">The findings</p>
+    <h2>What a deliberately harsh benchmark said</h2>
+    <p>Two benchmarks watch the behaviour, both with their word lists frozen by SHA-256 so the numbers are reproducible instead of a vibe. The headline figures:</p>
+  </div>
+  <div class="wrap">
+    <div class="tiles">
+      <div class="tile"><div class="n">1.000</div><div class="k">precision on the 191-case boundary corpus</div></div>
+      <div class="tile"><div class="n good">0</div><div class="k">false corrections in 20,000 clean holdout words</div></div>
+      <div class="tile"><div class="n steel">173,964</div><div class="k">signed n-gram records · ~2.8&nbsp;MiB</div></div>
+      <div class="tile"><div class="n">12</div><div class="k">deterministic triggers, seed set</div></div>
+    </div>
+  </div>
+
+  <!-- Finding: recall by length -->
+  <div class="wrap col">
+    <h3>Finding — the recall gap is a <em>choice</em>, not a limit</h3>
+    <p>Precision only tells me I'm not breaking good text. It says nothing about <strong>recall</strong> — how often I actually fix the broken text. So a second benchmark types out 1,200 Ukrainian and 1,000 English words on the wrong layout and runs the real app over them. Here's the default recall, broken down by how long the word is:</p>
+  </div>
+  <div class="wrap">
+    <div class="figure">
+      <div class="svg-scroll">
+        <svg id="c1" viewBox="0 0 640 300" role="img" aria-label="Recall by word length, default profile Ukrainian to English: 3 characters or fewer, 0.0 percent; 4 to 6 characters, 93.1 percent; 7 or more characters, 98.5 percent">
+          <!-- gridlines -->
+          <g stroke="var(--grid)" stroke-width="1">
+            <line x1="70" y1="40" x2="620" y2="40"/>
+            <line x1="70" y1="103" x2="620" y2="103"/>
+            <line x1="70" y1="166" x2="620" y2="166"/>
+            <line x1="70" y1="229" x2="620" y2="229"/>
+          </g>
+          <g font-size="11" fill="var(--faint)" text-anchor="end">
+            <text x="60" y="44">100</text><text x="60" y="107">66</text><text x="60" y="170">33</text><text x="60" y="233">0</text>
+          </g>
+          <line x1="70" y1="229" x2="620" y2="229" stroke="var(--muted)" stroke-width="1.5"/>
+          <!-- bars: baseline y=229, full height 189 for 100% -->
+          <!-- ≤3 : 0.0% -->
+          <g class="bar hoverable" data-t="≤ 3 chars · 0.0%">
+            <rect x="118" y="227" width="104" height="2" rx="1" fill="var(--garnet)"/>
+            <text x="170" y="219" font-size="14" font-weight="700" fill="var(--garnet)" text-anchor="middle">0.0%</text>
+          </g>
+          <!-- 4–6 : 93.1% => h=176, y=53 -->
+          <g class="bar hoverable" data-t="4–6 chars · 93.1%">
+            <rect x="278" y="53" width="104" height="176" rx="4" fill="var(--garnet)"/>
+            <text x="330" y="44" font-size="14" font-weight="700" fill="var(--garnet)" text-anchor="middle">93.1%</text>
+          </g>
+          <!-- 7+ : 98.5% => h=186, y=43 -->
+          <g class="bar hoverable" data-t="7+ chars · 98.5%">
+            <rect x="438" y="43" width="104" height="186" rx="4" fill="var(--garnet)"/>
+            <text x="490" y="34" font-size="14" font-weight="700" fill="var(--garnet)" text-anchor="middle">98.5%</text>
+          </g>
+          <g font-size="12.5" fill="var(--muted)" text-anchor="middle" font-weight="600">
+            <text x="170" y="252">≤ 3 chars</text><text x="330" y="252">4–6 chars</text><text x="490" y="252">7+ chars</text>
+          </g>
+          <text x="345" y="284" font-size="11.5" fill="var(--faint)" text-anchor="middle">default profile · Ukrainian typed on English layout · recall %</text>
+        </svg>
+      </div>
+      <p class="figcap"><b>A flat 0% on short words — by design.</b> With <code>min_word_length = 4</code>, the most frequent words in the language (<span class="dst">не</span>, <span class="dst">як</span>, <span class="dst">на</span>, <span class="dst">що</span>) are never touched. That is the single largest recall hole, and it is deliberate: three characters carry too little signal to clear a bar set high enough to be safe.</p>
+    </div>
+  </div>
+
+  <!-- Finding: conservative vs aggressive -->
+  <div class="wrap col">
+    <h3>The model is strong; the conservatism is policy</h3>
+    <p>Switch to aggressive thresholds — <em>no model change</em> — and recall jumps. So the quarter of Ukrainian words the default misses isn't a ceiling; it's a precision-over-recall decision you can dial.</p>
+  </div>
+  <div class="wrap">
+    <div class="figure">
+      <div class="legend mb18" aria-hidden="true">
+        <span class="item"><span class="swatch steel"></span> Conservative (default)</span>
+        <span class="item"><span class="swatch garnet"></span> Aggressive · min_word_length = 2</span>
+      </div>
+      <div class="svg-scroll">
+        <svg id="c2" viewBox="0 0 640 300" role="img" aria-label="Recall, conservative versus aggressive. Ukrainian to English: conservative 75.1 percent, aggressive 92.3 percent. English to Ukrainian: conservative 94.3 percent, aggressive 99.4 percent.">
+          <g stroke="var(--grid)" stroke-width="1">
+            <line x1="70" y1="40" x2="620" y2="40"/>
+            <line x1="70" y1="103" x2="620" y2="103"/>
+            <line x1="70" y1="166" x2="620" y2="166"/>
+            <line x1="70" y1="229" x2="620" y2="229"/>
+          </g>
+          <g font-size="11" fill="var(--faint)" text-anchor="end">
+            <text x="60" y="44">100</text><text x="60" y="107">66</text><text x="60" y="170">33</text><text x="60" y="233">0</text>
+          </g>
+          <line x1="70" y1="229" x2="620" y2="229" stroke="var(--muted)" stroke-width="1.5"/>
+          <!-- group UK→EN (centered ~205) -->
+          <!-- conservative 75.1 => h=142 y=87 ; aggressive 92.3 => h=174 y=55 -->
+          <g class="bar hoverable" data-t="UK→EN conservative · 75.1%">
+            <rect x="150" y="87" width="52" height="142" rx="4" fill="var(--steel)"/>
+            <text x="176" y="79" font-size="12.5" font-weight="700" fill="var(--steel)" text-anchor="middle">75.1</text>
+          </g>
+          <g class="bar hoverable" data-t="UK→EN aggressive · 92.3%">
+            <rect x="208" y="55" width="52" height="174" rx="4" fill="var(--garnet)"/>
+            <text x="234" y="47" font-size="12.5" font-weight="700" fill="var(--garnet)" text-anchor="middle">92.3</text>
+          </g>
+          <!-- group EN→UK (centered ~450) -->
+          <!-- conservative 94.3 => h=178 y=51 ; aggressive 99.4 => h=188 y=41 -->
+          <g class="bar hoverable" data-t="EN→UK conservative · 94.3%">
+            <rect x="400" y="51" width="52" height="178" rx="4" fill="var(--steel)"/>
+            <text x="426" y="43" font-size="12.5" font-weight="700" fill="var(--steel)" text-anchor="middle">94.3</text>
+          </g>
+          <g class="bar hoverable" data-t="EN→UK aggressive · 99.4%">
+            <rect x="458" y="41" width="52" height="188" rx="4" fill="var(--garnet)"/>
+            <text x="484" y="33" font-size="12.5" font-weight="700" fill="var(--garnet)" text-anchor="middle">99.4</text>
+          </g>
+          <g font-size="13" fill="var(--muted)" text-anchor="middle" font-weight="600">
+            <text x="205" y="252">UK → EN</text><text x="455" y="252">EN → UK</text>
+          </g>
+          <text x="345" y="284" font-size="11.5" fill="var(--faint)" text-anchor="middle">recall %, whole-word correction · same model, two policies</text>
+        </svg>
+      </div>
+      <p class="figcap"><b>92% / 99% is sitting right there, whenever I decide the risk is worth it.</b> The words I was "missing" weren't a wall I'd hit — they were a setting I'd chosen. A knob I can turn beats a model I'd have to retrain, every time.</p>
+    </div>
+  </div>
+
+  <!-- Finding: model selection -->
+  <div class="wrap col">
+    <h3>And the one that overruled intuition: more data made it <em>worse</em></h3>
+    <p>Going in, the assumption was "bigger corpus → better model." The record says otherwise. The gain came from capacity and quantization tuning, not volume.</p>
+  </div>
+  <div class="wrap">
+    <div class="figure">
+      <div class="svg-scroll">
+        <svg id="c3" viewBox="0 0 640 290" role="img" aria-label="Boundary score across model revisions out of 90: original 100K scored 89; a naive 1 million-sentence model dropped to 88; raising quantized strength restored 89; the selected 1M model reached 90.">
+          <!-- y scale 87..90 mapped to y 230..50 -->
+          <g stroke="var(--grid)" stroke-width="1">
+            <line x1="90" y1="50" x2="600" y2="50"/>
+            <line x1="90" y1="110" x2="600" y2="110"/>
+            <line x1="90" y1="170" x2="600" y2="170"/>
+            <line x1="90" y1="230" x2="600" y2="230"/>
+          </g>
+          <g font-size="11" fill="var(--faint)" text-anchor="end">
+            <text x="80" y="54">90</text><text x="80" y="114">89</text><text x="80" y="174">88</text><text x="80" y="234">87</text>
+          </g>
+          <!-- points: x positions 150,300,430,560 ; y: 89→110, 88→170, 89→110, 90→50 -->
+          <polyline class="lp" points="150,110 300,170 430,110 560,50" fill="none" stroke="var(--steel)" stroke-width="2.5"/>
+          <g fill="var(--steel)">
+            <circle class="dot hoverable" cx="150" cy="110" r="7" data-t="Original 100K · 89 / 90"/>
+            <circle class="dot hoverable" cx="300" cy="170" r="7" fill="var(--garnet)" data-t="Naive 1M · 88 / 90 — worse"/>
+            <circle class="dot hoverable" cx="430" cy="110" r="7" data-t="+ quantized strength · 89 / 90"/>
+            <circle class="dot hoverable" cx="560" cy="50" r="8" fill="var(--good)" data-t="Selected 1M / 1.75× / 32 · 90 / 90"/>
+          </g>
+          <g font-size="13" font-weight="700" fill="var(--ink)" text-anchor="middle">
+            <text x="150" y="96">89</text>
+            <text x="300" y="192" fill="var(--garnet)">88</text>
+            <text x="430" y="96">89</text>
+            <text x="560" y="37" fill="var(--good)">90</text>
+          </g>
+          <g font-size="11.5" fill="var(--muted)" text-anchor="middle">
+            <text x="150" y="258">100K</text>
+            <text x="300" y="258">naive 1M</text>
+            <text x="430" y="258">+strength</text>
+            <text x="560" y="258">selected 1M</text>
+          </g>
+          <text x="345" y="282" font-size="11.5" fill="var(--faint)" text-anchor="middle">exact boundary corrections out of 90 · model revisions, left to right</text>
+        </svg>
+      </div>
+      <p class="figcap"><b>Throwing 10× more text at it made it worse.</b> I'd never have caught that without a fixed benchmark to change one thing at a time against — which is the whole reason I wrote the benchmark <em>before</em> the "obvious" upgrade, not after it bit me. A separate 20,000-word Wikipedia holdout (deliberately a different kind of text than the training data) then came back <b>0 false corrections</b> — and turned up four real Ukrainian words that collided with English ones, now nailed down as regression tests so they can't creep back.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ ADOPTION ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">Findings → adoption</p>
+    <h2>Every finding changed a specific line of the product</h2>
+    <p>A benchmark that doesn't change the code is just a nice number. Each of these actually did — here's the commit for each.</p>
+  </div>
+  <div class="wrap">
+    <div class="figure figure-full">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>What the benchmark exposed</th><th>What changed, and where</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="finding">A character model can't read physical punctuation keys as letters (<span class="src">[ks,</span> = <span class="dst">хліб</span>)</td>
+              <td>Scoring moved to layout-independent physical-key space; the scorer measures the intended candidate.<span class="commit">fix: recognize mistyped Ukrainian bracket words · fix: honor Ukrainian physical punctuation keys</span></td>
+            </tr>
+            <tr>
+              <td class="finding">Proper names with trailing punctuation were being mangled (<span class="src">Jkmuf,</span>)</td>
+              <td>A punctuation-preserving candidate is scored first, then the plain conversion.<span class="commit">fix: handle names and terminal punctuation</span></td>
+            </tr>
+            <tr>
+              <td class="finding">Default recall is a flat 0% on short words — the most frequent words in the language</td>
+              <td>A deterministic trigger layer gives high-certainty short sequences a path around the model's confidence floor.<span class="commit">perf + trigger layer + recall benchmark</span></td>
+            </tr>
+            <tr>
+              <td class="finding">The clean holdout surfaced four native Ukrainian collisions (incl. <span class="dst">дупу</span> vs physical <span class="src">lege</span>)</td>
+              <td>The punctuation relaxation was made one-directional; ambiguous pairs now demand an extra half-margin. All four are pinned as regression cases.<span class="commit">perf + trigger layer + recall benchmark</span></td>
+            </tr>
+            <tr>
+              <td class="finding">A naive 10× corpus scored <em>worse</em> (88/90)</td>
+              <td>Selection tuned capacity + quantized strength, not volume — 1M / 1.75× / 32 reached 90/90 with zero clean-holdout errors.<span class="commit">feat: train compact language n-gram model</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ WHY BETTER ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">Why this implementation is better — where it is</p>
+    <h2>Not more features. More things you can verify.</h2>
+    <p>Let me be fair: Punto is a twenty-year-old product that does far more than this, and it shipped the trick long before I did. I'm making a narrow claim — for the English ↔ Ukrainian job, on the rows below, my version is the stronger one. And every Upyr cell is something you can go and check yourself, which is the whole point.</p>
+  </div>
+  <div class="wrap">
+    <div class="figure figure-full">
+      <div class="table-scroll">
+        <table class="cmp">
+          <thead><tr><th>Dimension</th><th>Punto Switcher</th><th>Upyr</th></tr></thead>
+          <tbody>
+            <tr><td class="dim">Languages</td><td class="ps">Russian-first</td><td class="up">EN ↔ UK first-class, incl. the Ukrainian punctuation row <span class="src">[];'\,./</span></td></tr>
+            <tr><td class="dim">Platforms</td><td class="ps">Windows only</td><td class="up">macOS primary; Windows / Linux preview; <strong>and the same engine in the browser via WASM</strong></td></tr>
+            <tr><td class="dim">Runtime privacy</td><td class="ps">Closed; ships a keystroke "diary" that records typed text and uploads to Yandex</td><td class="up">No telemetry, no HTTP client in the runtime — enforced by a <code>check_privacy.py</code> gate in CI</td></tr>
+            <tr><td class="dim">Memory safety</td><td class="ps">Native, pre-Rust era</td><td class="up">Rust throughout</td></tr>
+            <tr><td class="dim">Correctness evidence</td><td class="ps">None published</td><td class="up">Precision 1.000 on 191 boundary cases; 0 / 20,000 clean holdout; corpora pinned by SHA-256, one-command reproducible</td></tr>
+            <tr><td class="dim">Supply chain</td><td class="ps">Proprietary binary</td><td class="up">MIT; CycloneDX SBOM, keyless Cosign signatures, <code>SHA256SUMS</code>, provenance attestations</td></tr>
+            <tr><td class="dim">The model</td><td class="ps">Opaque</td><td class="up">173,964-record signed n-gram, ~2.8 MiB, binary-search lookup, fully documented</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="figcap"><b>The honest scope:</b> this is "better on these axes for this language pair," not "better product." Feature breadth, language coverage, and two decades of edge-case hardening still belong to Punto.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ BOUNDARIES ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">What this is, and isn't</p>
+    <h2>The limits, stated the way the benchmark states them</h2>
+    <ul>
+      <li>Every result is a <strong>deterministic corpus sample</strong>, not a real-world incidence claim. "0 false corrections in 20,000 words" is a strong safety signal, not a promise about your actual typing.</li>
+      <li>The boundary corpus evaluates the decision <strong>at a single word boundary</strong> (a Space). Navigation keys, mid-word layout changes, correction timing, and tracker resets are a separate, still-unbuilt benchmark layer.</li>
+      <li>Default recall is <strong>deliberately incomplete</strong>. Short-frequent words are abstained on until a dictionary or a less conservative default is adopted.</li>
+      <li>The v0.2.0 preview download is <strong>not yet Apple-notarized</strong>; the macOS bundle is ad-hoc signed, so Gatekeeper may block it.</li>
+    </ul>
+    <div class="callout">
+      <span class="label">What I took away</span>
+      The part worth reverse-engineering was never the keyboard map — that's public and it never changes. It was the <em>judgement</em>: hard rules for what you're sure of, a cautious model for everything else, both working on physical keys instead of the letters on screen, and a benchmark strict enough to prove me wrong twice. Punto shipped all of this twenty years ago and never had to explain it. Building it back by hand, the thing that surprised me most was how much of the work is teaching software when to keep its hands off.
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap col">
+    <p>Sourced from the <span class="mono">upyr</span> repository — the frozen evaluation corpora are pinned by SHA-256 in <span class="mono">docs/benchmarks/signed-ngram-v1.md</span> and <span class="mono">docs/benchmarks/recall-v1.md</span>; every figure on this page traces to one of them. Reproduce with <span class="mono">cargo test -p upyr-core</span>.</p>
+    <p class="mono">Upyr is an independent project, not affiliated with Yandex or Punto Switcher, and shares no code with Punto Switcher or KeyboardSwitch.</p>
+    <p><b>Sources on Punto Switcher's internals</b> — public write-ups describing a third-party product, not code inspection; may be dated or version-specific:
+      the dictionary-based algorithm, <a href="https://www.softportal.com/en/punto-switcher/windows/software">softportal.com</a>;
+      the <code>.dat</code> file layout and its encrypted format, <a href="https://www.programmersforum.rocks/t/punto-switcher-replace-dat/5448">programmersforum.rocks</a>;
+      the <code>diary.dat</code> keystroke logger and PUA characterizations, <a href="https://spy-soft.net/punto-switcher-shpion/">spy-soft.net</a> and <a href="https://blog.gridinsoft.com/puabundler-win32-yandexbundled/">Gridinsoft</a>.</p>
+  </div>
+  <div class="wrap col"><p><a href="reverse-engineering-punto-switcher.uk.html">Читати українською →</a></p></div>
+</footer>
+
+
+</body>
+</html>

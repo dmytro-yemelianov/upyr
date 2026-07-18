@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#16131c">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Upyr: реверс-інжиніринг Punto Switcher</title>
+<meta name="description" content="Чиста реалізація трюку Punto Switcher за три дні — що всередині PS, висновки бенчмарків, і чому ця реалізація об’єктивно краща.">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="re-writeup.css">
+<script src="re-writeup.js" defer></script>
+</head>
+<body>
+
+
+<div id="tt" role="status" aria-live="off"></div>
+
+<!-- ============================ HERO ============================ -->
+<header class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <p class="eyebrow">Нотатки з поля · три дні роботи</p>
+      <h1>Як я повертав до життя <span class="accent">мертвий текст</span></h1>
+      <p class="lead">Чиста реалізація найстарішого трюку Punto Switcher — зроблена за три дні, спостерігаючи, що воно робить, і жодного разу не торкаючись його коду; а потім бенчмарки показали, де я помилявся.</p>
+      <div class="hero-meta">
+        <span class="tag">Rust · WASM</span>
+        <span class="tag">EN ↔ UK</span>
+        <span class="tag">знаковий n-грам</span>
+        <span class="tag">точність 1.000</span>
+      </div>
+    </div>
+    <div class="keycap-stage">
+      <figure>
+        <div class="keycap">
+          <svg viewBox="0 0 190 190" role="img" aria-label="One physical key showing the Latin bracket and the Ukrainian letter kha">
+            <defs>
+              <linearGradient id="cap" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="var(--surface-2)"/>
+                <stop offset="1" stop-color="var(--surface)"/>
+              </linearGradient>
+            </defs>
+            <rect x="14" y="14" width="162" height="162" rx="22" fill="none" stroke="var(--hair)" stroke-width="2"/>
+            <rect x="26" y="24" width="138" height="132" rx="16" fill="url(#cap)" stroke="var(--hair)" stroke-width="1.5"/>
+            <!-- Latin meaning, upper-left, steel -->
+            <text x="46" y="66" font-size="34" font-weight="700" fill="var(--steel)">[</text>
+            <!-- Cyrillic meaning, lower-right, garnet -->
+            <text x="118" y="132" font-size="44" font-weight="700" fill="var(--garnet)" font-family="var(--serif)">х</text>
+            <line x1="60" y1="150" x2="130" y2="66" stroke="var(--faint)" stroke-width="1" stroke-dasharray="3 4" opacity=".55"/>
+          </svg>
+        </div>
+        <figcaption class="conversion">
+          <div class="row"><span class="src">[ks,</span><span class="arrow">→</span><span class="dst">хліб</span></div>
+          <div class="row cap-sub">одна клавіша. два значення. увесь застосунок — це вибір правильного.</div>
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+</header>
+
+<!-- ============================ THE PROBLEM ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">Проблема</p>
+    <h2>Правильні клавіші, але не та розкладка</h2>
+    <p>Ти сідаєш написати <span class="dst">привіт</span>, українська розкладка не ввімкнена — і клавіші виходять як <span class="src">ghbdsn</span>. Або хочеш <span class="dst">hello</span>, а отримуєш <span class="src">руддщ</span>. Якщо ти пишеш двома мовами, це трапляється сто разів на день, і щоразу треба зупинитися, стерти, перемкнути, набрати заново.</p>
+    <p><a href="https://en.wikipedia.org/wiki/Punto_Switcher">Punto Switcher</a> — багаторічний інструмент Яндекса — зробив собі ім’я саме на тому, що виправляє це за тебе: стежить за клавішами, впізнає абракадабру, тихо перенабирає її в іншій розкладці. Я хотів те саме для української — але без інструмента, який іде в комплекті. Тож зробив <strong>Upyr</strong>: упир — це той, хто повернувся з мертвих, а це приблизно те, що застосунок робить із твоїм понівеченим текстом. Rust, чиста реалізація, жодного рядка спільного з Punto.</p>
+    <div class="legend" aria-hidden="true">
+      <span class="item"><span class="swatch steel"></span> що видала не та розкладка (клавіші)</span>
+      <span class="item"><span class="swatch garnet"></span> що ти насправді мав на увазі</span>
+    </div>
+    <p class="mt16">Поміняти літери — це легка частина: QWERTY та ЙЦУКЕН — це фіксовані позиційні карти, пошук на п’ятдесят рядків. Складне — зрозуміти, <em>коли</em> їх міняти. Кожне завершене слово — це «так» чи «ні»: лишити чи переписати? Перепишеш слово, яке людина справді мала на увазі, — і ти щойно спотворив її текст. Саме через це видаляють застосунки. Пропущене виправлення — це знизане плече; хибне виправлення — це зрада. Тому весь дизайн схиляється до одного правила: <strong>сумніваєшся — не роби нічого.</strong></p>
+  </div>
+</section>
+
+<!-- ============================ TIMELINE ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">Як воно вийшло</p>
+    <h2>Три дні: від першого релізу до підписаної v0.2.0</h2>
+    <p class="lead">Уся історія — просто в логу комітів. Кожен вузол нижче — реальний коміт, а <span class="hl-garnet">гранатові</span> — це моменти, коли щось клацнуло, або коли бенчмарк упіймав мене на помилці.</p>
+  </div>
+  <div class="wrap col">
+    <div class="timeline">
+
+      <div class="day">
+        <div class="day-head"><span class="day-date">День 1 · 16 лип.</span><span class="day-title">Ключова ідея приходить</span></div>
+        <ul class="steps">
+          <li class="step"><span class="commit">Initial Upyr release</span> — <span class="note">застосунок у треї, зміна розкладки, обв’язка доступності macOS</span></li>
+          <li class="step"><span class="commit">feat: train compact language n-gram model</span> — <span class="note">з’являється статистичний оцінювач</span></li>
+          <li class="step key"><span class="commit">fix: recognize mistyped Ukrainian bracket words</span><br><span class="note">момент, коли дизайн повертає: <span class="src">[ks,</span> — це не пунктуація, це <span class="dst">хліб</span></span></li>
+          <li class="step key"><span class="commit">fix: honor Ukrainian physical punctuation keys</span><br><span class="note">оцінювання переходить у простір фізичних клавіш, незалежний від розкладки</span></li>
+        </ul>
+      </div>
+
+      <div class="day">
+        <div class="day-head"><span class="day-date">День 2 · 17 лип.</span><span class="day-title">Загартовування й винесення ядра</span></div>
+        <ul class="steps">
+          <li class="step key"><span class="commit">fix: handle names and terminal punctuation</span><br><span class="note">зберегти кому в кінці: <span class="src">Jkmuf,</span> → <span class="dst">Ольга,</span></span></li>
+          <li class="step"><span class="commit">test: simulate multilingual typing streams</span> — <span class="note">покриття послідовностей подій</span></li>
+          <li class="step key"><span class="commit">feat: extract core and add wasm delivery foundation</span><br><span class="note">рушій стає переносним — та сама логіка рішень у браузері</span></li>
+          <li class="step"><span class="commit">release: harden Upyr 0.1.0 public preview</span> — <span class="note">перша тегована збірка, універсальний бандл macOS</span></li>
+        </ul>
+      </div>
+
+      <div class="day">
+        <div class="day-head"><span class="day-date">День 3 · 18 лип.</span><span class="day-title">Вимірювання й ланцюг постачання</span></div>
+        <ul class="steps">
+          <li class="step key"><span class="commit">perf + trigger layer + recall benchmark</span><br><span class="note">висновки впроваджено: шар тригерів для сліпої зони коротких слів, правила політики для колізій, які знайшла відкладена вибірка</span></li>
+          <li class="step"><span class="commit">ci(security): scanners, SBOM, and Cosign signing</span> — <span class="note">CycloneDX SBOM, безключові підписи → v0.2.0</span></li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ============================ ARCHITECTURE ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">Дизайн, відтворений із поведінки</p>
+    <h2>Рішення у два шари — бо один шар не буває водночас і безпечним, і повним</h2>
+    <p>Punto ніде не каже, як воно вирішує, тож я просто дивився, що воно робить — клавіші на вході, виправлення на виході — доки крізь це не проступила форма. Це два шари, і Upyr копіює обидва. Коротка таблиця <strong>жорстких правил</strong> має перше слово й може скасувати будь-що. Усе інше йде до <strong>статистичної моделі, яка радо каже «не знаю»</strong> й мовчить. Ту таблицю правил узято прямо з Punto’вого <code>triggers.dat</code> — мій вихідний файл прямо зізнається в цьому в коментарях.</p>
+    <div class="callout">
+      <span class="label">Про етику розбирання</span>
+      Жодних докорів сумління. Я вивчав лише <em>видиму поведінку</em> Punto — послідовності клавіш на вході, виправлення на виході — і жодного разу її код; Upyr — чиста реалізація, що не має з нею нічого спільного. І тут є в’їдлива іронія: Punto Switcher постачає «щоденник» натискань, який записує все набране й вивантажує на сервери Яндекса — хрестоматійне визначення тієї шпигунської проблеми, яку середовище Upyr без жодної мережі й існує, щоб відкинути. Витягти добру ідею з інструмента, що логує твої натискання, відчувалося не свободою, а радше виправленням несправедливості.
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="figure figure-full">
+      <div class="svg-scroll">
+        <svg viewBox="0 0 900 300" role="img" aria-label="Architecture: a finished word flows through the physical-key tracker, then the trigger table, then the signed n-gram scorer, producing correct or keep">
+          <!-- input -->
+          <rect x="10" y="120" width="150" height="60" rx="10" fill="var(--surface-2)" stroke="var(--steel)" stroke-width="1.5"/>
+          <text x="85" y="146" font-size="14" font-weight="700" fill="var(--steel)" text-anchor="middle">готове слово</text>
+          <text x="85" y="166" font-size="12" fill="var(--muted)" text-anchor="middle">фізичні клавіші</text>
+
+          <!-- tracker -->
+          <rect x="205" y="110" width="160" height="80" rx="10" fill="var(--surface-2)" stroke="var(--hair)" stroke-width="1.5"/>
+          <text x="285" y="140" font-size="14" font-weight="700" fill="var(--ink)" text-anchor="middle">трекер клавіш</text>
+          <text x="285" y="160" font-size="11.5" fill="var(--muted)" text-anchor="middle">незалежний від розкладки</text>
+          <text x="285" y="176" font-size="11.5" fill="var(--muted)" text-anchor="middle">простір KeyboardEvent.code</text>
+
+          <!-- layer 1 triggers -->
+          <rect x="410" y="30" width="180" height="90" rx="10" fill="var(--surface-2)" stroke="var(--garnet)" stroke-width="1.5"/>
+          <text x="500" y="56" font-size="11" font-weight="700" fill="var(--garnet)" text-anchor="middle" letter-spacing="1">ШАР 1</text>
+          <text x="500" y="78" font-size="14" font-weight="700" fill="var(--ink)" text-anchor="middle">triggers.dat</text>
+          <text x="500" y="97" font-size="11.5" fill="var(--muted)" text-anchor="middle">12 точних правил · детерм.</text>
+          <text x="500" y="112" font-size="11.5" fill="var(--muted)" text-anchor="middle">скасовують модель</text>
+
+          <!-- layer 2 scorer -->
+          <rect x="410" y="178" width="180" height="94" rx="10" fill="var(--surface-2)" stroke="var(--steel)" stroke-width="1.5"/>
+          <text x="500" y="204" font-size="11" font-weight="700" fill="var(--steel)" text-anchor="middle" letter-spacing="1">ШАР 2</text>
+          <text x="500" y="226" font-size="14" font-weight="700" fill="var(--ink)" text-anchor="middle">знаковий n-грам</text>
+          <text x="500" y="245" font-size="11.5" fill="var(--muted)" text-anchor="middle">173,964 записи · ~2.8 MiB</text>
+          <text x="500" y="260" font-size="11.5" fill="var(--muted)" text-anchor="middle">мовчить, коли не певен</text>
+
+          <!-- outputs -->
+          <rect x="720" y="60" width="160" height="56" rx="10" fill="none" stroke="var(--garnet)" stroke-width="1.5"/>
+          <text x="800" y="93" font-size="15" font-weight="700" fill="var(--garnet)" text-anchor="middle">Виправити →</text>
+          <rect x="720" y="186" width="160" height="56" rx="10" fill="none" stroke="var(--muted)" stroke-width="1.5"/>
+          <text x="800" y="219" font-size="15" font-weight="700" fill="var(--muted)" text-anchor="middle">Лишити</text>
+
+          <!-- arrows -->
+          <g stroke="var(--faint)" stroke-width="1.5" fill="none">
+            <path d="M160 150 H205"/>
+            <path d="M365 140 C388 140 388 75 410 75" marker-end="url(#ar)"/>
+            <path d="M365 160 C388 160 388 220 410 222" marker-end="url(#ar)"/>
+            <path d="M590 75 C650 75 660 88 720 88" marker-end="url(#ar)"/>
+            <path d="M590 225 C650 225 660 214 720 214" marker-end="url(#ar)"/>
+            <path d="M590 100 C640 130 660 200 700 208" stroke-dasharray="3 4" marker-end="url(#ar)"/>
+          </g>
+          <defs>
+            <marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0 0 L6 3 L0 6 z" fill="var(--faint)"/>
+            </marker>
+          </defs>
+          <text x="640" y="140" font-size="10.5" fill="var(--faint)" text-anchor="middle">тригер може</text>
+          <text x="640" y="153" font-size="10.5" fill="var(--faint)" text-anchor="middle">змусити в будь-який бік</text>
+        </svg>
+      </div>
+      <p class="figcap"><b>Два шари роблять різну роботу.</b> Модель обережна й не вгадуватиме. Правила — для тієї жменьки випадків, у яких я вже впевнений, зокрема для коротких частих слів, які модель навмисно пропускає.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ WHAT'S INSIDE PS ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">Чим було розбирання — а чим ні</p>
+    <h2>Що насправді всередині Punto Switcher</h2>
+    <p>Слушне запитання до всього, що зветься «розбиранням»: із <em>чого</em> Punto зроблено і чим його розкрили? Ось що задокументовано публічно — і чесний опис методу.</p>
+    <p>Punto Switcher — програма для Windows (<code>punto.exe</code>) від Яндекса. Розкладку вона обирає за <strong>словником у кілька мільйонів слів</strong> плюс правилом «неможливого поєднання» — російське слово не може починатися з певних літер, тож їхня низка викриває не ту розкладку — і перевіряє це на кожен пробіл, Enter чи Tab. Її стан живе в кількох двійкових, не-текстових файлах <code>.dat</code>:</p>
+  </div>
+  <div class="wrap">
+    <div class="figure figure-full">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Файл</th><th>Роль</th></tr></thead>
+          <tbody>
+            <tr><td class="finding"><code>Data/triggers.dat</code></td><td><strong>правила-тригери</strong> перемикання — саме цей файл вихідник проєкту називає своєю моделлю</td></tr>
+            <tr><td class="finding"><code>Data/ps.dat</code></td><td>основний мовний словник (той список у кілька мільйонів слів)</td></tr>
+            <tr><td class="finding"><code>Data/translit.dat</code></td><td>таблиця транслітерації</td></tr>
+            <tr><td class="finding"><code>User Data/replace.dat</code></td><td>автозаміна / розгортання скорочень</td></tr>
+            <tr><td class="finding"><code>User Data/user.dic</code></td><td>користувацький словник винятків</td></tr>
+            <tr><td class="finding"><code>diary.dat</code></td><td><strong>щоденник натискань</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="figcap">Публічна структура файлів, зі сторонніх оглядів — а не з інспекції коду Punto. Файли даних — зашифрований двійковий формат; навіть список автозаміни не відкриється в текстовому редакторі.</p>
+    </div>
+  </div>
+  <div class="wrap col">
+    <div class="callout">
+      <span class="label">Файл, у який варто вдивитися</span>
+      Функція <strong>«Щоденник» (Дневник)</strong> Punto записує <em>кожне</em> натискання у <code>diary.dat</code> — чати в месенджерах, пошукові запити, паролі відкритим текстом — а програма тримає власне мережеве з’єднання; саме тому незалежні огляди вважають її кейлогером, а деякі антивіруси позначають збірку як PUA. Не побічний ризик: це поставлена, задокументована функція.
+    </div>
+    <h3>То яким був «інструментарій»? Його не було.</h3>
+    <p>Ті файли <code>.dat</code> — зашифровані двійкові блоби. Upyr їх ніколи не зламував: жодного дизасемблера, жодного розпакованого <code>ps.dat</code>, жодного словника, знятого з Яндекса. Метод був чорноскриньковий: подаєш послідовності клавіш, дивишся на виправлення на виході — і відтворюєш <em>архітектуру, яку ці файли передбачають</em>, а не їхній вміст. У цьому весь сенс «чистої реалізації» — і тому словників Punto ти ніде в цьому проєкті не знайдеш. Відтворено було форму:</p>
+    <ul>
+      <li><code>triggers.dat</code> → таблиця з 12 правил, написана з нуля;</li>
+      <li><code>ps.dat</code> на кілька мільйонів слів → <strong>зовсім не великий словник</strong>, а знаковий n-грам на 2.8 MiB плюс стоп-список із 296 слів — навмисно інша, статистична відповідь на те саме питання;</li>
+      <li><code>diary.dat</code> → нічого. Свідомо. Та єдина функція Punto, якої Upyr найбільше хотів <em>не</em> мати.</li>
+    </ul>
+    <p>Вивчати публічну структуру файлів і видиму поведінку програми — це геть інше, ніж копіювати її код; і саме суворе дотримання першого дає Upyr не мати з Punto нічого спільного, водночас у неї навчаючись. Джерела про внутрішню будову Punto наведені внизу сторінки.</p>
+  </div>
+</section>
+
+<!-- ============================ INSIGHT: physical keys ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">Ідея, що перекроїла дизайн</p>
+    <h2>Моделюй фізичні клавіші, а не символи</h2>
+    <p>Мій перший оцінювач ставив очевидне запитання: «на що <span class="src">ghbdsn</span> більше схоже — на англійське чи на українське?» Це вже неправильне запитання, і чотири символи показали мені чому.</p>
+    <div class="echo">
+<span class="k"># на українській розкладці ці фізичні клавіші — ЛІТЕРИ, а не пунктуація</span>
+[ ] ; ' \ , . /   <span class="k">→</span>   х ї ж є ґ б ю .
+
+<span class="k"># тож клавіші [ k s ,  — це не «дужка, дві літери, кома» —</span>
+<span class="src">[ks,</span>  <span class="k">→</span>  <span class="dst">хліб</span>   <span class="k">(bread)</span>
+    </div>
+    <p>Прочитай рядок <span class="src">[ks,</span> символ за символом — і побачиш дужку-літеру-літеру-кому: засмічений пунктуацією мотлох, який ти б нізащо не чіпав. Але це звичайне слово. Тому я перестав оцінювати літери на екрані й почав оцінювати <em>клавіші під ними</em>: Upyr відстежує фізичні позиції (ті самі назви, що браузер дає в <code>KeyboardEvent.code</code>) і питає модель про слово, яке ці клавіші <em>утворили б</em> в іншій розкладці. Саме ця зміна дає змогу <span class="src">[ks,</span> → <span class="dst">хліб</span> спрацювати, тоді як справжнє <span class="src">Jkmuf,</span> → <span class="dst">Ольга,</span> зберігає свою кому.</p>
+  </div>
+</section>
+
+<!-- ============================ FINDINGS ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">Висновки</p>
+    <h2>Що сказав навмисно суворий бенчмарк</h2>
+    <p>За поведінкою стежать два бенчмарки, і в обох списки слів заморожені через SHA-256 — тож числа відтворювані, а не «на око». Головні цифри:</p>
+  </div>
+  <div class="wrap">
+    <div class="tiles">
+      <div class="tile"><div class="n">1.000</div><div class="k">точність на межовому корпусі зі 191 випадку</div></div>
+      <div class="tile"><div class="n good">0</div><div class="k">хибних виправлень на 20 000 «чистих» слів</div></div>
+      <div class="tile"><div class="n steel">173,964</div><div class="k">записів знакового n-грама · ~2.8&nbsp;MiB</div></div>
+      <div class="tile"><div class="n">12</div><div class="k">детермінованих тригерів, стартовий набір</div></div>
+    </div>
+  </div>
+
+  <!-- Finding: recall by length -->
+  <div class="wrap col">
+    <h3>Висновок — розрив у повноті це <em>вибір</em>, а не межа</h3>
+    <p>Точність (precision) лише каже, що я не ламаю добрий текст. Про <strong>повноту</strong> (recall) — як часто я справді виправляю зламаний — вона мовчить. Тож другий бенчмарк набирає 1 200 українських і 1 000 англійських слів на неправильній розкладці й проганяє реальний застосунок по них. Ось повнота за замовчуванням, розбита за довжиною слова:</p>
+  </div>
+  <div class="wrap">
+    <div class="figure">
+      <div class="svg-scroll">
+        <svg id="c1" viewBox="0 0 640 300" role="img" aria-label="Recall by word length, default profile Ukrainian to English: 3 characters or fewer, 0.0 percent; 4 to 6 characters, 93.1 percent; 7 or more characters, 98.5 percent">
+          <!-- gridlines -->
+          <g stroke="var(--grid)" stroke-width="1">
+            <line x1="70" y1="40" x2="620" y2="40"/>
+            <line x1="70" y1="103" x2="620" y2="103"/>
+            <line x1="70" y1="166" x2="620" y2="166"/>
+            <line x1="70" y1="229" x2="620" y2="229"/>
+          </g>
+          <g font-size="11" fill="var(--faint)" text-anchor="end">
+            <text x="60" y="44">100</text><text x="60" y="107">66</text><text x="60" y="170">33</text><text x="60" y="233">0</text>
+          </g>
+          <line x1="70" y1="229" x2="620" y2="229" stroke="var(--muted)" stroke-width="1.5"/>
+          <!-- bars: baseline y=229, full height 189 for 100% -->
+          <!-- ≤3 : 0.0% -->
+          <g class="bar hoverable" data-t="≤ 3 симв. · 0.0%">
+            <rect x="118" y="227" width="104" height="2" rx="1" fill="var(--garnet)"/>
+            <text x="170" y="219" font-size="14" font-weight="700" fill="var(--garnet)" text-anchor="middle">0.0%</text>
+          </g>
+          <!-- 4–6 : 93.1% => h=176, y=53 -->
+          <g class="bar hoverable" data-t="4–6 симв. · 93.1%">
+            <rect x="278" y="53" width="104" height="176" rx="4" fill="var(--garnet)"/>
+            <text x="330" y="44" font-size="14" font-weight="700" fill="var(--garnet)" text-anchor="middle">93.1%</text>
+          </g>
+          <!-- 7+ : 98.5% => h=186, y=43 -->
+          <g class="bar hoverable" data-t="7+ симв. · 98.5%">
+            <rect x="438" y="43" width="104" height="186" rx="4" fill="var(--garnet)"/>
+            <text x="490" y="34" font-size="14" font-weight="700" fill="var(--garnet)" text-anchor="middle">98.5%</text>
+          </g>
+          <g font-size="12.5" fill="var(--muted)" text-anchor="middle" font-weight="600">
+            <text x="170" y="252">≤ 3 симв.</text><text x="330" y="252">4–6 симв.</text><text x="490" y="252">7+ симв.</text>
+          </g>
+          <text x="345" y="284" font-size="11.5" fill="var(--faint)" text-anchor="middle">профіль за замовч. · українське слово на англ. розкладці · повнота, %</text>
+        </svg>
+      </div>
+      <p class="figcap"><b>Рівні 0% на коротких словах — і це задум.</b> За <code>min_word_length = 4</code> найчастіші слова мови (<span class="dst">не</span>, <span class="dst">як</span>, <span class="dst">на</span>, <span class="dst">що</span>) не чіпаються взагалі. Це найбільша діра в повноті — і вона навмисна: у трьох символах замало сигналу, щоб подолати планку, поставлену досить високо, аби бути безпечною.</p>
+    </div>
+  </div>
+
+  <!-- Finding: conservative vs aggressive -->
+  <div class="wrap col">
+    <h3>Модель сильна; консервативність — це політика</h3>
+    <p>Перемкни на агресивні пороги — <em>без жодної зміни моделі</em> — і повнота підскакує. Тож та чверть українських слів, яку пропускає режим за замовчуванням, — це не стеля, а рішення «точність важливіша за повноту», яке можна викрутити.</p>
+  </div>
+  <div class="wrap">
+    <div class="figure">
+      <div class="legend mb18" aria-hidden="true">
+        <span class="item"><span class="swatch steel"></span> Консервативний (за замовч.)</span>
+        <span class="item"><span class="swatch garnet"></span> Агресивний · min_word_length = 2</span>
+      </div>
+      <div class="svg-scroll">
+        <svg id="c2" viewBox="0 0 640 300" role="img" aria-label="Recall, conservative versus aggressive. Ukrainian to English: conservative 75.1 percent, aggressive 92.3 percent. English to Ukrainian: conservative 94.3 percent, aggressive 99.4 percent.">
+          <g stroke="var(--grid)" stroke-width="1">
+            <line x1="70" y1="40" x2="620" y2="40"/>
+            <line x1="70" y1="103" x2="620" y2="103"/>
+            <line x1="70" y1="166" x2="620" y2="166"/>
+            <line x1="70" y1="229" x2="620" y2="229"/>
+          </g>
+          <g font-size="11" fill="var(--faint)" text-anchor="end">
+            <text x="60" y="44">100</text><text x="60" y="107">66</text><text x="60" y="170">33</text><text x="60" y="233">0</text>
+          </g>
+          <line x1="70" y1="229" x2="620" y2="229" stroke="var(--muted)" stroke-width="1.5"/>
+          <!-- group UK→EN (centered ~205) -->
+          <!-- conservative 75.1 => h=142 y=87 ; aggressive 92.3 => h=174 y=55 -->
+          <g class="bar hoverable" data-t="УК→АНГ консерв. · 75.1%">
+            <rect x="150" y="87" width="52" height="142" rx="4" fill="var(--steel)"/>
+            <text x="176" y="79" font-size="12.5" font-weight="700" fill="var(--steel)" text-anchor="middle">75.1</text>
+          </g>
+          <g class="bar hoverable" data-t="УК→АНГ агресив. · 92.3%">
+            <rect x="208" y="55" width="52" height="174" rx="4" fill="var(--garnet)"/>
+            <text x="234" y="47" font-size="12.5" font-weight="700" fill="var(--garnet)" text-anchor="middle">92.3</text>
+          </g>
+          <!-- group EN→UK (centered ~450) -->
+          <!-- conservative 94.3 => h=178 y=51 ; aggressive 99.4 => h=188 y=41 -->
+          <g class="bar hoverable" data-t="АНГ→УК консерв. · 94.3%">
+            <rect x="400" y="51" width="52" height="178" rx="4" fill="var(--steel)"/>
+            <text x="426" y="43" font-size="12.5" font-weight="700" fill="var(--steel)" text-anchor="middle">94.3</text>
+          </g>
+          <g class="bar hoverable" data-t="АНГ→УК агресив. · 99.4%">
+            <rect x="458" y="41" width="52" height="188" rx="4" fill="var(--garnet)"/>
+            <text x="484" y="33" font-size="12.5" font-weight="700" fill="var(--garnet)" text-anchor="middle">99.4</text>
+          </g>
+          <g font-size="13" fill="var(--muted)" text-anchor="middle" font-weight="600">
+            <text x="205" y="252">УК → АНГ</text><text x="455" y="252">АНГ → УК</text>
+          </g>
+          <text x="345" y="284" font-size="11.5" fill="var(--faint)" text-anchor="middle">повнота, %, виправлення цілого слова · та сама модель, дві політики</text>
+        </svg>
+      </div>
+      <p class="figcap"><b>92% / 99% лежать напоготові — щойно я вирішу, що ризик того вартий.</b> Слова, які я «пропускав», були не стіною, об яку я вдарився, а налаштуванням, яке я сам обрав. Ручка, яку можна крутнути, щоразу краща за модель, яку довелося б перетреновувати.</p>
+    </div>
+  </div>
+
+  <!-- Finding: model selection -->
+  <div class="wrap col">
+    <h3>І той, що переважив інтуїцію: більше даних зробило <em>гірше</em></h3>
+    <p>На старті я припускав: «більший корпус → краща модель». Історія каже інакше. Виграш дало налаштування ємності та квантування, а не обсяг.</p>
+  </div>
+  <div class="wrap">
+    <div class="figure">
+      <div class="svg-scroll">
+        <svg id="c3" viewBox="0 0 640 290" role="img" aria-label="Boundary score across model revisions out of 90: original 100K scored 89; a naive 1 million-sentence model dropped to 88; raising quantized strength restored 89; the selected 1M model reached 90.">
+          <!-- y scale 87..90 mapped to y 230..50 -->
+          <g stroke="var(--grid)" stroke-width="1">
+            <line x1="90" y1="50" x2="600" y2="50"/>
+            <line x1="90" y1="110" x2="600" y2="110"/>
+            <line x1="90" y1="170" x2="600" y2="170"/>
+            <line x1="90" y1="230" x2="600" y2="230"/>
+          </g>
+          <g font-size="11" fill="var(--faint)" text-anchor="end">
+            <text x="80" y="54">90</text><text x="80" y="114">89</text><text x="80" y="174">88</text><text x="80" y="234">87</text>
+          </g>
+          <!-- points: x positions 150,300,430,560 ; y: 89→110, 88→170, 89→110, 90→50 -->
+          <polyline class="lp" points="150,110 300,170 430,110 560,50" fill="none" stroke="var(--steel)" stroke-width="2.5"/>
+          <g fill="var(--steel)">
+            <circle class="dot hoverable" cx="150" cy="110" r="7" data-t="Початковий 100K · 89 / 90"/>
+            <circle class="dot hoverable" cx="300" cy="170" r="7" fill="var(--garnet)" data-t="Наївний 1M · 88 / 90 — гірше"/>
+            <circle class="dot hoverable" cx="430" cy="110" r="7" data-t="+ сила квантування · 89 / 90"/>
+            <circle class="dot hoverable" cx="560" cy="50" r="8" fill="var(--good)" data-t="Обраний 1M / 1.75× / 32 · 90 / 90"/>
+          </g>
+          <g font-size="13" font-weight="700" fill="var(--ink)" text-anchor="middle">
+            <text x="150" y="96">89</text>
+            <text x="300" y="192" fill="var(--garnet)">88</text>
+            <text x="430" y="96">89</text>
+            <text x="560" y="37" fill="var(--good)">90</text>
+          </g>
+          <g font-size="11.5" fill="var(--muted)" text-anchor="middle">
+            <text x="150" y="258">100K</text>
+            <text x="300" y="258">наївний 1M</text>
+            <text x="430" y="258">+сила</text>
+            <text x="560" y="258">обраний 1M</text>
+          </g>
+          <text x="345" y="282" font-size="11.5" fill="var(--faint)" text-anchor="middle">точні межові виправлення з 90 · ревізії моделі, зліва направо</text>
+        </svg>
+      </div>
+      <p class="figcap"><b>Кинути в неї у 10× більше тексту зробило її гіршою.</b> Я б цього нізащо не впіймав без фіксованого бенчмарку, проти якого можна міняти по одній речі за раз — і саме тому я написав бенчмарк <em>перед</em> «очевидним» апгрейдом, а не після того, як він мене вкусив. Окрема відкладена вибірка з 20 000 слів Вікіпедії (навмисно інший тип тексту, ніж тренувальні дані) тоді повернула <b>0 хибних виправлень</b> — і виявила чотири справжні українські слова, що зіштовхнулися з англійськими; тепер вони закріплені як регресійні тести, щоб не могли повернутися.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ ADOPTION ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">Висновки → впровадження</p>
+    <h2>Кожен висновок змінив конкретний рядок продукту</h2>
+    <p>Бенчмарк, який не змінює код, — це просто гарне число. Кожен із цих таки змінив — ось коміт для кожного.</p>
+  </div>
+  <div class="wrap">
+    <div class="figure figure-full">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Що виявив бенчмарк</th><th>Що змінилося і де</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="finding">Символьна модель не читає фізичні клавіші пунктуації як літери (<span class="src">[ks,</span> = <span class="dst">хліб</span>)</td>
+              <td>Оцінювання перейшло в простір фізичних клавіш, незалежний від розкладки; оцінювач міряє задуманий кандидат.<span class="commit">fix: recognize mistyped Ukrainian bracket words · fix: honor Ukrainian physical punctuation keys</span></td>
+            </tr>
+            <tr>
+              <td class="finding">Власні назви з комою в кінці спотворювалися (<span class="src">Jkmuf,</span>)</td>
+              <td>Спершу оцінюється кандидат зі збереженою пунктуацією, потім звичайне перетворення.<span class="commit">fix: handle names and terminal punctuation</span></td>
+            </tr>
+            <tr>
+              <td class="finding">Повнота за замовч. — рівні 0% на коротких словах, найчастіших у мові</td>
+              <td>Шар детермінованих тригерів дає коротким певним послідовностям шлях в обхід порога впевненості моделі.<span class="commit">perf + trigger layer + recall benchmark</span></td>
+            </tr>
+            <tr>
+              <td class="finding">Чиста вибірка виявила чотири колізії з українськими словами (зокрема <span class="dst">дупу</span> проти фізичного <span class="src">lege</span>)</td>
+              <td>Пом’якшення пунктуації зробили одностороннім; неоднозначні пари тепер вимагають додаткового пів-запасу. Усі чотири закріплені як регресійні випадки.<span class="commit">perf + trigger layer + recall benchmark</span></td>
+            </tr>
+            <tr>
+              <td class="finding">Наївний корпус у 10× дав <em>гірший</em> результат (88/90)</td>
+              <td>Відбір налаштував ємність + силу квантування, а не обсяг — 1M / 1.75× / 32 дав 90/90 без жодної помилки на чистій вибірці.<span class="commit">feat: train compact language n-gram model</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ WHY BETTER ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">Чому ця реалізація краща — і в чому саме</p>
+    <h2>Не більше функцій. Більше того, що можна перевірити.</h2>
+    <p>Скажу чесно: Punto — двадцятирічний продукт, який уміє куди більше за це, і він випустив цей трюк задовго до мене. Я роблю вузьке твердження: для завдання «англійська ↔ українська», за рядками нижче, моя версія сильніша. І кожну клітинку Upyr можна піти й перевірити самому — у цьому вся суть.</p>
+  </div>
+  <div class="wrap">
+    <div class="figure figure-full">
+      <div class="table-scroll">
+        <table class="cmp">
+          <thead><tr><th>Вимір</th><th>Punto Switcher</th><th>Upyr</th></tr></thead>
+          <tbody>
+            <tr><td class="dim">Мови</td><td class="ps">Насамперед російська</td><td class="up">EN ↔ UK повноцінно, зокрема український ряд пунктуації <span class="src">[];'\,./</span></td></tr>
+            <tr><td class="dim">Платформи</td><td class="ps">Лише Windows</td><td class="up">macOS основна; Windows / Linux у превʼю; <strong>і той самий рушій у браузері через WASM</strong></td></tr>
+            <tr><td class="dim">Приватність під час роботи</td><td class="ps">Закрита; постачає «щоденник» натискань, що записує набране й вивантажує на Яндекс</td><td class="up">Жодної телеметрії, жодного HTTP-клієнта в застосунку — це стереже <code>check_privacy.py</code> у CI</td></tr>
+            <tr><td class="dim">Безпека памʼяті</td><td class="ps">Нативна, доба до Rust</td><td class="up">Rust наскрізь</td></tr>
+            <tr><td class="dim">Докази коректності</td><td class="ps">Не опубліковані</td><td class="up">Точність 1.000 на 191 межовому випадку; 0 / 20 000 на чистій вибірці; корпуси закріплені через SHA-256, відтворюються однією командою</td></tr>
+            <tr><td class="dim">Ланцюг постачання</td><td class="ps">Пропрієтарний бінарник</td><td class="up">MIT; CycloneDX SBOM, безключові підписи Cosign, <code>SHA256SUMS</code>, атестації походження</td></tr>
+            <tr><td class="dim">Модель</td><td class="ps">Непрозора</td><td class="up">Знаковий n-грам на 173,964 записи, ~2.8 MiB, пошук двійковим поділом, повністю задокументований</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="figcap"><b>Чесні межі:</b> це «краще за цими осями для цієї пари мов», а не «кращий продукт». Широта функцій, охоплення мов і два десятиліття загартовування на крайніх випадках усе ще належать Punto.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ BOUNDARIES ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">Що це таке, а що ні</p>
+    <h2>Межі — так, як їх формулює сам бенчмарк</h2>
+    <ul>
+      <li>Кожен результат — це <strong>детермінована вибірка з корпусу</strong>, а не твердження про реальну частоту. «0 хибних виправлень на 20 000 слів» — сильний сигнал безпеки, а не обіцянка щодо твого справжнього набору.</li>
+      <li>Межовий корпус оцінює рішення <strong>на одній межі слова</strong> (пробіл). Клавіші навігації, зміни розкладки посеред слова, момент виправлення й скидання трекера — це окремий, ще не збудований шар бенчмарку.</li>
+      <li>Повнота за замовчуванням <strong>навмисно неповна</strong>. Короткі часті слова пропускаються, доки не додано словник або менш консервативне значення за замовчуванням.</li>
+      <li>Завантаження превʼю v0.2.0 <strong>ще не нотаризоване Apple</strong>; бандл macOS підписаний ad-hoc, тож Gatekeeper може його заблокувати.</li>
+    </ul>
+    <div class="callout">
+      <span class="label">Що я з цього виніс</span>
+      Розбирати варто було не карту клавіатури — вона публічна й ніколи не змінюється. Варто було — <em>судження</em>: жорсткі правила для того, у чому певен, обережна модель для всього іншого, обидва працюють на фізичних клавішах, а не на літерах на екрані, і бенчмарк, суворий настільки, щоб двічі довести мою неправоту. Punto випустило все це двадцять років тому й ніколи не мусило пояснювати. Складаючи це назад руками, найбільше мене здивувало, скільки роботи — це навчити програму, коли тримати руки при собі.
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap col">
+    <p>Джерело — репозиторій <span class="mono">upyr</span>: заморожені корпуси оцінювання закріплені через SHA-256 у <span class="mono">docs/benchmarks/signed-ngram-v1.md</span> та <span class="mono">docs/benchmarks/recall-v1.md</span>; кожна цифра на цій сторінці простежується до одного з них. Відтворити: <span class="mono">cargo test -p upyr-core</span>.</p>
+    <p class="mono">Upyr — незалежний проєкт, не пов’язаний із Яндексом чи Punto Switcher, і не має спільного коду з Punto Switcher чи KeyboardSwitch.</p>
+    <p><b>Джерела про внутрішню будову Punto Switcher</b> — публічні огляди стороннього продукту, а не інспекція коду; можуть бути застарілими чи залежати від версії:
+      словниковий алгоритм — <a href="https://www.softportal.com/en/punto-switcher/windows/software">softportal.com</a>;
+      структура файлів <code>.dat</code> та їхній зашифрований формат — <a href="https://www.programmersforum.rocks/t/punto-switcher-replace-dat/5448">programmersforum.rocks</a>;
+      кейлогер <code>diary.dat</code> та означення як PUA — <a href="https://spy-soft.net/punto-switcher-shpion/">spy-soft.net</a> і <a href="https://blog.gridinsoft.com/puabundler-win32-yandexbundled/">Gridinsoft</a>.</p>
+  </div>
+  <div class="wrap col"><p><a href="reverse-engineering-punto-switcher.html">Read in English →</a></p></div>
+</footer>
+
+
+</body>
+</html>
