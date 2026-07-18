@@ -1,5 +1,11 @@
 name: GitHub Pages
 
+# Note: "Validate site" is a required status check on main. Because this
+# workflow is path-filtered, a PR that touches none of the paths below never
+# runs it, and the required check stays permanently "Expected" (blocking the
+# merge). Keep the required-check list and these path filters in sync — or make
+# Validate site always-run — to avoid that phantom gate.
+
 on:
   push:
     branches:

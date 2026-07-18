@@ -95,3 +95,63 @@ jobs:
         run: cargo install cargo-audit --version 0.22.1 --locked
       - name: Audit locked Rust dependencies
         run: cargo audit
+
+  semgrep:
+    name: Semgrep SAST
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install Semgrep
+        run: pipx install semgrep
+      - name: Run Semgrep
+        run: >-
+          semgrep scan
+          --config p/rust
+          --config p/secure-defaults
+          --error
+          --severity ERROR
+          --exclude crates/upyr-core/fixtures
+          --exclude vendor
+          --exclude target
+          .
+
+  security-clippy:
+    name: Security-relevant clippy lints
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install Rust with clippy
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: stable
+          components: clippy
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev \
+            libgtk-3-dev libayatana-appindicator3-dev
+      - name: Run security-relevant clippy lints (advisory)
+        run: |
+          cargo clippy --all-targets --all-features --locked -- \
+            -W clippy::unwrap_used \
+            -W clippy::expect_used \
+            -W clippy::panic \
+            -W clippy::indexing_slicing \
+            -W clippy::arithmetic_side_effects \
+            -W clippy::cast_possible_truncation \
+            -W clippy::cast_sign_loss \
+            -D clippy::invalid_regex
