@@ -59,6 +59,7 @@ fn correction_policy(config: &Config) -> upyr_core::AutoCorrectPolicy {
         },
         min_word_length: config.auto_correct_min_word_length,
         exceptions: config.auto_correct_exceptions.clone(),
+        triggers: upyr_core::builtin_triggers(),
     }
 }
 

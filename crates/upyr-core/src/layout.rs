@@ -1,5 +1,8 @@
 //! Platform-neutral English-Ukrainian physical-key conversion.
 
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
 use serde::{Deserialize, Serialize};
 
 /// The common US-QWERTY positions covered by the initial layout.
@@ -48,29 +51,10 @@ pub fn convert(input: &str, requested: Direction) -> Conversion {
     );
 
     let direction = resolve_direction(input, requested);
-    let (source_lower, target_lower, source_upper, target_upper) = match direction {
-        Direction::EnglishToUkrainian => (
-            ENGLISH_LOWER,
-            UKRAINIAN_LOWER,
-            ENGLISH_UPPER,
-            UKRAINIAN_UPPER,
-        ),
-        Direction::UkrainianToEnglish => (
-            UKRAINIAN_LOWER,
-            ENGLISH_LOWER,
-            UKRAINIAN_UPPER,
-            ENGLISH_UPPER,
-        ),
-        Direction::Smart => unreachable!("smart direction is resolved before conversion"),
-    };
-
+    let table = builtin_mapping(direction);
     let text: String = input
         .chars()
-        .map(|character| {
-            translate_character(character, source_lower, target_lower)
-                .or_else(|| translate_character(character, source_upper, target_upper))
-                .unwrap_or(character)
-        })
+        .map(|character| table.get(&character).copied().unwrap_or(character))
         .collect();
 
     Conversion {
@@ -78,6 +62,41 @@ pub fn convert(input: &str, requested: Direction) -> Conversion {
         text,
         direction,
     }
+}
+
+/// Precomputed built-in mapping table for a resolved direction, covering both
+/// letter-case ranges. Replaces the previous per-character linear scans over the
+/// layout strings so conversion is O(1) per character.
+fn builtin_mapping(direction: Direction) -> &'static HashMap<char, char> {
+    static ENGLISH_TO_UKRAINIAN: OnceLock<HashMap<char, char>> = OnceLock::new();
+    static UKRAINIAN_TO_ENGLISH: OnceLock<HashMap<char, char>> = OnceLock::new();
+    match direction {
+        Direction::EnglishToUkrainian => {
+            ENGLISH_TO_UKRAINIAN.get_or_init(|| build_builtin_mapping(direction))
+        }
+        Direction::UkrainianToEnglish => {
+            UKRAINIAN_TO_ENGLISH.get_or_init(|| build_builtin_mapping(direction))
+        }
+        Direction::Smart => unreachable!("smart direction is resolved before conversion"),
+    }
+}
+
+fn build_builtin_mapping(direction: Direction) -> HashMap<char, char> {
+    let pairs = ENGLISH_LOWER
+        .chars()
+        .zip(UKRAINIAN_LOWER.chars())
+        .chain(ENGLISH_UPPER.chars().zip(UKRAINIAN_UPPER.chars()));
+    let mut mapping = HashMap::new();
+    for (english, ukrainian) in pairs {
+        let (from, to) = match direction {
+            Direction::EnglishToUkrainian => (english, ukrainian),
+            Direction::UkrainianToEnglish => (ukrainian, english),
+            Direction::Smart => unreachable!("smart direction is resolved before conversion"),
+        };
+        // First position wins, matching the previous left-to-right scan.
+        mapping.entry(from).or_insert(to);
+    }
+    mapping
 }
 
 /// Converts with a mapping generated from two installed layouts. Each pair is
@@ -88,19 +107,19 @@ pub fn convert_with_mapping(
     mapping: &[(char, char)],
 ) -> Conversion {
     let direction = resolve_direction(input, requested);
+    let mut lookup: HashMap<char, char> = HashMap::with_capacity(mapping.len());
+    for (english, ukrainian) in mapping {
+        let (from, to) = match direction {
+            Direction::EnglishToUkrainian => (*english, *ukrainian),
+            Direction::UkrainianToEnglish => (*ukrainian, *english),
+            Direction::Smart => unreachable!("smart direction is resolved before mapping"),
+        };
+        // First matching pair wins, matching the previous `find_map` scan.
+        lookup.entry(from).or_insert(to);
+    }
     let text: String = input
         .chars()
-        .map(|character| {
-            mapping
-                .iter()
-                .find_map(|(english, ukrainian)| match direction {
-                    Direction::EnglishToUkrainian if character == *english => Some(*ukrainian),
-                    Direction::UkrainianToEnglish if character == *ukrainian => Some(*english),
-                    Direction::Smart => unreachable!("smart direction is resolved before mapping"),
-                    _ => None,
-                })
-                .unwrap_or(character)
-        })
+        .map(|character| lookup.get(&character).copied().unwrap_or(character))
         .collect();
 
     Conversion {
@@ -130,13 +149,6 @@ pub fn resolve_direction(input: &str, requested: Direction) -> Direction {
     } else {
         Direction::EnglishToUkrainian
     }
-}
-
-fn translate_character(character: char, source: &str, target: &str) -> Option<char> {
-    source
-        .chars()
-        .position(|candidate| candidate == character)
-        .and_then(|index| target.chars().nth(index))
 }
 
 fn is_ukrainian_letter(character: char) -> bool {
