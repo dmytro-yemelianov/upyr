@@ -650,10 +650,9 @@ fn trigger_decision(
     if physical.is_empty() {
         return None;
     }
-    let trigger = policy
-        .triggers
-        .iter()
-        .find(|trigger| trigger.physical == physical)?;
+    let trigger = policy.triggers.iter().find(|trigger| {
+        trigger.physical == physical && trigger.source_layout == sample.source_layout
+    })?;
     match trigger.action {
         TriggerAction::Keep => Some(AutoDecision::Reset),
         TriggerAction::Correct => {
@@ -716,11 +715,11 @@ struct TokenContribution {
 const TOKEN_CACHE_CAPACITY: usize = 1 << 16;
 
 thread_local! {
-    /// Per-token contribution cache keyed by `(model identity, token)`. The
+    /// Per-token contribution cache for the embedded production model. The
     /// scorer re-reads the whole accumulated context on every word boundary;
     /// memoizing each token turns that repeated work into cheap hash lookups
     /// instead of thousands of binary searches over the 174k-entry model.
-    static TOKEN_CONTRIBUTION: RefCell<HashMap<(usize, String), TokenContribution>> =
+    static TOKEN_CONTRIBUTION: RefCell<HashMap<String, TokenContribution>> =
         RefCell::new(HashMap::new());
 }
 
@@ -781,13 +780,20 @@ impl NgramModel<'_> {
         }
     }
 
-    /// Computes (or reuses) a token's language-independent contribution. The
-    /// cache is keyed by the model's base pointer so alternate `.ngm` artifacts
-    /// under test never read each other's cached scores.
+    /// Computes (or reuses) a token's language-independent contribution. Only
+    /// the embedded production model is cached: it is scored repeatedly across
+    /// keystrokes and lives for the whole process, so its identity is stable.
+    /// Alternate `.ngm` artifacts (candidate models under test) are scored
+    /// one-shot and bypass the cache — that avoids keying on a byte address a
+    /// dropped model's allocation could later reuse.
     fn token_contribution(&self, token: &str) -> TokenContribution {
-        let key = (self.bytes.as_ptr() as usize, token.to_owned());
-        if let Some(cached) = TOKEN_CONTRIBUTION.with(|cache| cache.borrow().get(&key).copied()) {
-            return cached;
+        let cacheable = std::ptr::eq(self.bytes.as_ptr(), LANGUAGE_MODEL.as_ptr());
+        if cacheable {
+            if let Some(cached) =
+                TOKEN_CONTRIBUTION.with(|cache| cache.borrow().get(token).copied())
+            {
+                return cached;
+            }
         }
         let mut raw = 0i64;
         let mut maximum = 0i64;
@@ -803,13 +809,15 @@ impl NgramModel<'_> {
             maximum,
             grams,
         };
-        TOKEN_CONTRIBUTION.with(|cache| {
-            let mut cache = cache.borrow_mut();
-            if cache.len() >= TOKEN_CACHE_CAPACITY {
-                cache.clear();
-            }
-            cache.insert(key, contribution);
-        });
+        if cacheable {
+            TOKEN_CONTRIBUTION.with(|cache| {
+                let mut cache = cache.borrow_mut();
+                if cache.len() >= TOKEN_CACHE_CAPACITY {
+                    cache.clear();
+                }
+                cache.insert(token.to_owned(), contribution);
+            });
+        }
         contribution
     }
 
@@ -1657,6 +1665,21 @@ mod tests {
             super::evaluate(&sample("ghbdsn", InputLayout::English), &policy, None),
             AutoDecision::Reset
         );
+    }
+
+    #[test]
+    fn correct_trigger_does_not_fire_on_the_already_correct_layout() {
+        // The same physical keys `ghbdsn` already type "привіт" on a Ukrainian
+        // layout. A Correct trigger authored for the English layout must not
+        // fire there and turn the correct Ukrainian word back into Latin.
+        let policy = AutoCorrectPolicy {
+            triggers: vec![Trigger::new("ghbdsn", TriggerAction::Correct)],
+            ..AutoCorrectPolicy::default()
+        };
+        assert!(!matches!(
+            super::evaluate(&sample("ghbdsn", InputLayout::Ukrainian), &policy, None),
+            AutoDecision::Correct(_)
+        ));
     }
 
     #[test]

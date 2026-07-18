@@ -7,7 +7,11 @@
 //! domain-specific words a deterministic path that the coverage model, tuned to
 //! abstain when uncertain, would otherwise miss.
 
+use std::sync::OnceLock;
+
 use serde::{Deserialize, Serialize};
+
+use crate::auto_correct::InputLayout;
 
 const BUILTIN_TRIGGERS: &str = include_str!("../assets/triggers.txt");
 
@@ -28,13 +32,30 @@ pub enum TriggerAction {
 pub struct Trigger {
     pub physical: String,
     pub action: TriggerAction,
+    /// The active source layout this rule applies to. A trigger only fires when
+    /// the current source layout matches, so a `Correct` rule for a Ukrainian
+    /// word typed on the English layout never fires against the already-correct
+    /// Ukrainian text those same physical keys produce on the Ukrainian layout.
+    pub source_layout: InputLayout,
 }
 
 impl Trigger {
+    /// Builds a trigger for the English source layout — the built-in set is
+    /// Ukrainian words typed on a US-QWERTY layout.
     pub fn new(physical: impl AsRef<str>, action: TriggerAction) -> Self {
+        Self::for_source_layout(physical, action, InputLayout::English)
+    }
+
+    /// Builds a trigger scoped to a specific source layout.
+    pub fn for_source_layout(
+        physical: impl AsRef<str>,
+        action: TriggerAction,
+        source_layout: InputLayout,
+    ) -> Self {
         Self {
             physical: normalize_physical(physical.as_ref()),
             action,
+            source_layout,
         }
     }
 }
@@ -61,9 +82,14 @@ fn parse_line(line: &str) -> Option<Trigger> {
     (!trigger.physical.is_empty()).then_some(trigger)
 }
 
-/// The curated, embedded trigger table shipped with the engine.
+/// The curated, embedded trigger table shipped with the engine. The asset is
+/// parsed once and cached; callers get a cheap clone rather than re-parsing on
+/// every keystroke.
 pub fn builtin_triggers() -> Vec<Trigger> {
-    parse_triggers(BUILTIN_TRIGGERS)
+    static BUILTIN: OnceLock<Vec<Trigger>> = OnceLock::new();
+    BUILTIN
+        .get_or_init(|| parse_triggers(BUILTIN_TRIGGERS))
+        .clone()
 }
 
 /// Normalizes a physical key sequence for matching: trims surrounding

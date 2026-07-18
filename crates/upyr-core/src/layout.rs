@@ -107,19 +107,22 @@ pub fn convert_with_mapping(
     mapping: &[(char, char)],
 ) -> Conversion {
     let direction = resolve_direction(input, requested);
-    let mut lookup: HashMap<char, char> = HashMap::with_capacity(mapping.len());
-    for (english, ukrainian) in mapping {
-        let (from, to) = match direction {
-            Direction::EnglishToUkrainian => (*english, *ukrainian),
-            Direction::UkrainianToEnglish => (*ukrainian, *english),
-            Direction::Smart => unreachable!("smart direction is resolved before mapping"),
-        };
-        // First matching pair wins, matching the previous `find_map` scan.
-        lookup.entry(from).or_insert(to);
-    }
+    // Installed mappings are small (<= ~68 entries). A linear scan keeps the
+    // typing hot path allocation-free instead of building and hashing a lookup
+    // table on every conversion (the built-in mapping, by contrast, is cached).
     let text: String = input
         .chars()
-        .map(|character| lookup.get(&character).copied().unwrap_or(character))
+        .map(|character| {
+            mapping
+                .iter()
+                .find_map(|(english, ukrainian)| match direction {
+                    Direction::EnglishToUkrainian if character == *english => Some(*ukrainian),
+                    Direction::UkrainianToEnglish if character == *ukrainian => Some(*english),
+                    Direction::Smart => unreachable!("smart direction is resolved before mapping"),
+                    _ => None,
+                })
+                .unwrap_or(character)
+        })
         .collect();
 
     Conversion {
