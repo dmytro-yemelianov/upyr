@@ -313,6 +313,25 @@ jobs:
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: dist/*
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3
+      - name: Sign checksums with Cosign (keyless)
+        working-directory: dist
+        run: |
+          # Keyless signing: the certificate binds this repo's GitHub Actions
+          # OIDC identity and the signature is recorded in the Rekor
+          # transparency log. Signing SHA256SUMS.txt transitively covers every
+          # artifact via its hash. Verify with:
+          #   cosign verify-blob \
+          #     --certificate SHA256SUMS.txt.pem \
+          #     --signature SHA256SUMS.txt.sig \
+          #     --certificate-identity-regexp 'https://github.com/dmytro-yemelianov/upyr/.*' \
+          #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+          #     SHA256SUMS.txt
+          cosign sign-blob --yes \
+            --output-signature SHA256SUMS.txt.sig \
+            --output-certificate SHA256SUMS.txt.pem \
+            SHA256SUMS.txt
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

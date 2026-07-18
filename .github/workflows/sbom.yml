@@ -1,0 +1,91 @@
+name: SBOM (CycloneDX)
+
+# Generates a CycloneDX SBOM for the workspace and attaches it to the GitHub
+# release, giving machine-readable supply-chain provenance alongside the
+# THIRD_PARTY_NOTICES and the build-provenance attestation in release.yml.
+#
+# Split into two jobs so generation runs with read-only contents scope; only
+# the upload job elevates to contents: write.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sbom-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  generate-sbom:
+    name: Generate CycloneDX SBOM
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: 1.95.0
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev \
+            libgtk-3-dev libayatana-appindicator3-dev
+
+      - name: Install cargo-cyclonedx
+        run: cargo install --locked --version 0.5.9 cargo-cyclonedx
+
+      - name: Generate workspace SBOMs
+        run: cargo cyclonedx --format json --all
+
+      - name: Bundle SBOMs into a single archive
+        run: |
+          set -euo pipefail
+          mkdir -p sbom-out
+          find . -name '*.cdx.json' -not -path './sbom-out/*' \
+            -exec cp --parents {} sbom-out/ \;
+          tar -czf upyr-sbom.tar.gz -C sbom-out .
+          ls -la upyr-sbom.tar.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cyclonedx-sbom
+          path: upyr-sbom.tar.gz
+          retention-days: 90
+
+  upload-to-release:
+    name: Attach SBOM to release
+    needs: generate-sbom
+    # A real release: published event, or a manual dispatch from a tag ref
+    # (gh workflow run sbom.yml --ref vX.Y.Z). Reject non-tag refs so the SBOM
+    # is never uploaded to a branch-named release.
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/'))
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download SBOM artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: cyclonedx-sbom
+
+      - name: Attach SBOM to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Source the tag from env (not interpolated into the run script) so a
+          # hostile context value cannot influence the shell.
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: gh release upload "$TAG" upyr-sbom.tar.gz --clobber
