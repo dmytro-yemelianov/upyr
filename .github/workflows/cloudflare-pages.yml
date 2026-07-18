@@ -1,0 +1,47 @@
+name: Cloudflare Pages
+
+# Publishes the static site/ directory to the Cloudflare Pages project "upyr"
+# (upyr.org / upyr.pages.dev) on every push to main that touches the site.
+#
+# This is the CI/CD path GitHub Pages already has in pages.yml, mirrored for
+# Cloudflare so the two front doors never drift. Kept as a separate workflow so
+# it can't interfere with the required "Validate site" check in pages.yml.
+#
+# Requires two repository secrets:
+#   CLOUDFLARE_API_TOKEN  — a token scoped to Account · Cloudflare Pages · Edit
+#   CLOUDFLARE_ACCOUNT_ID — the Cloudflare account id
+# Wrangler validates site/ against the project's own settings; the site contract
+# is enforced separately by pages.yml (check_site_content / check_privacy).
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "site/**"
+      - ".github/workflows/cloudflare-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Cloudflare Pages
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Deploy site/ to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 pages deploy site --project-name upyr --branch main --commit-dirty=true
