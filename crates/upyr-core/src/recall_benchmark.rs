@@ -82,15 +82,36 @@ fn recall_v1_baseline_floor() {
     let (en_default, en_total) = recall(&en, InputLayout::Ukrainian, &default);
     let (en_aggressive, _) = recall(&en, InputLayout::Ukrainian, &aggressive);
 
-    println!("recall UK->EN default     {:.1}% ({uk_default}/{uk_total})", pct(uk_default, uk_total));
-    println!("recall UK->EN +triggers   {:.1}% ({uk_triggers}/{uk_total})", pct(uk_triggers, uk_total));
-    println!("recall UK->EN aggressive  {:.1}% ({uk_aggressive}/{uk_total})", pct(uk_aggressive, uk_total));
-    println!("recall EN->UK default     {:.1}% ({en_default}/{en_total})", pct(en_default, en_total));
-    println!("recall EN->UK aggressive  {:.1}% ({en_aggressive}/{en_total})", pct(en_aggressive, en_total));
+    println!(
+        "recall UK->EN default     {:.1}% ({uk_default}/{uk_total})",
+        pct(uk_default, uk_total)
+    );
+    println!(
+        "recall UK->EN +triggers   {:.1}% ({uk_triggers}/{uk_total})",
+        pct(uk_triggers, uk_total)
+    );
+    println!(
+        "recall UK->EN aggressive  {:.1}% ({uk_aggressive}/{uk_total})",
+        pct(uk_aggressive, uk_total)
+    );
+    println!(
+        "recall EN->UK default     {:.1}% ({en_default}/{en_total})",
+        pct(en_default, en_total)
+    );
+    println!(
+        "recall EN->UK aggressive  {:.1}% ({en_aggressive}/{en_total})",
+        pct(en_aggressive, en_total)
+    );
 
     // Regression floors (baseline measured 2026-07-18; see docs/benchmarks/recall-v1.md).
-    assert!(pct(uk_default, uk_total) >= 70.0, "UK->EN default recall regressed");
-    assert!(pct(en_default, en_total) >= 90.0, "EN->UK default recall regressed");
+    assert!(
+        pct(uk_default, uk_total) >= 70.0,
+        "UK->EN default recall regressed"
+    );
+    assert!(
+        pct(en_default, en_total) >= 90.0,
+        "EN->UK default recall regressed"
+    );
     // Triggers may only add recall, never remove it.
     assert!(uk_triggers >= uk_default, "triggers reduced recall");
     // The aggressive profile must recover the short-word segment the default

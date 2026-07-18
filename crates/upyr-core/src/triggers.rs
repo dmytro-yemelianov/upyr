@@ -43,9 +43,7 @@ impl Trigger {
 /// `physical <whitespace> action`, where action is `correct` or `keep`. A
 /// trailing `# comment` is ignored. Malformed lines are skipped.
 pub fn parse_triggers(text: &str) -> Vec<Trigger> {
-    text.lines()
-        .filter_map(parse_line)
-        .collect()
+    text.lines().filter_map(parse_line).collect()
 }
 
 fn parse_line(line: &str) -> Option<Trigger> {
@@ -95,7 +93,10 @@ mod tests {
 
     #[test]
     fn normalizes_case_on_construction() {
-        assert_eq!(Trigger::new("GhBdSn", TriggerAction::Correct).physical, "ghbdsn");
+        assert_eq!(
+            Trigger::new("GhBdSn", TriggerAction::Correct).physical,
+            "ghbdsn"
+        );
     }
 
     #[test]
