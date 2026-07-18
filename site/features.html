@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en" class="no-js" data-title-uk="Можливості — Upyr" data-description-uk="Нативні елементи керування macOS, налаштовуваний звуковий відгук, синтезований на пристрої, та історія назви Upyr." data-social-uk="Нативні налаштування, локальний звук, і що означає «упир».">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#11151c">
+    <meta name="color-scheme" content="dark">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+    <meta name="description" content="Native macOS controls, tunable sound feedback synthesized on-device, and the name behind Upyr.">
+    <meta name="robots" content="index,follow">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Features — Upyr">
+    <meta property="og:description" content="Private English ↔ Ukrainian layout correction. Local, fast, open source.">
+    <meta property="og:url" content="https://upyr.org/features.html">
+    <title>Features — Upyr</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main" data-i18n="skip">Skip to content</a>
+
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="index.html" aria-label="Upyr home" data-i18n-aria="homeLabel">
+          <img src="favicon.svg" width="36" height="36" alt="">
+          <span>Upyr</span>
+        </a>
+        <nav class="nav" aria-label="Main navigation" data-i18n-aria="navLabel">
+          <a href="index.html" data-i18n="navHome">Home</a>
+          <a href="how.html" data-i18n="navHow">How it works</a>
+          <a href="features.html" data-i18n="navFeatures" aria-current="page" class="is-current">Features</a>
+          <a href="privacy.html" data-i18n="navPrivacy">Privacy</a>
+          <a href="articles/reverse-engineering-punto-switcher.html" data-i18n="navStory">The making-of</a>
+        </nav>
+        <div class="header-actions">
+          <div class="language-switch" role="group" aria-label="Choose language" data-i18n-aria="languageLabel">
+            <button class="language-button is-active" type="button" data-language="en" aria-pressed="true" lang="en">EN</button>
+            <button class="language-button" type="button" data-language="uk" aria-pressed="false" lang="uk">УК</button>
+          </div>
+          <a class="github-link" href="https://github.com/dmytro-yemelianov/upyr" aria-label="Upyr on GitHub" data-i18n-aria="githubLabel">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 .7a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.2.8-.6v-2.2c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.6-.3-5.4-1.3-5.4-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.9 1.2 3.1 0 4.4-2.8 5.4-5.4 5.7.4.4.8 1.1.8 2.2v3.3c0 .4.2.7.8.6A11.5 11.5 0 0 0 12 .7Z"/>
+            </svg>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="section section-panel showcase-section" id="experience">
+        <div class="shell">
+          <div class="section-intro section-intro-wide">
+            <p class="kicker" data-i18n="experienceKicker">See it. Hear it.</p>
+            <h2 data-i18n="experienceTitle">Native controls, with feedback you can tune.</h2>
+            <p data-i18n="experienceLead">Searchable macOS settings keep automation, shortcuts, language flags, and every sound event understandable and optional.</p>
+          </div>
+
+          <div class="experience-grid">
+            <figure class="settings-preview">
+              <a class="settings-image-frame" href="assets/upyr-settings-feedback.webp" aria-label="Open the full-size Upyr Settings screenshot" data-i18n-aria="settingsScreenshotLinkLabel">
+                <img
+                  src="assets/upyr-settings-feedback.webp"
+                  width="1440"
+                  height="1360"
+                  loading="lazy"
+                  decoding="async"
+                  alt="Upyr Settings on macOS showing language indicator and sound feedback controls"
+                  data-i18n-alt="settingsScreenshotAlt"
+                >
+                <span class="settings-expand"><span data-i18n="settingsExpand">Open full size</span><span aria-hidden="true">↗</span></span>
+              </a>
+              <figcaption>
+                <span data-i18n="settingsCaption">Native AppKit settings on macOS</span>
+                <small data-i18n="settingsCaptionDetail">Searchable tabs, per-event controls, previews, and one clear Save action.</small>
+              </figcaption>
+            </figure>
+
+            <div class="sound-lab" aria-labelledby="sound-lab-title">
+              <div class="sound-lab-heading">
+                <div>
+                  <p class="sound-local-label"><span aria-hidden="true">●</span><span data-i18n="soundLocalLabel">Generated live</span></p>
+                  <h3 id="sound-lab-title" data-i18n="soundTitle">Try the sound packs</h3>
+                </div>
+                <div class="sound-volume-control">
+                  <label for="sound-preview-volume" data-i18n="soundVolume">Preview volume</label>
+                  <div>
+                    <input id="sound-preview-volume" type="range" min="0" max="100" step="1" value="35">
+                    <output for="sound-preview-volume">35%</output>
+                  </div>
+                </div>
+              </div>
+              <p class="sound-intro" data-i18n="soundLead">Short browser-generated previews inspired by the app’s local Rust synthesizer.</p>
+
+              <div class="sound-pack-list">
+                <article class="sound-pack-card">
+                  <div>
+                    <h4 id="sound-original-title">Original</h4>
+                    <p id="sound-original-description" data-i18n="soundOriginalCopy">A soft, restrained conversion chime.</p>
+                  </div>
+                  <button class="sound-preview-button" type="button" data-sound-preview="original" aria-labelledby="sound-original-title sound-original-play" aria-describedby="sound-original-description sound-preview-status">
+                    <span class="sound-preview-icon" aria-hidden="true">▶</span>
+                    <span id="sound-original-play" data-i18n="soundPlay">Play sample</span>
+                    <span class="sound-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+                  </button>
+                </article>
+                <article class="sound-pack-card">
+                  <div>
+                    <h4 id="sound-arcade-title">Arcade</h4>
+                    <p id="sound-arcade-description" data-i18n="soundArcadeCopy">A bright, short retro confirmation.</p>
+                  </div>
+                  <button class="sound-preview-button" type="button" data-sound-preview="arcade" aria-labelledby="sound-arcade-title sound-arcade-play" aria-describedby="sound-arcade-description sound-preview-status">
+                    <span class="sound-preview-icon" aria-hidden="true">▶</span>
+                    <span id="sound-arcade-play" data-i18n="soundPlay">Play sample</span>
+                    <span class="sound-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+                  </button>
+                </article>
+                <article class="sound-pack-card">
+                  <div>
+                    <h4 id="sound-anime-title">Anime Reactions</h4>
+                    <p id="sound-anime-description" data-i18n="soundAnimeCopy">A synthesized vowel reaction for Enter—no voice recording.</p>
+                  </div>
+                  <button class="sound-preview-button" type="button" data-sound-preview="anime" aria-labelledby="sound-anime-title sound-anime-play" aria-describedby="sound-anime-description sound-preview-status">
+                    <span class="sound-preview-icon" aria-hidden="true">▶</span>
+                    <span id="sound-anime-play" data-i18n="soundPlay">Play sample</span>
+                    <span class="sound-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+                  </button>
+                </article>
+              </div>
+
+              <div class="sound-lab-footer">
+                <p id="sound-preview-status" role="status" aria-live="polite" aria-atomic="true" data-i18n="soundReady">Ready · nothing plays automatically</p>
+                <p data-i18n="soundPrivacy">Generated locally in your browser. No audio files, microphone, network, or tracking.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section about-section" id="about">
+        <div class="shell about-grid">
+          <div class="about-mark" aria-hidden="true"><img src="favicon.svg" width="112" height="112" alt=""></div>
+          <div>
+            <p class="kicker" data-i18n="aboutKicker">About the name</p>
+            <h2 data-i18n="aboutTitle">Made to switch.</h2>
+            <p data-i18n="aboutCopy">Upyr takes its name from the Ukrainian «упир»—a shape-changing figure, one who turns. The app does the same small transformation for text typed in the wrong layout.</p>
+            <p data-i18n="inspirationCopy">It is an independent Rust implementation inspired by Punto Switcher and TolikPylypchuk/KeyboardSwitch, with a narrower EN–UK focus and local-first architecture.</p>
+            <div class="about-links">
+              <a class="text-link" href="https://github.com/TolikPylypchuk/KeyboardSwitch"><span>KeyboardSwitch</span><span aria-hidden="true">↗</span></a>
+              <a class="text-link" href="https://github.com/dmytro-yemelianov/upyr/blob/main/LICENSE"><span data-i18n="mitLicense">MIT license</span><span aria-hidden="true">↗</span></a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="download-section">
+        <div class="shell download-card">
+          <div>
+            <p class="kicker" data-i18n="downloadKicker">Public preview</p>
+            <h2 data-i18n="downloadTitle">Keep typing. Upyr will flip the rest.</h2>
+            <p data-i18n="downloadCopy">The current macOS preview is ad-hoc signed and not Apple-notarized, so Gatekeeper may block it. You can also inspect and build every line yourself.</p>
+          </div>
+          <div class="download-actions">
+            <a class="button button-light" href="https://github.com/dmytro-yemelianov/upyr/releases"><span data-i18n="downloadButton">Download for macOS</span><span aria-hidden="true">↓</span></a>
+            <a class="button button-ghost" href="https://github.com/dmytro-yemelianov/upyr/issues/new/choose"><span data-i18n="reportIssue">Report an issue</span><span aria-hidden="true">↗</span></a>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <div class="footer-brand">
+          <img src="favicon.svg" width="32" height="32" alt="">
+          <div><strong>Upyr</strong><span data-i18n="footerTagline">Type what you meant.</span></div>
+        </div>
+        <div class="footer-links">
+          <a href="https://github.com/dmytro-yemelianov/upyr" data-i18n="footerSource">Source</a>
+          <a href="https://github.com/dmytro-yemelianov/upyr/releases" data-i18n="footerReleases">Releases</a>
+          <a href="https://github.com/dmytro-yemelianov/upyr/issues" data-i18n="footerIssues">Issues</a>
+          <a href="https://github.com/dmytro-yemelianov/upyr/security" data-i18n="footerSecurity">Security</a>
+          <a href="articles/reverse-engineering-punto-switcher.html" data-i18n="footerStory">The making-of</a>
+        </div>
+        <p class="footer-meta" data-i18n="footerMeta">No cookies · No analytics · No external assets</p>
+      </div>
+    </footer>
+  </body>
+</html>

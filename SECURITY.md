@@ -57,17 +57,47 @@ website subresources; every release still requires code review.
 Pull requests and the default branch are checked with:
 
 - GitHub CodeQL analysis for Rust;
+- Semgrep SAST (`p/rust`, `p/secure-defaults`) and an advisory security-lint
+  Clippy pass;
 - RustSec advisory scanning of the locked Cargo dependency graph;
+- OSV-Scanner (cross-ecosystem CVEs) and a Trivy filesystem scan (vulnerabilities,
+  leaked secrets, misconfigurations) on the default branch and weekly;
 - GitHub dependency review for newly introduced vulnerable dependencies;
 - Clippy, formatting, unit/integration tests, and cross-platform builds;
 - a privacy-architecture guard that rejects common outbound network and tracking
   integrations in application code;
-- pinned GitHub Actions, least-privilege workflow tokens, release checksums, and
-  GitHub artifact provenance attestations.
+- pinned GitHub Actions, least-privilege workflow tokens, release checksums,
+  GitHub artifact provenance attestations, a CycloneDX SBOM, and keyless Cosign
+  signatures.
 
 Tagged macOS and Windows releases must use the configured platform signing
 identities; macOS packages are also notarized. Verification reduces risk but does
 not guarantee that the software is vulnerability-free.
+
+### Verifying a release
+
+Every tagged release ships `SHA256SUMS.txt`, a Cosign signature
+(`SHA256SUMS.txt.sig` + `SHA256SUMS.txt.pem`), a CycloneDX SBOM
+(`upyr-sbom.tar.gz`), and a GitHub build-provenance attestation.
+
+```sh
+# 1. integrity
+sha256sum --check SHA256SUMS.txt
+
+# 2. authenticity — the checksums were signed by this repo's release workflow
+cosign verify-blob \
+  --certificate SHA256SUMS.txt.pem \
+  --signature SHA256SUMS.txt.sig \
+  --certificate-identity-regexp 'https://github.com/dmytro-yemelianov/upyr/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS.txt
+
+# 3. provenance — the artifact was built by this repo's workflow
+gh attestation verify <artifact> --repo dmytro-yemelianov/upyr
+```
+
+macOS: `spctl -a -vv Upyr.app` and `codesign --verify --deep --strict Upyr.app`.
+Windows: `signtool verify /pa /v <file>`.
 
 ## High-value report areas
 

@@ -22,6 +22,23 @@ RUNTIME_ROOTS = (
     ROOT / "crates" / "upyr-core" / "src",
     ROOT / "crates" / "upyr-wasm" / "src",
 )
+BUNDLED_ASSET_ROOTS = (
+    ROOT / "assets",
+    ROOT / "crates",
+    ROOT / "packaging",
+    ROOT / "site",
+    ROOT / "src",
+)
+PRE_RENDERED_AUDIO_SUFFIXES = {
+    ".aac",
+    ".aiff",
+    ".flac",
+    ".m4a",
+    ".mp3",
+    ".ogg",
+    ".opus",
+    ".wav",
+}
 
 NETWORK_CRATES = {
     "awc",
@@ -54,6 +71,10 @@ WEB_CODE_PATTERNS = {
     "sendBeacon": re.compile(r"\bsendBeacon\s*\("),
     "WebSocket": re.compile(r"\bWebSocket\s*\("),
     "EventSource": re.compile(r"\bEventSource\s*\("),
+    "microphone capture API": re.compile(
+        r"\b(?:getUserMedia|MediaRecorder|mediaDevices)\b", re.IGNORECASE
+    ),
+    "WebRTC API": re.compile(r"\b(?:RTCPeerConnection|webkitRTCPeerConnection)\b"),
     "analytics loader": re.compile(
         r"\b(?:gtag|posthog\.init|mixpanel\.init|analytics\.track)\s*\(", re.IGNORECASE
     ),
@@ -121,6 +142,17 @@ def rust_files() -> list[Path]:
     return sorted(path for root in RUNTIME_ROOTS for path in root.rglob("*.rs"))
 
 
+def pre_rendered_audio_files(roots: tuple[Path, ...]) -> list[Path]:
+    """Return bundled audio files that would bypass local sound synthesis."""
+    return sorted(
+        path
+        for root in roots
+        if root.exists()
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix.lower() in PRE_RENDERED_AUDIO_SUFFIXES
+    )
+
+
 def package_names() -> set[str]:
     lock = (ROOT / "Cargo.lock").read_text(encoding="utf-8")
     return set(re.findall(r'^name = "([^"]+)"$', lock, flags=re.MULTILINE))
@@ -136,6 +168,13 @@ def check_dependencies(errors: list[str]) -> None:
     forbidden = package_names() & (NETWORK_CRATES | TELEMETRY_CRATES)
     if forbidden:
         errors.append("forbidden network/telemetry crates in Cargo.lock: " + ", ".join(sorted(forbidden)))
+
+
+def check_bundled_audio(errors: list[str]) -> None:
+    for path in pre_rendered_audio_files(BUNDLED_ASSET_ROOTS):
+        errors.append(
+            f"{path.relative_to(ROOT)}: pre-rendered audio is forbidden; synthesize cues locally"
+        )
 
 
 def check_runtime_source(errors: list[str]) -> None:
@@ -247,6 +286,7 @@ def check_site(errors: list[str]) -> None:
 def main() -> int:
     errors: list[str] = []
     check_dependencies(errors)
+    check_bundled_audio(errors)
     check_runtime_source(errors)
     check_site(errors)
     if errors:

@@ -1,0 +1,46 @@
+name: Trivy filesystem scan
+
+# Filesystem scan for vulnerable dependencies, leaked secrets, and
+# misconfigurations across the source tree. Runs post-merge and on a schedule
+# so it does not gate pull requests.
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "33 7 * * 1" # Mondays 07:33 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trivy-fs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Trivy fs
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          scanners: "vuln,secret,misconfig"
+          format: "table"
+          severity: "CRITICAL,HIGH"
+          ignore-unfixed: true
+          exit-code: "1"
+          # Vendored crates and generated corpora are not our attack surface.
+          skip-dirs: "target,vendor,crates/upyr-core/fixtures"

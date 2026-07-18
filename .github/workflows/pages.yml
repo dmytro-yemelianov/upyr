@@ -1,5 +1,11 @@
 name: GitHub Pages
 
+# Note: "Validate site" is a required status check on main, so it must report a
+# result on every PR. The pull_request trigger is therefore not path-filtered —
+# filtering it left the required check permanently "Expected" and blocked
+# unrelated PRs from merging. The job is fast, and the deploy job stays gated to
+# non-PR pushes, so only the push trigger keeps a path filter.
+
 on:
   push:
     branches:
@@ -7,14 +13,16 @@ on:
     paths:
       - "site/**"
       - "tools/check_privacy.py"
+      - "tools/check_site_content.py"
+      - "tools/test_check_site_content.py"
+      - "tools/test_check_privacy.py"
+      - "crates/upyr-core/src/auto_correct.rs"
+      - "crates/upyr-core/assets/dictionaries/*.txt"
+      - "crates/upyr-core/assets/models/language.ngm"
       - ".github/workflows/pages.yml"
   pull_request:
     branches:
       - main
-    paths:
-      - "site/**"
-      - "tools/check_privacy.py"
-      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions: {}
@@ -40,6 +48,12 @@ jobs:
         run: test -s site/index.html
       - name: Verify release version synchronization
         run: python3 tools/check_version_sync.py
+      - name: Verify site script syntax
+        run: node --check site/app.js
+      - name: Verify bilingual product tour and model trace
+        run: python3 tools/check_site_content.py
+      - name: Test site contracts
+        run: python3 -m unittest tools.test_check_site_content tools.test_check_privacy
       - name: Verify non-tracking site resources
         run: python3 tools/check_privacy.py
       - name: Configure Pages

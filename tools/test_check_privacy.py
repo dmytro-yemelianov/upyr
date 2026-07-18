@@ -3,8 +3,14 @@
 
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from tools.check_privacy import sensitive_log_field, validate_csp
+from tools.check_privacy import (
+    WEB_CODE_PATTERNS,
+    pre_rendered_audio_files,
+    sensitive_log_field,
+    validate_csp,
+)
 
 
 VALID_POLICY = (
@@ -43,6 +49,33 @@ class SensitiveLoggingTests(unittest.TestCase):
 
     def test_allows_privacy_preserving_key_categories(self) -> None:
         self.assertIsNone(sensitive_log_field('debug!(?cue, "keyboard sound unavailable");'))
+
+
+class BundledAudioTests(unittest.TestCase):
+    def test_detects_pre_rendered_audio_case_insensitively(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            wav = root / "event.WAV"
+            wav.write_bytes(b"RIFF")
+            (root / "notes.txt").write_text("generated locally", encoding="utf-8")
+
+            self.assertEqual(pre_rendered_audio_files((root,)), [wav])
+
+    def test_accepts_missing_asset_roots(self) -> None:
+        with TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing"
+            self.assertEqual(pre_rendered_audio_files((missing,)), [])
+
+
+class BrowserPrivacyApiTests(unittest.TestCase):
+    def test_rejects_microphone_capture_apis(self) -> None:
+        pattern = WEB_CODE_PATTERNS["microphone capture API"]
+        self.assertIsNotNone(pattern.search("navigator.mediaDevices.getUserMedia({ audio: true })"))
+        self.assertIsNotNone(pattern.search("new MediaRecorder(stream)"))
+
+    def test_rejects_webrtc_even_with_connect_src_none(self) -> None:
+        pattern = WEB_CODE_PATTERNS["WebRTC API"]
+        self.assertIsNotNone(pattern.search("new RTCPeerConnection()"))
 
 
 if __name__ == "__main__":

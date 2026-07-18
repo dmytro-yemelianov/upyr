@@ -26,70 +26,21 @@ enum SoundId {
 }
 
 #[derive(Clone)]
-enum SoundBytes {
-    Static(&'static [u8]),
-    Shared(Arc<[u8]>),
-}
-
-impl AsRef<[u8]> for SoundBytes {
-    fn as_ref(&self) -> &[u8] {
-        match self {
-            Self::Static(bytes) => bytes,
-            Self::Shared(bytes) => bytes,
-        }
-    }
-}
-
-#[derive(Clone)]
 pub(super) struct SoundAsset {
     id: SoundId,
     slug: String,
-    bytes: SoundBytes,
+    bytes: Arc<[u8]>,
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     keyboard: bool,
 }
 
-fn original_event_asset(event: SoundEvent) -> SoundAsset {
-    let (slug, bytes): (&str, &[u8]) = match event {
-        SoundEvent::AutoCorrect => (
-            "auto-correct",
-            include_bytes!("../../assets/sounds/auto-correct.wav"),
-        ),
-        SoundEvent::ManualConversion => (
-            "manual-conversion",
-            include_bytes!("../../assets/sounds/manual-conversion.wav"),
-        ),
-        SoundEvent::LayoutSwitch => (
-            "layout-switch",
-            include_bytes!("../../assets/sounds/layout-switch.wav"),
-        ),
-        SoundEvent::Pause => ("pause", include_bytes!("../../assets/sounds/pause.wav")),
-        SoundEvent::Resume => ("resume", include_bytes!("../../assets/sounds/resume.wav")),
-        SoundEvent::Error => ("error", include_bytes!("../../assets/sounds/error.wav")),
-    };
-    SoundAsset {
-        id: SoundId::Event(SoundPack::Original, event),
-        slug: slug.to_owned(),
-        bytes: SoundBytes::Static(bytes),
-        keyboard: false,
-    }
-}
-
 fn event_asset(event: SoundEvent, pack: SoundPack) -> SoundAsset {
-    if pack == SoundPack::Original {
-        return original_event_asset(event);
-    }
     let cue = event_cue(event);
     let seed = 0x5550_5952 ^ event_index(event).wrapping_mul(0x9e37_79b9);
     SoundAsset {
         id: SoundId::Event(pack, event),
         slug: format!("{}-{}", pack_slug(pack), event_slug(event)),
-        bytes: SoundBytes::Shared(generated_sound(
-            SoundId::Event(pack, event),
-            pack,
-            Cue::Event(cue),
-            seed,
-        )),
+        bytes: generated_sound(SoundId::Event(pack, event), pack, Cue::Event(cue), seed),
         keyboard: false,
     }
 }
@@ -100,12 +51,7 @@ fn key_asset(cue: KeyCue, pack: SoundPack) -> SoundAsset {
     SoundAsset {
         id: SoundId::Key(pack, cue, variant),
         slug: format!("{}-key-{}-{variant}", pack_slug(pack), key_cue_slug(cue)),
-        bytes: SoundBytes::Shared(generated_sound(
-            SoundId::Key(pack, cue, variant),
-            pack,
-            Cue::Key(cue),
-            seed,
-        )),
+        bytes: generated_sound(SoundId::Key(pack, cue, variant), pack, Cue::Key(cue), seed),
         keyboard: true,
     }
 }
@@ -146,12 +92,10 @@ pub(super) fn prewarm(pack: SoundPack) {
                     generated_sound(id, pack, Cue::Key(cue), key_seed(cue, variant));
                 }
             }
-            if pack != SoundPack::Original {
-                for event in SoundEvent::ALL {
-                    let id = SoundId::Event(pack, event);
-                    let seed = 0x5550_5952 ^ event_index(event).wrapping_mul(0x9e37_79b9);
-                    generated_sound(id, pack, Cue::Event(event_cue(event)), seed);
-                }
+            for event in SoundEvent::ALL {
+                let id = SoundId::Event(pack, event);
+                let seed = 0x5550_5952 ^ event_index(event).wrapping_mul(0x9e37_79b9);
+                generated_sound(id, pack, Cue::Event(event_cue(event)), seed);
             }
         })
         .is_err()
@@ -585,7 +529,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_events_have_distinct_embedded_pcm16_assets() {
+    fn all_packs_generate_distinct_pcm16_event_assets() {
+        let packs = [SoundPack::Original, SoundPack::Arcade, SoundPack::Anime];
         let expected = [
             (SoundEvent::AutoCorrect, "auto-correct"),
             (SoundEvent::ManualConversion, "manual-conversion"),
@@ -594,21 +539,33 @@ mod tests {
             (SoundEvent::Resume, "resume"),
             (SoundEvent::Error, "error"),
         ];
+        let mut waveforms: Vec<Arc<[u8]>> = Vec::new();
 
-        for (event, slug) in expected {
-            let asset = original_event_asset(event);
-            assert_eq!(asset.id, SoundId::Event(SoundPack::Original, event));
-            assert_eq!(asset.slug, slug);
-            assert!(asset.bytes.as_ref().len() > 44);
-            let samples = pcm16_data_range(asset.bytes.as_ref()).unwrap();
-            assert!(!samples.is_empty());
-            assert!(samples.len() <= 44_100 * 2 * 350 / 1_000);
+        for pack in packs {
+            for (event, slug) in expected {
+                let asset = event_asset(event, pack);
+                assert_eq!(asset.id, SoundId::Event(pack, event));
+                assert_eq!(asset.slug, format!("{}-{slug}", pack_slug(pack)));
+                assert!(asset.bytes.len() > 44);
+                let samples = pcm16_data_range(asset.bytes.as_ref()).unwrap();
+                assert!(!samples.is_empty());
+                assert!(samples.len() <= 44_100 * 2 * 500 / 1_000);
+                assert!(
+                    waveforms
+                        .iter()
+                        .all(|existing| existing.as_ref() != asset.bytes.as_ref()),
+                    "{pack:?} {event:?} unexpectedly reused another event waveform"
+                );
+                waveforms.push(asset.bytes);
+            }
         }
+
+        assert_eq!(waveforms.len(), packs.len() * expected.len());
     }
 
     #[test]
     fn pcm16_scaling_changes_only_sample_data() {
-        let asset = original_event_asset(SoundEvent::Error);
+        let asset = event_asset(SoundEvent::Error, SoundPack::Original);
         let input = asset.bytes.as_ref();
         let data = pcm16_data_range(input).unwrap();
         let output = scale_pcm16_wav(input, 50).unwrap();
@@ -632,8 +589,8 @@ mod tests {
     }
 
     #[test]
-    fn full_volume_preserves_the_embedded_wav_exactly() {
-        let asset = original_event_asset(SoundEvent::Resume);
+    fn full_volume_preserves_the_generated_wav_exactly() {
+        let asset = event_asset(SoundEvent::Resume, SoundPack::Original);
         let input = asset.bytes.as_ref();
         assert_eq!(scale_pcm16_wav(input, 100).unwrap().as_slice(), input);
     }
@@ -642,7 +599,13 @@ mod tests {
     fn rejects_invalid_wav_and_out_of_range_volume() {
         assert!(pcm16_data_range(b"not a wav").is_err());
         assert!(
-            scale_pcm16_wav(original_event_asset(SoundEvent::Pause).bytes.as_ref(), 101).is_err()
+            scale_pcm16_wav(
+                event_asset(SoundEvent::Pause, SoundPack::Original)
+                    .bytes
+                    .as_ref(),
+                101
+            )
+            .is_err()
         );
     }
 

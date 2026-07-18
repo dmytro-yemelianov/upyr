@@ -1,0 +1,31 @@
+# Built-in deterministic triggers, consulted before the statistical scorer.
+#
+# Format: <physical-keys>  <action>
+#   physical-keys : the US-QWERTY key sequence that was pressed (lowercase)
+#   action        : `correct` = always fix the layout for this sequence
+#                   `keep`    = never correct this sequence
+#
+# `correct` entries are high-frequency Ukrainian words whose physical form is
+# not a plausible English token, so fixing them is unambiguous even for short
+# words the n-gram model deliberately abstains on. Each one is validated in
+# tests (builtin_correct_triggers_are_genuinely_wrong_layout).
+#
+# Add domain vocabulary here or via user configuration to raise recall without
+# touching the scorer.
+
+ghbdsn   correct   # привіт
+ckjdj    correct   # слово
+vjdf     correct   # мова
+pyfyyz   correct   # знання
+pfhfp    correct   # зараз
+njve     correct   # тому
+zrbq     correct   # який
+xthtp    correct   # через
+vskmqjy  correct   # мільйон
+gbnfyyz  correct   # питання
+xfcnj    correct   # часто
+levrf    correct   # думка
+
+# `keep` example (English words already covered by the dictionary/heuristics;
+# use this section for sequences the model wrongly corrects in your workflow):
+# npn      keep
