@@ -220,6 +220,46 @@ code {
   fill: currentcolor;
 }
 
+.nav-toggle {
+  display: none;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted-strong);
+  background: transparent;
+  cursor: pointer;
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.nav-toggle:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.nav-toggle svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.nav-toggle .icon-close {
+  display: none;
+}
+
+.nav-toggle[aria-expanded="true"] .icon-menu {
+  display: none;
+}
+
+.nav-toggle[aria-expanded="true"] .icon-close {
+  display: block;
+}
+
 .hero {
   position: relative;
   isolation: isolate;
@@ -1960,8 +2000,36 @@ code {
 }
 
 @media (max-width: 1060px) {
+  .nav-toggle {
+    display: grid;
+  }
+
   .nav {
     display: none;
+    position: absolute;
+    inset: 100% 0 auto;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    margin: 0;
+    padding: 8px 20px 20px;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg-deep);
+    box-shadow: var(--shadow);
+  }
+
+  .nav.is-open {
+    display: flex;
+  }
+
+  .nav a {
+    padding: 15px 4px;
+    border-top: 1px solid var(--line);
+    font-size: 1rem;
+  }
+
+  .nav a:first-child {
+    border-top: 0;
   }
 
   .hero {
@@ -2421,6 +2489,18 @@ code {
   overflow-x: auto;
 }
 
+.live-demo-keyboard-wrap::after {
+  position: absolute;
+  top: 20px;
+  right: 0;
+  bottom: 20px;
+  width: 28px;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  background: linear-gradient(to right, transparent, var(--bg-deep));
+  content: "";
+  pointer-events: none;
+}
+
 .live-demo-layout-badge {
   position: absolute;
   top: 14px;
@@ -2556,6 +2636,41 @@ code {
 
   .keyboard {
     min-width: 560px;
+  }
+}
+
+@media (max-width: 480px) {
+  .live-demo-keyboard-wrap {
+    padding: 14px;
+  }
+
+  .keyboard,
+  .keyboard-row {
+    gap: 4px;
+  }
+
+  .keyboard {
+    min-width: 460px;
+  }
+
+  .key {
+    min-width: 32px;
+    height: 36px;
+    padding: 0 5px;
+    font-size: 0.82rem;
+  }
+
+  .key-wide {
+    min-width: 54px;
+  }
+
+  .key-space {
+    min-width: 170px;
+  }
+
+  .key-modifier {
+    min-width: 40px;
+    font-size: 0.95rem;
   }
 }
 
