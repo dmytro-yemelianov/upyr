@@ -1,0 +1,73 @@
+# OSV-Scanner accepted-advisory list.
+#
+# These advisories are already tolerated by the project's cargo-audit policy:
+# they are RustSec "unmaintained"/"unsound" categories, which cargo-audit
+# reports as warnings rather than failures. Listing them here keeps
+# OSV-Scanner (which fails on any finding) as a meaningful gate that trips only
+# on new, actionable issues, while staying consistent with cargo-audit.
+#
+# `ignoreUntil` forces a quarterly revisit so the acceptance cannot silently
+# rot.
+#
+# Two groups:
+#  1. GTK3 desktop stack (gtk-rs 0.18) reached via `tray-icon`/`libappindicator`
+#     on Linux. gtk3-rs is unmaintained (superseded by gtk4) and `glib 0.20`
+#     — the only advisory with a fix — belongs to the gtk4 generation, so it
+#     cannot be adopted without leaving gtk3. Tracked by the Linux tray
+#     migration to `ksni` (drops the entire gtk3 stack).
+#  2. `ttf-parser` via `egui`/`eframe` font rendering. Independent of the tray
+#     stack; resolved by an `egui`/`ab_glyph` update.
+
+# --- GTK3 desktop stack (Linux tray) — tracked for the ksni migration ---
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0415"
+ignoreUntil = 2026-10-18
+reason = "gtk (gtk-rs 0.18) unmaintained; Linux tray dep via tray-icon; tracked for ksni migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0420"
+ignoreUntil = 2026-10-18
+reason = "gtk-sys (gtk-rs 0.18) unmaintained; Linux tray dep; tracked for ksni migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0419"
+ignoreUntil = 2026-10-18
+reason = "gtk3-macros (gtk-rs 0.18) unmaintained; Linux tray dep; tracked for ksni migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0412"
+ignoreUntil = 2026-10-18
+reason = "gdk (gtk-rs 0.18) unmaintained; Linux tray dep; tracked for ksni migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0418"
+ignoreUntil = 2026-10-18
+reason = "gdk-sys (gtk-rs 0.18) unmaintained; Linux tray dep; tracked for ksni migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0413"
+ignoreUntil = 2026-10-18
+reason = "atk (gtk-rs 0.18) unmaintained; Linux tray dep; tracked for ksni migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0416"
+ignoreUntil = 2026-10-18
+reason = "atk-sys (gtk-rs 0.18) unmaintained; Linux tray dep; tracked for ksni migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0429"
+ignoreUntil = 2026-10-18
+reason = "glib 0.18 unsound (RUSTSEC-2024-0429); fix is glib 0.20 which is gtk4-only, unreachable while on gtk3; tracked for ksni migration"
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0370"
+ignoreUntil = 2026-10-18
+reason = "proc-macro-error unmaintained; build-time dep of glib-macros in the gtk3 stack; tracked for ksni migration"
+
+# --- egui/eframe font stack — tracked for an egui update ---
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0192"
+ignoreUntil = 2026-10-18
+reason = "ttf-parser via egui/eframe (ab_glyph) font rendering; resolved by an egui/ab_glyph update"
