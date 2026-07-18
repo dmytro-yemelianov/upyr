@@ -1,10 +1,10 @@
 name: GitHub Pages
 
-# Note: "Validate site" is a required status check on main. Because this
-# workflow is path-filtered, a PR that touches none of the paths below never
-# runs it, and the required check stays permanently "Expected" (blocking the
-# merge). Keep the required-check list and these path filters in sync — or make
-# Validate site always-run — to avoid that phantom gate.
+# Note: "Validate site" is a required status check on main, so it must report a
+# result on every PR. The pull_request trigger is therefore not path-filtered —
+# filtering it left the required check permanently "Expected" and blocked
+# unrelated PRs from merging. The job is fast, and the deploy job stays gated to
+# non-PR pushes, so only the push trigger keeps a path filter.
 
 on:
   push:
@@ -23,16 +23,6 @@ on:
   pull_request:
     branches:
       - main
-    paths:
-      - "site/**"
-      - "tools/check_privacy.py"
-      - "tools/check_site_content.py"
-      - "tools/test_check_site_content.py"
-      - "tools/test_check_privacy.py"
-      - "crates/upyr-core/src/auto_correct.rs"
-      - "crates/upyr-core/assets/dictionaries/*.txt"
-      - "crates/upyr-core/assets/models/language.ngm"
-      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions: {}
