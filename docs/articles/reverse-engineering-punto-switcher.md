@@ -1,9 +1,10 @@
-# Reverse-engineering Punto Switcher, and what a clean-room rebuild taught me
+# A clean-room rebuild of Punto Switcher's trick, and what it taught me
 
-*How Upyr reconstructs the "you typed that in the wrong keyboard layout" trick for
-English ↔ Ukrainian — the two-layer design borrowed from Punto Switcher, the part
-that turned out to be the actual hard problem, and the benchmark findings that
-contradicted my own intuitions.*
+*How Upyr reconstructs the "you typed that in the wrong keyboard layout" behaviour for
+English ↔ Ukrainian — not by disassembling Punto Switcher, but by studying its public
+structure and observable behaviour and rebuilding the idea from scratch. The two-layer
+design, the part that turned out to be the actual hard problem, and the benchmark findings
+that contradicted my own intuitions.*
 
 ---
 
@@ -60,6 +61,51 @@ Upyr rebuilds both layers. The trigger layer is modelled directly on Punto's `tr
 — the source comment says so in as many words — and the statistical layer is a signed
 character n-gram scorer trained from scratch on public corpora. The rest of this article
 is about the three things that made the rebuild non-obvious.
+
+## What's actually inside Punto Switcher — and what the teardown was (and wasn't)
+
+Fair question to ask of anything calling itself a teardown: what *is* Punto Switcher made
+of, and what tools cracked it open? Here are the parts that are publicly documented, and
+an honest account of the method.
+
+Punto Switcher is a Windows program (`punto.exe`) developed by Yandex. It decides the
+layout with a **dictionary of several million words** plus an "impossible-combination"
+heuristic — a Russian word can't begin with certain letters, so a run of them betrays the
+wrong layout — re-evaluated on every Space, Enter, or Tab.[^algo] Its state lives in a
+handful of binary, non-plaintext `.dat` files:[^files]
+
+| File | Role |
+|---|---|
+| `Data/triggers.dat` | the switching **trigger rules** — the file this project's source names as its model |
+| `Data/ps.dat` | the main language dictionary (the several-million-word list) |
+| `Data/translit.dat` | transliteration table |
+| `User Data/replace.dat` | autoreplace / abbreviation expansions |
+| `User Data/user.dic` | user exceptions dictionary |
+| `diary.dat` | the **keystroke diary** |
+
+That last file is the one worth staring at. Punto's **Diary (Дневник)** feature logs
+*every* keystroke to `diary.dat` — messenger chats, search queries, passwords in the
+clear, anything typed — and the program maintains its own network connection, which is why
+independent write-ups treat it as a keylogger and some antivirus vendors flag the bundle as
+a PUA.[^diary] That is not an incidental risk; it is a shipped, documented feature.
+
+**Now the honest part about the "tooling."** Those `.dat` files are encrypted binary blobs
+— even the autoreplace list can't be opened in a text editor.[^files] Upyr never cracked
+them. There was no disassembler, no unpacked `ps.dat`, no dictionary lifted from Yandex.
+The method was black-box: feed key sequences in, watch the corrections come out, and
+rebuild the *architecture those files imply* rather than their contents. That's the whole
+meaning of "clean-room" here — and it's also why you won't find Punto's dictionaries in
+this repo. What got reconstructed was the shape:
+
+- `triggers.dat` → a 12-rule trigger table written from scratch;
+- the several-million-word `ps.dat` → **not** a big dictionary at all, but a 2.8 MiB signed
+  n-gram model plus a 296-word stop-list — a deliberately different, statistical answer to
+  the same question;
+- `diary.dat` → nothing. On purpose. The one Punto feature Upyr most wanted to *not* have.
+
+Studying a program's public file layout and observable behaviour is a world away from
+copying its code, and keeping strictly to the former is what lets Upyr share nothing with
+Punto while still learning from it.
 
 ## Insight 1: model the *physical keys*, not the characters
 
@@ -239,3 +285,23 @@ it back from scratch, the surprise was how much of the design is really about kn
 shares no code with Punto Switcher or KeyboardSwitch. Benchmark artifacts and reproduction
 commands live under [`docs/benchmarks/`](../benchmarks/); the frozen corpora are pinned by
 SHA-256 in those documents.*
+
+---
+
+### Sources on Punto Switcher
+
+The claims about Punto Switcher's internals are drawn from public write-ups, not from
+inspecting its code. They describe a third-party product and may be dated or
+version-specific; verify against a current build before relying on them.
+
+[^algo]: Overview of the dictionary-based "impossible-combination" algorithm and the
+    several-million-word dictionary — [softportal.com](https://www.softportal.com/en/punto-switcher/windows/software)
+    and general-overview write-ups.
+[^files]: Punto Switcher `Data/` and `User Data/` file layout (`triggers.dat`, `ps.dat`,
+    `translit.dat`, `replace.dat`, `user.dic`, `diary.dat`) and the note that the data files
+    are binary/encrypted rather than plain text —
+    [programmersforum.rocks: "Punto Switcher replace.dat"](https://www.programmersforum.rocks/t/punto-switcher-replace-dat/5448).
+[^diary]: The Diary (Дневник) keystroke-logging feature, `diary.dat`, and the keylogger /
+    PUA characterizations — [spy-soft.net](https://spy-soft.net/punto-switcher-shpion/),
+    codeby.net discussions of `diary.dat`, and
+    [Gridinsoft on PUABundler:Win32/YandexBundled](https://blog.gridinsoft.com/puabundler-win32-yandexbundled/).

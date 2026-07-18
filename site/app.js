@@ -122,6 +122,7 @@
     footerReleases: "Релізи",
     footerIssues: "Проблеми",
     footerSecurity: "Безпека",
+    footerStory: "Історія створення",
     footerMeta: "Без cookies · Без аналітики · Без зовнішніх ресурсів",
     homeLabel: "Головна сторінка Upyr",
     navLabel: "Основна навігація",

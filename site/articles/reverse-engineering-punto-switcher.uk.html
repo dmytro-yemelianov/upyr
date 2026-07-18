@@ -3,222 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#16131c">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Upyr: реверс-інжиніринг Punto Switcher</title>
-<meta name="description" content="Історія створення Upyr за три дні — як розібрано трюк Punto Switcher, які висновки дали бенчмарки, і чому ця реалізація об’єктивно краща.">
-<style>*,*::before,*::after{box-sizing:border-box}html{-webkit-text-size-adjust:100%}img,svg{max-width:100%}</style>
+<meta name="description" content="Чиста реалізація трюку Punto Switcher за три дні — що всередині PS, висновки бенчмарків, і чому ця реалізація об’єктивно краща.">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="re-writeup.css">
+<script src="re-writeup.js" defer></script>
 </head>
 <body>
-<style>
-  :root {
-    /* neutrals — a chosen cool "bone", biased away from the warm garnet accent */
-    --ground: #e8e8ea;
-    --surface: #f6f6f7;
-    --surface-2: #fdfdfd;
-    --hair: #d3d3d7;
-    --ink: #1a1720;
-    --muted: #64606a;
-    --faint: #928d97;
-    /* accents */
-    --garnet: #a81a2c;   /* the intended / the revenant / brand */
-    --garnet-soft: #c65563;
-    --steel: #136c9e;    /* the source: what the wrong layout produced */
-    --steel-soft: #4f8bb0;
-    --grid: #dcdce0;
-    --chart-surface: #fcfcfb;
-    --good: #1c7c54;
-    --shadow: 0 1px 2px rgba(20,16,26,.06), 0 8px 30px rgba(20,16,26,.05);
-    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-    --serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
-    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --ground: #16131c;
-      --surface: #1f1b28;
-      --surface-2: #262130;
-      --hair: #322c3d;
-      --ink: #ece7ea;
-      --muted: #a49dac;
-      --faint: #776f82;
-      --garnet: #d64c56;
-      --garnet-soft: #e07d84;
-      --steel: #4f9bd1;
-      --steel-soft: #6fa9d3;
-      --grid: #2c2738;
-      --chart-surface: #1a1622;
-      --good: #52c08b;
-      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 34px rgba(0,0,0,.35);
-    }
-  }
-  :root[data-theme="light"] {
-    --ground: #e8e8ea; --surface: #f6f6f7; --surface-2: #fdfdfd; --hair: #d3d3d7;
-    --ink: #1a1720; --muted: #64606a; --faint: #928d97;
-    --garnet: #a81a2c; --garnet-soft: #c65563; --steel: #136c9e; --steel-soft: #4f8bb0;
-    --grid: #dcdce0; --chart-surface: #fcfcfb; --good: #1c7c54;
-    --shadow: 0 1px 2px rgba(20,16,26,.06), 0 8px 30px rgba(20,16,26,.05);
-  }
-  :root[data-theme="dark"] {
-    --ground: #16131c; --surface: #1f1b28; --surface-2: #262130; --hair: #322c3d;
-    --ink: #ece7ea; --muted: #a49dac; --faint: #776f82;
-    --garnet: #d64c56; --garnet-soft: #e07d84; --steel: #4f9bd1; --steel-soft: #6fa9d3;
-    --grid: #2c2738; --chart-surface: #1a1622; --good: #52c08b;
-    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 34px rgba(0,0,0,.35);
-  }
 
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--ground); color: var(--ink);
-    font-family: var(--sans); line-height: 1.65;
-    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
-  }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
-  .col { max-width: 660px; margin-left: auto; margin-right: auto; }
-  section { padding: 64px 0; border-top: 1px solid var(--hair); }
-  section:first-of-type { border-top: none; }
-
-  h1, h2, h3 { font-family: var(--serif); font-weight: 700; text-wrap: balance; letter-spacing: -.01em; }
-  h2 { font-size: clamp(26px, 4vw, 38px); line-height: 1.1; margin: 0 0 8px; }
-  h3 { font-size: 20px; line-height: 1.25; margin: 32px 0 8px; }
-  p { margin: 0 0 18px; }
-  .col p, .col ul { color: var(--ink); }
-  .lead { font-size: 19px; color: var(--muted); }
-  .eyebrow {
-    font-family: var(--mono); font-size: 12px; letter-spacing: .16em; text-transform: uppercase;
-    color: var(--garnet); margin: 0 0 14px; font-weight: 600;
-  }
-  a { color: var(--garnet); text-underline-offset: 3px; }
-  strong { font-weight: 650; }
-  code, .mono { font-family: var(--mono); }
-  .src { font-family: var(--mono); color: var(--steel); font-weight: 600; }
-  .dst { font-family: var(--serif); color: var(--garnet); font-weight: 700; font-style: normal; }
-  ul { padding-left: 20px; }
-  li { margin-bottom: 8px; }
-
-  /* ---------- HERO ---------- */
-  .hero { padding: clamp(72px, 12vh, 128px) 0 72px; border-top: none; }
-  .hero-grid { display: grid; grid-template-columns: 1fr; gap: 40px; align-items: center; }
-  @media (min-width: 820px) { .hero-grid { grid-template-columns: 1.25fr .75fr; gap: 56px; } }
-  .hero h1 { font-size: clamp(40px, 7vw, 68px); line-height: .98; margin: 0 0 20px; }
-  .hero h1 .accent { color: var(--garnet); }
-  .hero .lead { font-size: clamp(17px, 2.4vw, 21px); max-width: 30ch; }
-  .hero-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 28px; }
-  .tag {
-    font-family: var(--mono); font-size: 12px; letter-spacing: .04em;
-    padding: 5px 10px; border: 1px solid var(--hair); border-radius: 999px; color: var(--muted);
-    background: var(--surface);
-  }
-
-  /* the keycap: same physical key, two writing systems */
-  .keycap-stage { display: flex; justify-content: center; }
-  figure { margin: 0; }
-  .keycap {
-    width: 190px; height: 190px; position: relative;
-  }
-  .conversion {
-    margin-top: 22px; font-size: 15px; color: var(--muted); text-align: center;
-    display: flex; flex-direction: column; gap: 6px; align-items: center;
-  }
-  .conversion .row { display: flex; align-items: center; gap: 12px; }
-  .conversion .arrow { color: var(--faint); }
-
-  /* ---------- generic figure / card ---------- */
-  .figure {
-    background: var(--surface); border: 1px solid var(--hair); border-radius: 14px;
-    box-shadow: var(--shadow); padding: 24px; margin: 28px 0;
-  }
-  .figure-full { max-width: 1080px; }
-  .figcap {
-    font-family: var(--mono); font-size: 12.5px; color: var(--muted); margin-top: 14px;
-    line-height: 1.5;
-  }
-  .figcap b { color: var(--ink); font-weight: 600; }
-  .svg-scroll { overflow-x: auto; }
-  svg { display: block; max-width: 100%; height: auto; }
-  svg text { font-family: var(--mono); }
-
-  /* ---------- stat tiles ---------- */
-  .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin: 28px 0; }
-  @media (min-width: 700px) { .tiles { grid-template-columns: repeat(4, 1fr); } }
-  .tile {
-    background: var(--surface); border: 1px solid var(--hair); border-radius: 12px; padding: 18px;
-  }
-  .tile .n {
-    font-family: var(--mono); font-size: 30px; font-weight: 600; letter-spacing: -.02em;
-    color: var(--garnet); font-variant-numeric: tabular-nums; line-height: 1;
-  }
-  .tile .n.steel { color: var(--steel); }
-  .tile .n.good { color: var(--good); }
-  .tile .k { font-size: 12.5px; color: var(--muted); margin-top: 8px; line-height: 1.4; }
-
-  /* ---------- timeline ---------- */
-  .timeline { position: relative; margin: 32px 0 0; }
-  .day { margin-bottom: 8px; }
-  .day-head {
-    display: flex; align-items: baseline; gap: 14px; margin: 28px 0 4px;
-  }
-  .day-date { font-family: var(--mono); font-size: 13px; color: var(--garnet); font-weight: 600; letter-spacing: .03em; white-space: nowrap; }
-  .day-title { font-family: var(--serif); font-size: 21px; font-weight: 700; }
-  .steps { list-style: none; padding: 0; margin: 0; border-left: 2px solid var(--hair); }
-  .step { position: relative; padding: 6px 0 6px 26px; }
-  .step::before {
-    content: ""; position: absolute; left: -7px; top: 13px; width: 12px; height: 12px;
-    border-radius: 50%; background: var(--surface); border: 2px solid var(--steel);
-  }
-  .step.key::before { background: var(--garnet); border-color: var(--garnet); box-shadow: 0 0 0 4px color-mix(in srgb, var(--garnet) 18%, transparent); }
-  .step .commit { font-family: var(--mono); font-size: 13.5px; color: var(--ink); }
-  .step .note { font-size: 13.5px; color: var(--muted); }
-  .step.key .commit { font-weight: 600; }
-
-  /* ---------- adoption table ---------- */
-  .table-scroll { overflow-x: auto; margin: 24px 0; }
-  table { border-collapse: collapse; width: 100%; font-size: 14.5px; min-width: 560px; }
-  th, td { text-align: left; padding: 13px 16px; border-bottom: 1px solid var(--hair); vertical-align: top; }
-  th {
-    font-family: var(--mono); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase;
-    color: var(--muted); font-weight: 600; border-bottom: 1.5px solid var(--hair);
-  }
-  td.finding { font-weight: 600; }
-  td .commit { font-family: var(--mono); font-size: 12.5px; color: var(--steel); display: block; margin-top: 4px; }
-  tr:last-child td { border-bottom: none; }
-  .cmp td.up { color: var(--ink); }
-  .cmp td.ps { color: var(--muted); }
-  .cmp .dim { font-family: var(--mono); font-size: 12.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
-
-  /* code echo blocks */
-  .echo {
-    font-family: var(--mono); font-size: 14px; background: var(--surface-2);
-    border: 1px solid var(--hair); border-radius: 10px; padding: 16px 18px; margin: 20px 0;
-    overflow-x: auto; line-height: 1.9;
-  }
-  .echo .k { color: var(--faint); }
-
-  .callout {
-    border-left: 3px solid var(--garnet); background: var(--surface);
-    padding: 16px 20px; border-radius: 0 10px 10px 0; margin: 22px 0; font-size: 15px;
-  }
-  .callout .label { font-family: var(--mono); font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--garnet); display: block; margin-bottom: 6px; font-weight: 600; }
-
-  /* legend for the Latin/Cyrillic encoding */
-  .legend { display: flex; gap: 20px; flex-wrap: wrap; margin: 16px 0 4px; font-size: 13px; color: var(--muted); }
-  .legend .item { display: flex; align-items: center; gap: 8px; }
-  .swatch { width: 12px; height: 12px; border-radius: 3px; }
-  .swatch.steel { background: var(--steel); }
-  .swatch.garnet { background: var(--garnet); }
-
-  footer { padding: 48px 0 72px; border-top: 1px solid var(--hair); color: var(--muted); font-size: 13.5px; }
-  footer .mono { color: var(--faint); }
-
-  /* chart tooltip */
-  #tt {
-    position: fixed; pointer-events: none; z-index: 50; opacity: 0; transform: translate(-50%, -120%);
-    background: var(--ink); color: var(--ground); font-family: var(--mono); font-size: 12px;
-    padding: 6px 9px; border-radius: 6px; white-space: nowrap; transition: opacity .1s;
-  }
-  .bar, .dot, .lp { transition: opacity .12s; }
-  .hoverable:hover { opacity: .82; cursor: default; }
-  :focus-visible { outline: 2px solid var(--garnet); outline-offset: 2px; border-radius: 4px; }
-  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
-</style>
 
 <div id="tt" role="status" aria-live="off"></div>
 
@@ -228,7 +22,7 @@
     <div>
       <p class="eyebrow">Нотатки з поля · три дні роботи</p>
       <h1>Як я повертав до життя <span class="accent">мертвий текст</span></h1>
-      <p class="lead">За три дні я з нуля відтворив найстаріший трюк Punto Switcher — а потім дозволив бенчмаркам показати, де я помилявся.</p>
+      <p class="lead">Чиста реалізація найстарішого трюку Punto Switcher — зроблена за три дні, спостерігаючи, що воно робить, і жодного разу не торкаючись його коду; а потім бенчмарки показали, де я помилявся.</p>
       <div class="hero-meta">
         <span class="tag">Rust · WASM</span>
         <span class="tag">EN ↔ UK</span>
@@ -257,7 +51,7 @@
         </div>
         <figcaption class="conversion">
           <div class="row"><span class="src">[ks,</span><span class="arrow">→</span><span class="dst">хліб</span></div>
-          <div class="row" style="font-size:13px;color:var(--faint)">одна клавіша. два значення. увесь застосунок — це вибір правильного.</div>
+          <div class="row cap-sub">одна клавіша. два значення. увесь застосунок — це вибір правильного.</div>
         </figcaption>
       </figure>
     </div>
@@ -275,7 +69,7 @@
       <span class="item"><span class="swatch steel"></span> що видала не та розкладка (клавіші)</span>
       <span class="item"><span class="swatch garnet"></span> що ти насправді мав на увазі</span>
     </div>
-    <p style="margin-top:16px">Поміняти літери — це легка частина: QWERTY та ЙЦУКЕН — це фіксовані позиційні карти, пошук на п’ятдесят рядків. Складне — зрозуміти, <em>коли</em> їх міняти. Кожне завершене слово — це «так» чи «ні»: лишити чи переписати? Перепишеш слово, яке людина справді мала на увазі, — і ти щойно спотворив її текст. Саме через це видаляють застосунки. Пропущене виправлення — це знизане плече; хибне виправлення — це зрада. Тому весь дизайн схиляється до одного правила: <strong>сумніваєшся — не роби нічого.</strong></p>
+    <p class="mt16">Поміняти літери — це легка частина: QWERTY та ЙЦУКЕН — це фіксовані позиційні карти, пошук на п’ятдесят рядків. Складне — зрозуміти, <em>коли</em> їх міняти. Кожне завершене слово — це «так» чи «ні»: лишити чи переписати? Перепишеш слово, яке людина справді мала на увазі, — і ти щойно спотворив її текст. Саме через це видаляють застосунки. Пропущене виправлення — це знизане плече; хибне виправлення — це зрада. Тому весь дизайн схиляється до одного правила: <strong>сумніваєшся — не роби нічого.</strong></p>
   </div>
 </section>
 
@@ -284,7 +78,7 @@
   <div class="wrap col">
     <p class="eyebrow">Як воно вийшло</p>
     <h2>Три дні: від першого релізу до підписаної v0.2.0</h2>
-    <p class="lead">Уся історія — просто в логу комітів. Кожен вузол нижче — реальний коміт, а <span style="color:var(--garnet);font-weight:600">гранатові</span> — це моменти, коли щось клацнуло, або коли бенчмарк упіймав мене на помилці.</p>
+    <p class="lead">Уся історія — просто в логу комітів. Кожен вузол нижче — реальний коміт, а <span class="hl-garnet">гранатові</span> — це моменти, коли щось клацнуло, або коли бенчмарк упіймав мене на помилці.</p>
   </div>
   <div class="wrap col">
     <div class="timeline">
@@ -390,6 +184,48 @@
   </div>
 </section>
 
+<!-- ============================ WHAT'S INSIDE PS ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">Чим було розбирання — а чим ні</p>
+    <h2>Що насправді всередині Punto Switcher</h2>
+    <p>Слушне запитання до всього, що зветься «розбиранням»: із <em>чого</em> Punto зроблено і чим його розкрили? Ось що задокументовано публічно — і чесний опис методу.</p>
+    <p>Punto Switcher — програма для Windows (<code>punto.exe</code>) від Яндекса. Розкладку вона обирає за <strong>словником у кілька мільйонів слів</strong> плюс правилом «неможливого поєднання» — російське слово не може починатися з певних літер, тож їхня низка викриває не ту розкладку — і перевіряє це на кожен пробіл, Enter чи Tab. Її стан живе в кількох двійкових, не-текстових файлах <code>.dat</code>:</p>
+  </div>
+  <div class="wrap">
+    <div class="figure figure-full">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Файл</th><th>Роль</th></tr></thead>
+          <tbody>
+            <tr><td class="finding"><code>Data/triggers.dat</code></td><td><strong>правила-тригери</strong> перемикання — саме цей файл вихідник проєкту називає своєю моделлю</td></tr>
+            <tr><td class="finding"><code>Data/ps.dat</code></td><td>основний мовний словник (той список у кілька мільйонів слів)</td></tr>
+            <tr><td class="finding"><code>Data/translit.dat</code></td><td>таблиця транслітерації</td></tr>
+            <tr><td class="finding"><code>User Data/replace.dat</code></td><td>автозаміна / розгортання скорочень</td></tr>
+            <tr><td class="finding"><code>User Data/user.dic</code></td><td>користувацький словник винятків</td></tr>
+            <tr><td class="finding"><code>diary.dat</code></td><td><strong>щоденник натискань</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="figcap">Публічна структура файлів, зі сторонніх оглядів — а не з інспекції коду Punto. Файли даних — зашифрований двійковий формат; навіть список автозаміни не відкриється в текстовому редакторі.</p>
+    </div>
+  </div>
+  <div class="wrap col">
+    <div class="callout">
+      <span class="label">Файл, у який варто вдивитися</span>
+      Функція <strong>«Щоденник» (Дневник)</strong> Punto записує <em>кожне</em> натискання у <code>diary.dat</code> — чати в месенджерах, пошукові запити, паролі відкритим текстом — а програма тримає власне мережеве з’єднання; саме тому незалежні огляди вважають її кейлогером, а деякі антивіруси позначають збірку як PUA. Не побічний ризик: це поставлена, задокументована функція.
+    </div>
+    <h3>То яким був «інструментарій»? Його не було.</h3>
+    <p>Ті файли <code>.dat</code> — зашифровані двійкові блоби. Upyr їх ніколи не зламував: жодного дизасемблера, жодного розпакованого <code>ps.dat</code>, жодного словника, знятого з Яндекса. Метод був чорноскриньковий: подаєш послідовності клавіш, дивишся на виправлення на виході — і відтворюєш <em>архітектуру, яку ці файли передбачають</em>, а не їхній вміст. У цьому весь сенс «чистої реалізації» — і тому словників Punto ти ніде в цьому проєкті не знайдеш. Відтворено було форму:</p>
+    <ul>
+      <li><code>triggers.dat</code> → таблиця з 12 правил, написана з нуля;</li>
+      <li><code>ps.dat</code> на кілька мільйонів слів → <strong>зовсім не великий словник</strong>, а знаковий n-грам на 2.8 MiB плюс стоп-список із 296 слів — навмисно інша, статистична відповідь на те саме питання;</li>
+      <li><code>diary.dat</code> → нічого. Свідомо. Та єдина функція Punto, якої Upyr найбільше хотів <em>не</em> мати.</li>
+    </ul>
+    <p>Вивчати публічну структуру файлів і видиму поведінку програми — це геть інше, ніж копіювати її код; і саме суворе дотримання першого дає Upyr не мати з Punto нічого спільного, водночас у неї навчаючись. Джерела про внутрішню будову Punto наведені внизу сторінки.</p>
+  </div>
+</section>
+
 <!-- ============================ INSIGHT: physical keys ============================ -->
 <section>
   <div class="wrap col">
@@ -476,7 +312,7 @@
   </div>
   <div class="wrap">
     <div class="figure">
-      <div class="legend" style="margin-bottom:18px" aria-hidden="true">
+      <div class="legend mb18" aria-hidden="true">
         <span class="item"><span class="swatch steel"></span> Консервативний (за замовч.)</span>
         <span class="item"><span class="swatch garnet"></span> Агресивний · min_word_length = 2</span>
       </div>
@@ -659,28 +495,14 @@
   <div class="wrap col">
     <p>Джерело — репозиторій <span class="mono">upyr</span>: заморожені корпуси оцінювання закріплені через SHA-256 у <span class="mono">docs/benchmarks/signed-ngram-v1.md</span> та <span class="mono">docs/benchmarks/recall-v1.md</span>; кожна цифра на цій сторінці простежується до одного з них. Відтворити: <span class="mono">cargo test -p upyr-core</span>.</p>
     <p class="mono">Upyr — незалежний проєкт, не пов’язаний із Яндексом чи Punto Switcher, і не має спільного коду з Punto Switcher чи KeyboardSwitch.</p>
+    <p><b>Джерела про внутрішню будову Punto Switcher</b> — публічні огляди стороннього продукту, а не інспекція коду; можуть бути застарілими чи залежати від версії:
+      словниковий алгоритм — <a href="https://www.softportal.com/en/punto-switcher/windows/software">softportal.com</a>;
+      структура файлів <code>.dat</code> та їхній зашифрований формат — <a href="https://www.programmersforum.rocks/t/punto-switcher-replace-dat/5448">programmersforum.rocks</a>;
+      кейлогер <code>diary.dat</code> та означення як PUA — <a href="https://spy-soft.net/punto-switcher-shpion/">spy-soft.net</a> і <a href="https://blog.gridinsoft.com/puabundler-win32-yandexbundled/">Gridinsoft</a>.</p>
   </div>
+  <div class="wrap col"><p><a href="reverse-engineering-punto-switcher.html">Read in English →</a></p></div>
 </footer>
 
-<script>
-  (function () {
-    var tt = document.getElementById('tt');
-    function show(e, text) {
-      tt.textContent = text;
-      tt.style.left = e.clientX + 'px';
-      tt.style.top = e.clientY + 'px';
-      tt.style.opacity = '1';
-    }
-    function hide() { tt.style.opacity = '0'; }
-    document.querySelectorAll('[data-t]').forEach(function (el) {
-      el.addEventListener('mousemove', function (e) { show(e, el.getAttribute('data-t')); });
-      el.addEventListener('mouseleave', hide);
-      el.setAttribute('tabindex', '0');
-      el.setAttribute('role', 'img');
-      el.setAttribute('aria-label', el.getAttribute('data-t'));
-    });
-  })();
-</script>
 
 </body>
 </html>

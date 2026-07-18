@@ -3,222 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#16131c">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Upyr: reverse-engineering Punto Switcher</title>
-<meta name="description" content="A three-day build history of Upyr — how Punto Switcher's layout-correction trick was reverse-engineered, the benchmark findings, and why the rebuild is verifiably better.">
-<style>*,*::before,*::after{box-sizing:border-box}html{-webkit-text-size-adjust:100%}img,svg{max-width:100%}</style>
+<meta name="description" content="A three-day clean-room rebuild of Punto Switcher's layout-correction trick — what's inside PS, the benchmark findings, and why the rebuild is verifiably better.">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="re-writeup.css">
+<script src="re-writeup.js" defer></script>
 </head>
 <body>
-<style>
-  :root {
-    /* neutrals — a chosen cool "bone", biased away from the warm garnet accent */
-    --ground: #e8e8ea;
-    --surface: #f6f6f7;
-    --surface-2: #fdfdfd;
-    --hair: #d3d3d7;
-    --ink: #1a1720;
-    --muted: #64606a;
-    --faint: #928d97;
-    /* accents */
-    --garnet: #a81a2c;   /* the intended / the revenant / brand */
-    --garnet-soft: #c65563;
-    --steel: #136c9e;    /* the source: what the wrong layout produced */
-    --steel-soft: #4f8bb0;
-    --grid: #dcdce0;
-    --chart-surface: #fcfcfb;
-    --good: #1c7c54;
-    --shadow: 0 1px 2px rgba(20,16,26,.06), 0 8px 30px rgba(20,16,26,.05);
-    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-    --serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
-    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --ground: #16131c;
-      --surface: #1f1b28;
-      --surface-2: #262130;
-      --hair: #322c3d;
-      --ink: #ece7ea;
-      --muted: #a49dac;
-      --faint: #776f82;
-      --garnet: #d64c56;
-      --garnet-soft: #e07d84;
-      --steel: #4f9bd1;
-      --steel-soft: #6fa9d3;
-      --grid: #2c2738;
-      --chart-surface: #1a1622;
-      --good: #52c08b;
-      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 34px rgba(0,0,0,.35);
-    }
-  }
-  :root[data-theme="light"] {
-    --ground: #e8e8ea; --surface: #f6f6f7; --surface-2: #fdfdfd; --hair: #d3d3d7;
-    --ink: #1a1720; --muted: #64606a; --faint: #928d97;
-    --garnet: #a81a2c; --garnet-soft: #c65563; --steel: #136c9e; --steel-soft: #4f8bb0;
-    --grid: #dcdce0; --chart-surface: #fcfcfb; --good: #1c7c54;
-    --shadow: 0 1px 2px rgba(20,16,26,.06), 0 8px 30px rgba(20,16,26,.05);
-  }
-  :root[data-theme="dark"] {
-    --ground: #16131c; --surface: #1f1b28; --surface-2: #262130; --hair: #322c3d;
-    --ink: #ece7ea; --muted: #a49dac; --faint: #776f82;
-    --garnet: #d64c56; --garnet-soft: #e07d84; --steel: #4f9bd1; --steel-soft: #6fa9d3;
-    --grid: #2c2738; --chart-surface: #1a1622; --good: #52c08b;
-    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 34px rgba(0,0,0,.35);
-  }
 
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--ground); color: var(--ink);
-    font-family: var(--sans); line-height: 1.65;
-    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
-  }
-  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
-  .col { max-width: 660px; margin-left: auto; margin-right: auto; }
-  section { padding: 64px 0; border-top: 1px solid var(--hair); }
-  section:first-of-type { border-top: none; }
-
-  h1, h2, h3 { font-family: var(--serif); font-weight: 700; text-wrap: balance; letter-spacing: -.01em; }
-  h2 { font-size: clamp(26px, 4vw, 38px); line-height: 1.1; margin: 0 0 8px; }
-  h3 { font-size: 20px; line-height: 1.25; margin: 32px 0 8px; }
-  p { margin: 0 0 18px; }
-  .col p, .col ul { color: var(--ink); }
-  .lead { font-size: 19px; color: var(--muted); }
-  .eyebrow {
-    font-family: var(--mono); font-size: 12px; letter-spacing: .16em; text-transform: uppercase;
-    color: var(--garnet); margin: 0 0 14px; font-weight: 600;
-  }
-  a { color: var(--garnet); text-underline-offset: 3px; }
-  strong { font-weight: 650; }
-  code, .mono { font-family: var(--mono); }
-  .src { font-family: var(--mono); color: var(--steel); font-weight: 600; }
-  .dst { font-family: var(--serif); color: var(--garnet); font-weight: 700; font-style: normal; }
-  ul { padding-left: 20px; }
-  li { margin-bottom: 8px; }
-
-  /* ---------- HERO ---------- */
-  .hero { padding: clamp(72px, 12vh, 128px) 0 72px; border-top: none; }
-  .hero-grid { display: grid; grid-template-columns: 1fr; gap: 40px; align-items: center; }
-  @media (min-width: 820px) { .hero-grid { grid-template-columns: 1.25fr .75fr; gap: 56px; } }
-  .hero h1 { font-size: clamp(40px, 7vw, 68px); line-height: .98; margin: 0 0 20px; }
-  .hero h1 .accent { color: var(--garnet); }
-  .hero .lead { font-size: clamp(17px, 2.4vw, 21px); max-width: 30ch; }
-  .hero-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 28px; }
-  .tag {
-    font-family: var(--mono); font-size: 12px; letter-spacing: .04em;
-    padding: 5px 10px; border: 1px solid var(--hair); border-radius: 999px; color: var(--muted);
-    background: var(--surface);
-  }
-
-  /* the keycap: same physical key, two writing systems */
-  .keycap-stage { display: flex; justify-content: center; }
-  figure { margin: 0; }
-  .keycap {
-    width: 190px; height: 190px; position: relative;
-  }
-  .conversion {
-    margin-top: 22px; font-size: 15px; color: var(--muted); text-align: center;
-    display: flex; flex-direction: column; gap: 6px; align-items: center;
-  }
-  .conversion .row { display: flex; align-items: center; gap: 12px; }
-  .conversion .arrow { color: var(--faint); }
-
-  /* ---------- generic figure / card ---------- */
-  .figure {
-    background: var(--surface); border: 1px solid var(--hair); border-radius: 14px;
-    box-shadow: var(--shadow); padding: 24px; margin: 28px 0;
-  }
-  .figure-full { max-width: 1080px; }
-  .figcap {
-    font-family: var(--mono); font-size: 12.5px; color: var(--muted); margin-top: 14px;
-    line-height: 1.5;
-  }
-  .figcap b { color: var(--ink); font-weight: 600; }
-  .svg-scroll { overflow-x: auto; }
-  svg { display: block; max-width: 100%; height: auto; }
-  svg text { font-family: var(--mono); }
-
-  /* ---------- stat tiles ---------- */
-  .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin: 28px 0; }
-  @media (min-width: 700px) { .tiles { grid-template-columns: repeat(4, 1fr); } }
-  .tile {
-    background: var(--surface); border: 1px solid var(--hair); border-radius: 12px; padding: 18px;
-  }
-  .tile .n {
-    font-family: var(--mono); font-size: 30px; font-weight: 600; letter-spacing: -.02em;
-    color: var(--garnet); font-variant-numeric: tabular-nums; line-height: 1;
-  }
-  .tile .n.steel { color: var(--steel); }
-  .tile .n.good { color: var(--good); }
-  .tile .k { font-size: 12.5px; color: var(--muted); margin-top: 8px; line-height: 1.4; }
-
-  /* ---------- timeline ---------- */
-  .timeline { position: relative; margin: 32px 0 0; }
-  .day { margin-bottom: 8px; }
-  .day-head {
-    display: flex; align-items: baseline; gap: 14px; margin: 28px 0 4px;
-  }
-  .day-date { font-family: var(--mono); font-size: 13px; color: var(--garnet); font-weight: 600; letter-spacing: .03em; white-space: nowrap; }
-  .day-title { font-family: var(--serif); font-size: 21px; font-weight: 700; }
-  .steps { list-style: none; padding: 0; margin: 0; border-left: 2px solid var(--hair); }
-  .step { position: relative; padding: 6px 0 6px 26px; }
-  .step::before {
-    content: ""; position: absolute; left: -7px; top: 13px; width: 12px; height: 12px;
-    border-radius: 50%; background: var(--surface); border: 2px solid var(--steel);
-  }
-  .step.key::before { background: var(--garnet); border-color: var(--garnet); box-shadow: 0 0 0 4px color-mix(in srgb, var(--garnet) 18%, transparent); }
-  .step .commit { font-family: var(--mono); font-size: 13.5px; color: var(--ink); }
-  .step .note { font-size: 13.5px; color: var(--muted); }
-  .step.key .commit { font-weight: 600; }
-
-  /* ---------- adoption table ---------- */
-  .table-scroll { overflow-x: auto; margin: 24px 0; }
-  table { border-collapse: collapse; width: 100%; font-size: 14.5px; min-width: 560px; }
-  th, td { text-align: left; padding: 13px 16px; border-bottom: 1px solid var(--hair); vertical-align: top; }
-  th {
-    font-family: var(--mono); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase;
-    color: var(--muted); font-weight: 600; border-bottom: 1.5px solid var(--hair);
-  }
-  td.finding { font-weight: 600; }
-  td .commit { font-family: var(--mono); font-size: 12.5px; color: var(--steel); display: block; margin-top: 4px; }
-  tr:last-child td { border-bottom: none; }
-  .cmp td.up { color: var(--ink); }
-  .cmp td.ps { color: var(--muted); }
-  .cmp .dim { font-family: var(--mono); font-size: 12.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
-
-  /* code echo blocks */
-  .echo {
-    font-family: var(--mono); font-size: 14px; background: var(--surface-2);
-    border: 1px solid var(--hair); border-radius: 10px; padding: 16px 18px; margin: 20px 0;
-    overflow-x: auto; line-height: 1.9;
-  }
-  .echo .k { color: var(--faint); }
-
-  .callout {
-    border-left: 3px solid var(--garnet); background: var(--surface);
-    padding: 16px 20px; border-radius: 0 10px 10px 0; margin: 22px 0; font-size: 15px;
-  }
-  .callout .label { font-family: var(--mono); font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--garnet); display: block; margin-bottom: 6px; font-weight: 600; }
-
-  /* legend for the Latin/Cyrillic encoding */
-  .legend { display: flex; gap: 20px; flex-wrap: wrap; margin: 16px 0 4px; font-size: 13px; color: var(--muted); }
-  .legend .item { display: flex; align-items: center; gap: 8px; }
-  .swatch { width: 12px; height: 12px; border-radius: 3px; }
-  .swatch.steel { background: var(--steel); }
-  .swatch.garnet { background: var(--garnet); }
-
-  footer { padding: 48px 0 72px; border-top: 1px solid var(--hair); color: var(--muted); font-size: 13.5px; }
-  footer .mono { color: var(--faint); }
-
-  /* chart tooltip */
-  #tt {
-    position: fixed; pointer-events: none; z-index: 50; opacity: 0; transform: translate(-50%, -120%);
-    background: var(--ink); color: var(--ground); font-family: var(--mono); font-size: 12px;
-    padding: 6px 9px; border-radius: 6px; white-space: nowrap; transition: opacity .1s;
-  }
-  .bar, .dot, .lp { transition: opacity .12s; }
-  .hoverable:hover { opacity: .82; cursor: default; }
-  :focus-visible { outline: 2px solid var(--garnet); outline-offset: 2px; border-radius: 4px; }
-  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
-</style>
 
 <div id="tt" role="status" aria-live="off"></div>
 
@@ -228,7 +22,7 @@
     <div>
       <p class="eyebrow">Field notes · a three-day build</p>
       <h1>Bringing dead text <span class="accent">back to life</span></h1>
-      <p class="lead">I rebuilt Punto Switcher's oldest trick from scratch in three days — then let the benchmarks tell me where I'd got it wrong.</p>
+      <p class="lead">A clean-room rebuild of Punto Switcher's oldest trick — built in three days by watching what it does, never touching its code, then letting the benchmarks tell me where I'd got it wrong.</p>
       <div class="hero-meta">
         <span class="tag">Rust · WASM</span>
         <span class="tag">EN ↔ UK</span>
@@ -257,7 +51,7 @@
         </div>
         <figcaption class="conversion">
           <div class="row"><span class="src">[ks,</span><span class="arrow">→</span><span class="dst">хліб</span></div>
-          <div class="row" style="font-size:13px;color:var(--faint)">one key. two meanings. the whole product is choosing right.</div>
+          <div class="row cap-sub">one key. two meanings. the whole product is choosing right.</div>
         </figcaption>
       </figure>
     </div>
@@ -275,7 +69,7 @@
       <span class="item"><span class="swatch steel"></span> what the wrong layout produced (the keys)</span>
       <span class="item"><span class="swatch garnet"></span> what you actually meant</span>
     </div>
-    <p style="margin-top:16px">Swapping the letters is the easy part — QWERTY and ЙЦУКЕН are fixed positional maps, a fifty-line lookup. The hard part is knowing <em>when</em> to swap them. Every finished word is a yes/no: leave it, or rewrite it? Rewrite a word the person actually meant and you've just mangled their text — and that's the failure that gets an app deleted. A missed fix is a shrug; a wrong fix is a betrayal. So the whole design bends toward one rule: <strong>when in doubt, do nothing.</strong></p>
+    <p class="mt16">Swapping the letters is the easy part — QWERTY and ЙЦУКЕН are fixed positional maps, a fifty-line lookup. The hard part is knowing <em>when</em> to swap them. Every finished word is a yes/no: leave it, or rewrite it? Rewrite a word the person actually meant and you've just mangled their text — and that's the failure that gets an app deleted. A missed fix is a shrug; a wrong fix is a betrayal. So the whole design bends toward one rule: <strong>when in doubt, do nothing.</strong></p>
   </div>
 </section>
 
@@ -284,7 +78,7 @@
   <div class="wrap col">
     <p class="eyebrow">How it shipped</p>
     <h2>Three days, initial release to signed v0.2.0</h2>
-    <p class="lead">The whole thing is right there in the commit log. Every node below is a real commit — and the <span style="color:var(--garnet);font-weight:600">garnet ones</span> are the moments something clicked, or a benchmark caught me out.</p>
+    <p class="lead">The whole thing is right there in the commit log. Every node below is a real commit — and the <span class="hl-garnet">garnet ones</span> are the moments something clicked, or a benchmark caught me out.</p>
   </div>
   <div class="wrap col">
     <div class="timeline">
@@ -390,6 +184,48 @@
   </div>
 </section>
 
+<!-- ============================ WHAT'S INSIDE PS ============================ -->
+<section>
+  <div class="wrap col">
+    <p class="eyebrow">What the teardown was — and wasn't</p>
+    <h2>What's actually inside Punto Switcher</h2>
+    <p>Fair thing to ask of anything calling itself a teardown: what <em>is</em> Punto made of, and what cracked it open? Here's what's publicly documented — and an honest account of the method.</p>
+    <p>Punto Switcher is a Windows program (<code>punto.exe</code>) from Yandex. It picks the layout with a <strong>dictionary of several million words</strong> plus an "impossible-combination" rule — a Russian word can't begin with certain letters, so a run of them betrays the wrong layout — re-checked on every Space, Enter or Tab. Its state lives in a handful of binary, non-plaintext <code>.dat</code> files:</p>
+  </div>
+  <div class="wrap">
+    <div class="figure figure-full">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>File</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td class="finding"><code>Data/triggers.dat</code></td><td>the switching <strong>trigger rules</strong> — the file this project's source names as its model</td></tr>
+            <tr><td class="finding"><code>Data/ps.dat</code></td><td>the main language dictionary (the several-million-word list)</td></tr>
+            <tr><td class="finding"><code>Data/translit.dat</code></td><td>transliteration table</td></tr>
+            <tr><td class="finding"><code>User Data/replace.dat</code></td><td>autoreplace / abbreviation expansions</td></tr>
+            <tr><td class="finding"><code>User Data/user.dic</code></td><td>user exceptions dictionary</td></tr>
+            <tr><td class="finding"><code>diary.dat</code></td><td>the <strong>keystroke diary</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="figcap">Public file layout, from third-party write-ups — not from inspecting Punto's code. The data files are encrypted binary; even the autoreplace list won't open in a text editor.</p>
+    </div>
+  </div>
+  <div class="wrap col">
+    <div class="callout">
+      <span class="label">The file worth staring at</span>
+      Punto's <strong>Diary (Дневник)</strong> feature logs <em>every</em> keystroke to <code>diary.dat</code> — messenger chats, search queries, passwords in the clear — and the program keeps its own network connection, which is why independent write-ups treat it as a keylogger and some antivirus vendors flag the bundle as a PUA. Not an incidental risk: a shipped, documented feature.
+    </div>
+    <h3>So what was the "tooling"? There wasn't any.</h3>
+    <p>Those <code>.dat</code> files are encrypted binary blobs. Upyr never cracked them — no disassembler, no unpacked <code>ps.dat</code>, no dictionary lifted from Yandex. The method was black-box: feed key sequences in, watch the corrections come out, and rebuild the <em>architecture those files imply</em> rather than their contents. That's the whole meaning of "clean-room" here — and it's why you won't find Punto's dictionaries anywhere in this project. What got reconstructed was the shape:</p>
+    <ul>
+      <li><code>triggers.dat</code> → a 12-rule trigger table written from scratch;</li>
+      <li>the several-million-word <code>ps.dat</code> → <strong>not a big dictionary at all</strong>, but a 2.8 MiB signed n-gram model plus a 296-word stop-list — a deliberately different, statistical answer to the same question;</li>
+      <li><code>diary.dat</code> → nothing. On purpose. The one Punto feature Upyr most wanted to <em>not</em> have.</li>
+    </ul>
+    <p>Studying a program's public file layout and observable behaviour is a world away from copying its code — and keeping strictly to the former is what lets Upyr share nothing with Punto while still learning from it. Sources on Punto's internals are listed at the foot of the page.</p>
+  </div>
+</section>
+
 <!-- ============================ INSIGHT: physical keys ============================ -->
 <section>
   <div class="wrap col">
@@ -476,7 +312,7 @@
   </div>
   <div class="wrap">
     <div class="figure">
-      <div class="legend" style="margin-bottom:18px" aria-hidden="true">
+      <div class="legend mb18" aria-hidden="true">
         <span class="item"><span class="swatch steel"></span> Conservative (default)</span>
         <span class="item"><span class="swatch garnet"></span> Aggressive · min_word_length = 2</span>
       </div>
@@ -659,28 +495,14 @@
   <div class="wrap col">
     <p>Sourced from the <span class="mono">upyr</span> repository — the frozen evaluation corpora are pinned by SHA-256 in <span class="mono">docs/benchmarks/signed-ngram-v1.md</span> and <span class="mono">docs/benchmarks/recall-v1.md</span>; every figure on this page traces to one of them. Reproduce with <span class="mono">cargo test -p upyr-core</span>.</p>
     <p class="mono">Upyr is an independent project, not affiliated with Yandex or Punto Switcher, and shares no code with Punto Switcher or KeyboardSwitch.</p>
+    <p><b>Sources on Punto Switcher's internals</b> — public write-ups describing a third-party product, not code inspection; may be dated or version-specific:
+      the dictionary-based algorithm, <a href="https://www.softportal.com/en/punto-switcher/windows/software">softportal.com</a>;
+      the <code>.dat</code> file layout and its encrypted format, <a href="https://www.programmersforum.rocks/t/punto-switcher-replace-dat/5448">programmersforum.rocks</a>;
+      the <code>diary.dat</code> keystroke logger and PUA characterizations, <a href="https://spy-soft.net/punto-switcher-shpion/">spy-soft.net</a> and <a href="https://blog.gridinsoft.com/puabundler-win32-yandexbundled/">Gridinsoft</a>.</p>
   </div>
+  <div class="wrap col"><p><a href="reverse-engineering-punto-switcher.uk.html">Читати українською →</a></p></div>
 </footer>
 
-<script>
-  (function () {
-    var tt = document.getElementById('tt');
-    function show(e, text) {
-      tt.textContent = text;
-      tt.style.left = e.clientX + 'px';
-      tt.style.top = e.clientY + 'px';
-      tt.style.opacity = '1';
-    }
-    function hide() { tt.style.opacity = '0'; }
-    document.querySelectorAll('[data-t]').forEach(function (el) {
-      el.addEventListener('mousemove', function (e) { show(e, el.getAttribute('data-t')); });
-      el.addEventListener('mouseleave', hide);
-      el.setAttribute('tabindex', '0');
-      el.setAttribute('role', 'img');
-      el.setAttribute('aria-label', el.getAttribute('data-t'));
-    });
-  })();
-</script>
 
 </body>
 </html>
