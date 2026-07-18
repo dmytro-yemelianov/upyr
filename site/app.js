@@ -5,9 +5,12 @@
     skip: "Перейти до вмісту",
     navWhy: "Навіщо Upyr",
     navExperience: "Огляд",
+    navHome: "Головна",
     navHow: "Як це працює",
+    navFeatures: "Можливості",
     navPrivacy: "Приватність",
     navPlatforms: "Платформи",
+    navStory: "Історія створення",
     heroEyebrow: "Публічна попередня версія · v0.2.0",
     heroTitle: "Розкладка може помилятися. Ваші слова — ні.",
     heroLead: "Upyr миттєво відновлює англійський та український текст, набраний у неправильній розкладці. Нативна швидкість Rust, локальні рішення, жодного стеження.",
@@ -143,18 +146,25 @@
     ngramStep4Label: "Крок 4: ухвалити захищене рішення"
   };
 
-  const englishMetadata = {
-    title: "Upyr — type what you meant",
-    description: "Upyr is a private, native English–Ukrainian keyboard-layout fixer for macOS, built in Rust and powered by a compact local character n-gram model.",
-    socialTitle: "Upyr — type what you meant",
-    socialDescription: "Private English ↔ Ukrainian layout correction. Local, fast, open source."
+  // Per-page metadata: the English base is read from each page's own head, and
+  // the Ukrainian strings come from data-* attributes on <html>. This keeps every
+  // page's title/description its own, across the multi-page site.
+  const metaContent = (selector) => {
+    const node = document.querySelector(selector);
+    return node ? node.getAttribute("content") || "" : "";
   };
-
+  const pageData = document.documentElement.dataset;
+  const englishMetadata = {
+    title: document.title,
+    description: metaContent('meta[name="description"]'),
+    socialTitle: metaContent('meta[property="og:title"]') || document.title,
+    socialDescription: metaContent('meta[property="og:description"]')
+  };
   const ukrainianMetadata = {
-    title: "Upyr — набирайте те, що мали на увазі",
-    description: "Upyr — приватний нативний перемикач англійської та української розкладок для macOS, створений на Rust із компактною локальною моделлю символьних n-грам.",
-    socialTitle: "Upyr — набирайте те, що мали на увазі",
-    socialDescription: "Приватне виправлення розкладки EN ↔ УК. Локально, швидко, з відкритим кодом."
+    title: pageData.titleUk || englishMetadata.title,
+    description: pageData.descriptionUk || englishMetadata.description,
+    socialTitle: pageData.titleUk || englishMetadata.socialTitle,
+    socialDescription: pageData.socialUk || englishMetadata.socialDescription
   };
 
   document.documentElement.classList.remove("no-js");

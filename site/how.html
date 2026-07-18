@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en" class="no-js" data-title-uk="Як працює Upyr — Upyr" data-description-uk="Крихітний локальний шлях рішення в Upyr: перемапити фізичні клавіші, а потім дати знаковій моделі символьних n-грам оцінити кандидат іншої розкладки." data-social-uk="Як Upyr вирішує: фізичні клавіші + знаковий n-грам, локально й детерміновано.">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#11151c">
+    <meta name="color-scheme" content="dark">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+    <meta name="description" content="The tiny local decision path behind Upyr: remap the physical keys, then let a signed character n-gram model judge the other-layout candidate.">
+    <meta name="robots" content="index,follow">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="How Upyr works — Upyr">
+    <meta property="og:description" content="Private English ↔ Ukrainian layout correction. Local, fast, open source.">
+    <meta property="og:url" content="https://upyr.org/how.html">
+    <title>How Upyr works — Upyr</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main" data-i18n="skip">Skip to content</a>
+
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="index.html" aria-label="Upyr home" data-i18n-aria="homeLabel">
+          <img src="favicon.svg" width="36" height="36" alt="">
+          <span>Upyr</span>
+        </a>
+        <nav class="nav" aria-label="Main navigation" data-i18n-aria="navLabel">
+          <a href="index.html" data-i18n="navHome">Home</a>
+          <a href="how.html" data-i18n="navHow" aria-current="page" class="is-current">How it works</a>
+          <a href="features.html" data-i18n="navFeatures">Features</a>
+          <a href="privacy.html" data-i18n="navPrivacy">Privacy</a>
+          <a href="articles/reverse-engineering-punto-switcher.html" data-i18n="navStory">The making-of</a>
+        </nav>
+        <div class="header-actions">
+          <div class="language-switch" role="group" aria-label="Choose language" data-i18n-aria="languageLabel">
+            <button class="language-button is-active" type="button" data-language="en" aria-pressed="true" lang="en">EN</button>
+            <button class="language-button" type="button" data-language="uk" aria-pressed="false" lang="uk">УК</button>
+          </div>
+          <a class="github-link" href="https://github.com/dmytro-yemelianov/upyr" aria-label="Upyr on GitHub" data-i18n-aria="githubLabel">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 .7a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.2.8-.6v-2.2c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.6-.3-5.4-1.3-5.4-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.9 1.2 3.1 0 4.4-2.8 5.4-5.4 5.7.4.4.8 1.1.8 2.2v3.3c0 .4.2.7.8.6A11.5 11.5 0 0 0 12 .7Z"/>
+            </svg>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="section" id="how">
+        <div class="shell">
+          <div class="section-intro section-intro-wide">
+            <p class="kicker" data-i18n="howKicker">Under the hood</p>
+            <h2 data-i18n="howTitle">A tiny local decision path</h2>
+            <p data-i18n="howLead">No translation service and no generative model. Upyr remaps the exact physical keys, then asks whether the other-layout candidate is clearly more plausible.</p>
+          </div>
+
+          <ol class="pipeline">
+            <li>
+              <span class="step-number">01</span>
+              <h3 data-i18n="stepCaptureTitle">Capture positions</h3>
+              <p data-i18n="stepCaptureCopy">The native hook keeps a bounded in-memory prefix for the current input boundary.</p>
+            </li>
+            <li>
+              <span class="step-number">02</span>
+              <h3 data-i18n="stepMapTitle">Remap keys</h3>
+              <p data-i18n="stepMapCopy">Installed EN and UK input sources produce the opposite-layout candidate, case and punctuation included.</p>
+            </li>
+            <li>
+              <span class="step-number">03</span>
+              <h3 data-i18n="stepScoreTitle">Score evidence</h3>
+              <p data-i18n="stepScoreCopy">Dictionaries, technical guards, exceptions, and the signed character n-gram index compare both readings.</p>
+            </li>
+            <li>
+              <span class="step-number">04</span>
+              <h3 data-i18n="stepApplyTitle">Apply carefully</h3>
+              <p data-i18n="stepApplyCopy">Only a candidate above the selected confidence threshold replaces text and switches the input source.</p>
+            </li>
+          </ol>
+
+          <div class="model-card">
+            <div class="model-copy">
+              <div class="model-label" data-i18n="modelLabel">SIGNED N-GRAM v1</div>
+              <h3 data-i18n="modelTitle">Character patterns, packed small</h3>
+              <p data-i18n="modelCopy">Equal-size English and Ukrainian news corpora are filtered by alphabet and split into 2–5-character sequences. Each retained sequence becomes a packed key plus one signed confidence byte: negative for English, positive for Ukrainian.</p>
+              <p data-i18n="modelPrivacy">The app embeds no corpus sentences and no word-frequency table—only 173,964 n-gram records in about 2.8 MiB. Lookup is local, deterministic, and immediate.</p>
+              <a class="text-link" href="https://github.com/dmytro-yemelianov/upyr/blob/main/docs/benchmarks/signed-ngram-v1.md">
+                <span data-i18n="modelEval">Read the frozen evaluation</span><span aria-hidden="true">→</span>
+              </a>
+            </div>
+            <div class="ngram-demo" data-ngram-demo aria-labelledby="ngram-demo-title">
+              <div class="ngram-demo-heading">
+                <div>
+                  <span class="ngram-live-label" data-i18n="ngramLiveLabel">LOCAL TRACE</span>
+                  <h4 id="ngram-demo-title" data-i18n="ngramDemoTitle">Follow one correction</h4>
+                </div>
+                <button class="ngram-replay" type="button" data-ngram-replay aria-label="Replay trace" data-i18n-aria="ngramReplayLabel">
+                  <span aria-hidden="true">↻</span><span data-i18n="ngramReplay">Replay trace</span>
+                </button>
+              </div>
+
+              <div class="ngram-progress" aria-label="N-gram trace steps" data-i18n-aria="ngramStepsLabel">
+                <button class="is-active" type="button" data-ngram-jump="0" aria-current="step" aria-label="Step 1: map the physical keys" data-i18n-aria="ngramStep1Label">01</button>
+                <button type="button" data-ngram-jump="1" aria-label="Step 2: extract overlapping grams" data-i18n-aria="ngramStep2Label">02</button>
+                <button type="button" data-ngram-jump="2" aria-label="Step 3: compare local evidence" data-i18n-aria="ngramStep3Label">03</button>
+                <button type="button" data-ngram-jump="3" aria-label="Step 4: make the guarded decision" data-i18n-aria="ngramStep4Label">04</button>
+              </div>
+
+              <ol class="ngram-phases">
+                <li class="ngram-phase is-active" data-ngram-phase="0">
+                  <div class="ngram-phase-label"><span>01</span><strong data-i18n="ngramMapTitle">Map the physical keys</strong></div>
+                  <p data-i18n="ngramMapCopy">The same six key positions produce a candidate on the Ukrainian layout.</p>
+                  <div class="key-pair-row" aria-label="g maps to п, h to р, b to и, d to в, s to і, n to т" data-i18n-aria="ngramKeyPairsLabel">
+                    <span><code>g</code><i>→</i><code>п</code></span>
+                    <span><code>h</code><i>→</i><code>р</code></span>
+                    <span><code>b</code><i>→</i><code>и</code></span>
+                    <span><code>d</code><i>→</i><code>в</code></span>
+                    <span><code>s</code><i>→</i><code>і</code></span>
+                    <span><code>n</code><i>→</i><code>т</code></span>
+                  </div>
+                  <div class="ngram-conversion"><code>ghbdsn</code><span>→</span><code lang="uk">привіт</code></div>
+                </li>
+
+                <li class="ngram-phase" data-ngram-phase="1">
+                  <div class="ngram-phase-label"><span>02</span><strong data-i18n="ngramSplitTitle">Extract overlapping grams</strong></div>
+                  <p data-i18n="ngramSplitCopy">Add word boundaries and inspect every 2–5-character window. Longer grams receive more weight.</p>
+                  <div class="ngram-boundary"><code lang="uk">^привіт$</code><span data-i18n="ngramCount">22 overlapping grams</span></div>
+                  <div class="ngram-token-rows" aria-label="Overlapping n-grams from length two through five" data-i18n-aria="ngramTokensLabel">
+                    <div><b>n2</b><span><code>^п</code><code>пр</code><code>ри</code><code>ив</code><code>ві</code><code>іт</code><code>т$</code></span></div>
+                    <div><b>n3</b><span><code>^пр</code><code>при</code><code>рив</code><code>иві</code><code>віт</code><code>іт$</code></span></div>
+                    <div><b>n4</b><span><code>^при</code><code>прив</code><code>риві</code><code>ивіт</code><code>віт$</code></span></div>
+                    <div><b>n5</b><span><code>^прив</code><code>приві</code><code>ривіт</code><code>ивіт$</code></span></div>
+                  </div>
+                </li>
+
+                <li class="ngram-phase" data-ngram-phase="2">
+                  <div class="ngram-phase-label"><span>03</span><strong data-i18n="ngramCompareTitle">Compare local evidence</strong></div>
+                  <p data-i18n="ngramCompareCopy">Packed signed records are found with binary search; longer grams are weighted before the sum is normalized.</p>
+                  <div class="signed-records" aria-label="Sample signed n-gram records" data-i18n-aria="ngramRecordsLabel">
+                    <span class="record-en"><code>^g</code><b>−112</b></span>
+                    <span class="record-en"><code>ghb</code><b>−83</b></span>
+                    <span class="record-en"><code>sn$</code><b>−63</b></span>
+                    <span class="record-uk"><code>^п</code><b>+127</b></span>
+                    <span class="record-uk"><code>при</code><b>+116</b></span>
+                    <span class="record-uk"><code>ивіт$</code><b>+43</b></span>
+                  </div>
+                  <div class="coverage-chart">
+                    <div><span><code>ghbdsn</code><small>EN · 0.209</small></span><i><b class="coverage-en"></b></i></div>
+                    <div><span><code>привіт</code><small>УК · 0.704</small></span><i><b class="coverage-uk"></b></i></div>
+                  </div>
+                  <div class="coverage-note"><span data-i18n="ngramCoverageLabel">Model coverage · not probability</span><strong>+0.495</strong></div>
+                </li>
+
+                <li class="ngram-phase" data-ngram-phase="3">
+                  <div class="ngram-phase-label"><span>04</span><strong data-i18n="ngramDecideTitle">Make the guarded decision</strong></div>
+                  <p data-i18n="ngramDecideCopy">“привіт” is known; “ghbdsn” is not. The model agrees, and the policy permits correction.</p>
+                  <div class="decision-evidence">
+                    <span><code>ghbdsn</code><small data-i18n="ngramUnknown">unknown</small></span>
+                    <span><code>привіт</code><small data-i18n="ngramKnown">known word</small></span>
+                  </div>
+                  <div class="ngram-final-decision"><span aria-hidden="true">✓</span><strong data-i18n="ngramCorrect">CORRECT</strong><code>привіт</code></div>
+                </li>
+              </ol>
+              <p class="ngram-announcer sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="download-section">
+        <div class="shell download-card">
+          <div>
+            <p class="kicker" data-i18n="downloadKicker">Public preview</p>
+            <h2 data-i18n="downloadTitle">Keep typing. Upyr will flip the rest.</h2>
+            <p data-i18n="downloadCopy">The current macOS preview is ad-hoc signed and not Apple-notarized, so Gatekeeper may block it. You can also inspect and build every line yourself.</p>
+          </div>
+          <div class="download-actions">
+            <a class="button button-light" href="https://github.com/dmytro-yemelianov/upyr/releases"><span data-i18n="downloadButton">Download for macOS</span><span aria-hidden="true">↓</span></a>
+            <a class="button button-ghost" href="https://github.com/dmytro-yemelianov/upyr/issues/new/choose"><span data-i18n="reportIssue">Report an issue</span><span aria-hidden="true">↗</span></a>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <div class="footer-brand">
+          <img src="favicon.svg" width="32" height="32" alt="">
+          <div><strong>Upyr</strong><span data-i18n="footerTagline">Type what you meant.</span></div>
+        </div>
+        <div class="footer-links">
+          <a href="https://github.com/dmytro-yemelianov/upyr" data-i18n="footerSource">Source</a>
+          <a href="https://github.com/dmytro-yemelianov/upyr/releases" data-i18n="footerReleases">Releases</a>
+          <a href="https://github.com/dmytro-yemelianov/upyr/issues" data-i18n="footerIssues">Issues</a>
+          <a href="https://github.com/dmytro-yemelianov/upyr/security" data-i18n="footerSecurity">Security</a>
+          <a href="articles/reverse-engineering-punto-switcher.html" data-i18n="footerStory">The making-of</a>
+        </div>
+        <p class="footer-meta" data-i18n="footerMeta">No cookies · No analytics · No external assets</p>
+      </div>
+    </footer>
+  </body>
+</html>
