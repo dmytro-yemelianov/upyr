@@ -158,6 +158,22 @@ code {
   color: var(--text);
 }
 
+.nav a.is-current {
+  color: var(--text);
+  position: relative;
+}
+
+.nav a.is-current::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -6px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
 .header-actions {
   display: flex;
   flex: 0 0 auto;

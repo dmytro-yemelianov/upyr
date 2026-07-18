@@ -232,11 +232,25 @@ def check_ngram_trace(html: str, app: str, css: str) -> None:
         fail("the trace's known/unknown dictionary decision no longer matches the dictionaries")
 
 
+# The multi-page site: each app page carries its own data-i18n keys. Feature
+# content moved off the home page, so each contract is checked on its own page.
+APP_PAGES = ("index.html", "how.html", "features.html", "privacy.html")
+SCREENSHOT_HTML = ROOT / "site" / "features.html"   # settings screenshot lives here
+SOUND_HTML = ROOT / "site" / "features.html"        # sound packs live here
+NGRAM_HTML = ROOT / "site" / "how.html"             # n-gram trace lives here
+
+
 def main() -> None:
-    html = HTML_PATH.read_text(encoding="utf-8")
     app = APP_PATH.read_text(encoding="utf-8")
     css = CSS_PATH.read_text(encoding="utf-8")
-    required = translation_keys(html)
+
+    required: set[str] = set()
+    for name in APP_PAGES:
+        page = ROOT / "site" / name
+        if not page.is_file():
+            fail(f"missing site page {name}")
+        required |= translation_keys(page.read_text(encoding="utf-8"))
+
     translations = ukrainian_translations(app)
     missing = sorted(required - translations.keys())
     if missing:
@@ -245,12 +259,13 @@ def main() -> None:
     if empty:
         fail("empty Ukrainian translations: " + ", ".join(empty))
 
-    check_screenshot(html)
-    check_sound_packs(html)
-    check_ngram_trace(html, app, css)
+    check_screenshot(SCREENSHOT_HTML.read_text(encoding="utf-8"))
+    check_sound_packs(SOUND_HTML.read_text(encoding="utf-8"))
+    check_ngram_trace(NGRAM_HTML.read_text(encoding="utf-8"), app, css)
     print(
         "site content verification passed: "
-        f"{len(required)} bilingual keys, 3 sound packs, and frozen n-gram trace values"
+        f"{len(required)} bilingual keys across {len(APP_PAGES)} pages, "
+        "3 sound packs, and frozen n-gram trace values"
     )
 
 
