@@ -2,7 +2,10 @@
 
 [![CI](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml/badge.svg)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml)
 [![Security](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml/badge.svg)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml)
-[![MIT License](https://img.shields.io/badge/license-MIT-58d6a8.svg)](LICENSE)
+[![OSV-Scanner](https://github.com/dmytro-yemelianov/upyr/actions/workflows/osv-scanner.yml/badge.svg)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/osv-scanner.yml)
+[![Rust 1.86+](https://img.shields.io/badge/rust-1.86%2B-b7410e.svg?logo=rust)](#build-and-run)
+[![No telemetry](https://img.shields.io/badge/telemetry-none-58d6a8.svg)](#privacy-and-security)
+[![License: MIT](https://img.shields.io/badge/license-MIT-58d6a8.svg)](LICENSE)
 
 Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in Rust. It turns text typed on the wrong physical layout into what you meant: `ghbdsn` → `привіт`, `руддщ` → `hello`.
 
