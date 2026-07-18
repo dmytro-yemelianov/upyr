@@ -1,8 +1,13 @@
 //! Platform-neutral physical-key tracking and automatic-correction decisions.
 
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
+
 use serde::{Deserialize, Serialize};
 
 use crate::layout::{Direction, convert, convert_with_mapping};
+use crate::triggers::{Trigger, TriggerAction, normalize_physical};
 
 const ENGLISH_WORDS: &str = include_str!("../assets/dictionaries/english.txt");
 const UKRAINIAN_WORDS: &str = include_str!("../assets/dictionaries/ukrainian.txt");
@@ -36,6 +41,10 @@ pub struct AutoCorrectPolicy {
     pub sensitivity: Sensitivity,
     pub min_word_length: usize,
     pub exceptions: Vec<String>,
+    /// Deterministic rules consulted before the scorer. Empty by default so the
+    /// statistical behavior is unchanged; production wires in
+    /// [`crate::triggers::builtin_triggers`] plus any user rules.
+    pub triggers: Vec<Trigger>,
 }
 
 impl Default for AutoCorrectPolicy {
@@ -44,6 +53,7 @@ impl Default for AutoCorrectPolicy {
             sensitivity: Sensitivity::Conservative,
             min_word_length: 4,
             exceptions: Vec::new(),
+            triggers: Vec::new(),
         }
     }
 }
@@ -323,6 +333,13 @@ fn evaluate_with_scorer<S: CandidateScorer + ?Sized>(
     scorer: &S,
 ) -> AutoDecision {
     let candidates = Candidates::new(sample, mapping);
+
+    // Deterministic triggers win over the statistical scorer: they let short or
+    // domain-specific sequences correct (or be preserved) without needing model
+    // confidence.
+    if let Some(decision) = trigger_decision(policy, sample, &candidates) {
+        return decision;
+    }
 
     // A physical punctuation key can either be a letter in the other layout
     // (`,.` -> `бю`) or punctuation the user wants to keep. Score the
@@ -617,16 +634,56 @@ trait CandidateScorer {
     fn compare(&self, pair: CandidatePair<'_>) -> PairEvidence;
 }
 
-fn known(language: Language, word: &str) -> bool {
-    dictionary(language)
-        .lines()
-        .any(|candidate| candidate == word)
+/// Applies a matching deterministic trigger, if any. Triggers match the physical
+/// key sequence (layout-independent), and either force a correction toward the
+/// other layout or preserve the current text outright — bypassing the scorer's
+/// confidence thresholds and `min_word_length`.
+fn trigger_decision(
+    policy: &AutoCorrectPolicy,
+    sample: &WordSample,
+    candidates: &Candidates,
+) -> Option<AutoDecision> {
+    if policy.triggers.is_empty() {
+        return None;
+    }
+    let physical = normalize_physical(&sample.physical_word);
+    if physical.is_empty() {
+        return None;
+    }
+    let trigger = policy.triggers.iter().find(|trigger| {
+        trigger.physical == physical && trigger.source_layout == sample.source_layout
+    })?;
+    match trigger.action {
+        TriggerAction::Keep => Some(AutoDecision::Reset),
+        TriggerAction::Correct => {
+            let source = normalize_word(&candidates.source_word);
+            let target = normalize_word(&candidates.target_word);
+            if target.is_empty() || source == target {
+                return Some(AutoDecision::Reset);
+            }
+            Some(AutoDecision::Correct(AutoCorrection {
+                expected_source: candidates.source_context.clone(),
+                replacement: candidates.target_context.clone(),
+                direction: candidates.direction,
+            }))
+        }
+    }
 }
 
-fn dictionary(language: Language) -> &'static str {
+fn known(language: Language, word: &str) -> bool {
+    dictionary(language).contains(word)
+}
+
+/// Exact-match word list, parsed once per language into a hash set. The previous
+/// implementation rescanned the embedded text on every call; keeping the set
+/// behind `OnceLock` makes `known` O(1) and keeps the door open for much larger
+/// dictionaries without regressing the per-keystroke hot path.
+fn dictionary(language: Language) -> &'static HashSet<&'static str> {
+    static ENGLISH: OnceLock<HashSet<&'static str>> = OnceLock::new();
+    static UKRAINIAN: OnceLock<HashSet<&'static str>> = OnceLock::new();
     match language {
-        Language::English => ENGLISH_WORDS,
-        Language::Ukrainian => UKRAINIAN_WORDS,
+        Language::English => ENGLISH.get_or_init(|| ENGLISH_WORDS.lines().collect()),
+        Language::Ukrainian => UKRAINIAN.get_or_init(|| UKRAINIAN_WORDS.lines().collect()),
     }
 }
 
@@ -643,6 +700,28 @@ struct NgramModel<'a> {
 static SIGNED_NGRAM_V1: NgramModel<'static> = NgramModel {
     bytes: LANGUAGE_MODEL,
 };
+
+/// Language-independent contribution of a single token: the raw signed evidence
+/// sum (model score x n-gram weight), the maximum achievable magnitude, and the
+/// n-gram count. Multiplying `raw` by the language sign reproduces the previous
+/// per-language accumulation exactly.
+#[derive(Debug, Clone, Copy)]
+struct TokenContribution {
+    raw: i64,
+    maximum: i64,
+    grams: usize,
+}
+
+const TOKEN_CACHE_CAPACITY: usize = 1 << 16;
+
+thread_local! {
+    /// Per-token contribution cache for the embedded production model. The
+    /// scorer re-reads the whole accumulated context on every word boundary;
+    /// memoizing each token turns that repeated work into cheap hash lookups
+    /// instead of thousands of binary searches over the 174k-entry model.
+    static TOKEN_CONTRIBUTION: RefCell<HashMap<String, TokenContribution>> =
+        RefCell::new(HashMap::new());
+}
 
 impl NgramModel<'_> {
     fn entry_count(&self) -> usize {
@@ -678,20 +757,18 @@ impl NgramModel<'_> {
     }
 
     fn score(&self, language: Language, text: &str) -> ModelEvidence {
-        let mut evidence = 0i64;
-        let mut maximum = 0i64;
-        let mut grams = 0usize;
         let language_sign = match language {
             Language::English => -1i64,
             Language::Ukrainian => 1i64,
         };
+        let mut evidence = 0i64;
+        let mut maximum = 0i64;
+        let mut grams = 0usize;
         for token in language_tokens(text) {
-            for_each_ngram(&token, |gram, weight| {
-                let weight = weight as i64;
-                grams += 1;
-                maximum += MODEL_MAX_STRENGTH * weight;
-                evidence += self.language_score(gram) as i64 * language_sign * weight;
-            });
+            let contribution = self.token_contribution(&token);
+            evidence += contribution.raw * language_sign;
+            maximum += contribution.maximum;
+            grams += contribution.grams;
         }
         ModelEvidence {
             coverage: if maximum == 0 {
@@ -701,6 +778,47 @@ impl NgramModel<'_> {
             },
             grams,
         }
+    }
+
+    /// Computes (or reuses) a token's language-independent contribution. Only
+    /// the embedded production model is cached: it is scored repeatedly across
+    /// keystrokes and lives for the whole process, so its identity is stable.
+    /// Alternate `.ngm` artifacts (candidate models under test) are scored
+    /// one-shot and bypass the cache — that avoids keying on a byte address a
+    /// dropped model's allocation could later reuse.
+    fn token_contribution(&self, token: &str) -> TokenContribution {
+        let cacheable = std::ptr::eq(self.bytes.as_ptr(), LANGUAGE_MODEL.as_ptr());
+        if cacheable {
+            if let Some(cached) =
+                TOKEN_CONTRIBUTION.with(|cache| cache.borrow().get(token).copied())
+            {
+                return cached;
+            }
+        }
+        let mut raw = 0i64;
+        let mut maximum = 0i64;
+        let mut grams = 0usize;
+        for_each_ngram(token, |gram, weight| {
+            let weight = weight as i64;
+            grams += 1;
+            maximum += MODEL_MAX_STRENGTH * weight;
+            raw += self.language_score(gram) as i64 * weight;
+        });
+        let contribution = TokenContribution {
+            raw,
+            maximum,
+            grams,
+        };
+        if cacheable {
+            TOKEN_CONTRIBUTION.with(|cache| {
+                let mut cache = cache.borrow_mut();
+                if cache.len() >= TOKEN_CACHE_CAPACITY {
+                    cache.clear();
+                }
+                cache.insert(token.to_owned(), contribution);
+            });
+        }
+        contribution
     }
 
     #[cfg(test)]
@@ -1520,11 +1638,90 @@ mod tests {
             assert_eq!(physical_english_character(key, false), Some(character));
         }
     }
+
+    #[test]
+    fn correct_trigger_overrides_model_abstention_on_short_words() {
+        let policy = AutoCorrectPolicy {
+            triggers: vec![Trigger::new("zzz", TriggerAction::Correct)],
+            ..AutoCorrectPolicy::default()
+        };
+        let correction = correction(super::evaluate(
+            &sample("zzz", InputLayout::English),
+            &policy,
+            None,
+        ));
+        assert_eq!(correction.expected_source, "zzz");
+        assert_eq!(correction.replacement, "яяя");
+        assert_eq!(correction.direction, Direction::EnglishToUkrainian);
+    }
+
+    #[test]
+    fn keep_trigger_suppresses_a_correction_the_model_would_make() {
+        let policy = AutoCorrectPolicy {
+            triggers: vec![Trigger::new("ghbdsn", TriggerAction::Keep)],
+            ..AutoCorrectPolicy::default()
+        };
+        assert_eq!(
+            super::evaluate(&sample("ghbdsn", InputLayout::English), &policy, None),
+            AutoDecision::Reset
+        );
+    }
+
+    #[test]
+    fn correct_trigger_does_not_fire_on_the_already_correct_layout() {
+        // The same physical keys `ghbdsn` already type "привіт" on a Ukrainian
+        // layout. A Correct trigger authored for the English layout must not
+        // fire there and turn the correct Ukrainian word back into Latin.
+        let policy = AutoCorrectPolicy {
+            triggers: vec![Trigger::new("ghbdsn", TriggerAction::Correct)],
+            ..AutoCorrectPolicy::default()
+        };
+        assert!(!matches!(
+            super::evaluate(&sample("ghbdsn", InputLayout::Ukrainian), &policy, None),
+            AutoDecision::Correct(_)
+        ));
+    }
+
+    #[test]
+    fn triggers_match_the_physical_sequence_case_insensitively() {
+        let policy = AutoCorrectPolicy {
+            triggers: vec![Trigger::new("ghbdsn", TriggerAction::Correct)],
+            ..AutoCorrectPolicy::default()
+        };
+        assert!(matches!(
+            super::evaluate(&sample("Ghbdsn", InputLayout::English), &policy, None),
+            AutoDecision::Correct(_)
+        ));
+    }
+
+    #[test]
+    fn builtin_correct_triggers_are_genuinely_wrong_layout() {
+        for trigger in crate::triggers::builtin_triggers() {
+            if trigger.action != TriggerAction::Correct {
+                continue;
+            }
+            let ukrainian = to_ukrainian(&trigger.physical, None);
+            let as_english = language_likelihood(Language::English, &trigger.physical);
+            let as_ukrainian = language_likelihood(Language::Ukrainian, &ukrainian);
+            assert!(
+                as_ukrainian.coverage > as_english.coverage,
+                "built-in trigger {:?} -> {:?} is not clearly Ukrainian (uk={:.3} en={:.3})",
+                trigger.physical,
+                ukrainian,
+                as_ukrainian.coverage,
+                as_english.coverage
+            );
+        }
+    }
 }
 
 #[cfg(test)]
 #[path = "auto_correct/replay_benchmark.rs"]
 mod replay_benchmark;
+
+#[cfg(test)]
+#[path = "recall_benchmark.rs"]
+mod recall_benchmark;
 
 #[cfg(test)]
 #[path = "auto_correct_synthetic_tests.rs"]
