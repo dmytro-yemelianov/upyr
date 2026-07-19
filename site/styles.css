@@ -672,7 +672,7 @@ code {
 .section-intro > p:last-child,
 .privacy-heading > p,
 .about-grid > div:last-child > p,
-.download-card > div > p:last-child {
+.download-copy {
   margin: 20px 0 0;
   color: var(--muted);
   font-size: 1.05rem;
@@ -1894,9 +1894,47 @@ code {
   font-size: clamp(2rem, 4vw, 3.7rem);
 }
 
-.download-card > div > p:last-child {
+.download-copy {
   max-width: 670px;
   color: rgba(10, 33, 21, 0.73);
+}
+
+.install-options {
+  display: grid;
+  max-width: 820px;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.install-option {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 1px solid rgba(10, 33, 21, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.install-option span {
+  color: rgba(10, 33, 21, 0.72);
+  font-size: 0.68rem;
+  font-weight: 790;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.install-option code {
+  display: block;
+  min-width: 0;
+  overflow-x: auto;
+  color: #0a2115;
+  font-size: 0.72rem;
+  font-weight: 680;
+  line-height: 1.45;
+  scrollbar-width: thin;
+  white-space: nowrap;
 }
 
 .download-actions {
@@ -2356,6 +2394,11 @@ code {
   .download-actions,
   .download-actions .button {
     width: 100%;
+  }
+
+  .install-option {
+    grid-template-columns: 1fr;
+    gap: 3px;
   }
 
   .footer-links {

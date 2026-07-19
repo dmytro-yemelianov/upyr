@@ -11,7 +11,7 @@ Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in
 
 **Release status:** v0.3.0 public preview. **There is no Apple-verified Upyr build yet.** The current macOS preview is ad-hoc signed, not Apple Developer ID signed, and not notarized; Gatekeeper may show "Apple could not verify Upyr is free of malware." Upyr has no automatic update checker, so check GitHub Releases manually for newer or notarized builds. macOS is the primary supported desktop target. Release CI is configured to build and smoke-test Windows and Linux/X11 packages, but those platforms remain preview targets. Upyr follows [Semantic Versioning](#versioning-and-releases); compatibility may change before 1.0.
 
-[Download from GitHub Releases](https://github.com/dmytro-yemelianov/upyr/releases) · [Product page](https://upyr.org/) · [Report an issue](https://github.com/dmytro-yemelianov/upyr/issues/new/choose)
+[Download from GitHub Releases](https://github.com/dmytro-yemelianov/upyr/releases) · [Package-manager installs](#package-manager-installs) · [Product page](https://upyr.org/) · [Report an issue](https://github.com/dmytro-yemelianov/upyr/issues/new/choose)
 
 ## What it does
 
@@ -34,6 +34,29 @@ The menu-bar or system-tray app can convert text, pause or resume correction, op
 4. Return to Upyr. When a new grant is detected, the app offers to restart so every input monitor starts with the permission.
 
 Release builds target macOS 11 or newer and contain Apple Silicon and Intel binaries. If macOS says Apple could not verify Upyr, that means the downloaded preview is not notarized; it is not an in-app update prompt and it is not something Upyr can fix after download. The recommended paths are to wait for a Developer ID/notarized release tracked in [issue #4](https://github.com/dmytro-yemelianov/upyr/issues/4), verify the release artifacts yourself, or build from source. Tagged macOS releases fail closed unless signing and notarization complete; check the release notes and artifact provenance rather than bypassing Gatekeeper.
+
+## Package-manager installs
+
+These channels build Upyr from source. They avoid the downloaded `.app` Gatekeeper quarantine path, but they are not Apple-notarized app bundles. On macOS, grant Accessibility permission to the `upyr-background` process when prompted.
+
+Install from Git with Cargo:
+
+```sh
+cargo install --git https://github.com/dmytro-yemelianov/upyr --locked --force
+upyr convert ghbdsn
+upyr settings
+```
+
+Install from the Homebrew tap:
+
+```sh
+brew tap dmytro-yemelianov/upyr
+brew install upyr
+brew services start upyr
+upyr settings
+```
+
+Crates.io publishing is not enabled yet because the workspace packages still need registry metadata and a crates.io publish token.
 
 ## Build and run
 
