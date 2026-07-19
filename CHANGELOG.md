@@ -9,9 +9,23 @@ change between minor releases while the version is below 1.0.
 ### Planned
 
 - Notarized Developer ID distribution for macOS.
-- Broader Windows and Linux validation and restored screen-reader integration
-  for the cross-platform settings UI.
+- Broader Windows and Linux desktop validation.
 - Browser adapter and npm delivery for `upyr-wasm`.
+
+### Changed
+
+- The cross-platform settings UI enables AccessKit again on Windows and Linux.
+- Linux/X11 tray support now uses StatusNotifierItem over D-Bus instead of the
+  GTK/AppIndicator stack; layout feedback uses a Freedesktop notification.
+- The project MSRV is now Rust 1.87 so AccessKit can use the quick-xml-free
+  `zbus_xml` parser line.
+
+### Security
+
+- Removed the Linux GTK/glib dependency chain and its accepted advisory entries.
+- Kept the compatible `wayland-scanner` backport documented after confirming
+  upstream master's scanner is not compatible with the released `wayland-client`
+  stack used by `winit`/`eframe`.
 
 ## [0.3.0] - 2026-07-19
 
@@ -108,7 +122,6 @@ Initial public preview.
 
 - macOS is the primary supported target. Windows and Linux/X11 are previews.
 - Native Wayland global input is not supported.
-- The Windows/Linux settings screen-reader bridge is temporarily unavailable.
 - Public preview artifacts may be explicitly marked unnotarized; users should
   check each release's signing status before installing.
 
