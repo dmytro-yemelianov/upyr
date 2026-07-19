@@ -13,6 +13,37 @@ change between minor releases while the version is below 1.0.
   for the cross-platform settings UI.
 - Browser adapter and npm delivery for `upyr-wasm`.
 
+## [0.3.0] - 2026-07-19
+
+Detection and public-site preview.
+
+### Added
+
+- High-confidence trigger rules can now match exact words, prefixes, suffixes,
+  and contains patterns (`word`, `word*`, `*word`, `*word*`). This is Upyr's
+  clean-room counterpart to Punto Switcher for Windows consuming its `A` tag as
+  an any-position wildcard.
+- Recall and performance benchmark coverage for the trigger layer.
+- English and Ukrainian reverse-engineering articles for the Punto Switcher
+  rule format and the Mac/Windows `A`-tag divergence.
+- A multipage product site, live Cloudflare Pages deployment at `upyr.org`, and
+  article-level navigation with an English/Ukrainian language selector.
+
+### Changed
+
+- The trigger layer now uses wildcard-aware matching instead of exact-only
+  comparisons for built-in high-confidence rules.
+- Public project links now point at `https://upyr.org/`.
+- Documentation now clearly separates Upyr's clean-room behavior from Punto's
+  data files and binary-specific rule semantics.
+
+### Security
+
+- Added OSV, Trivy, SBOM, and Cosign-backed supply-chain checks around release
+  and deployment workflows.
+- Documented the currently accepted Linux GTK/egui advisory exposure and keeps
+  it on a dated revisit path while the gtk3 replacement work remains parked.
+
 ## [0.2.0] - 2026-07-17
 
 Sound-pack and keyboard-feedback preview.
@@ -81,6 +112,7 @@ Initial public preview.
 - Public preview artifacts may be explicitly marked unnotarized; users should
   check each release's signing status before installing.
 
-[Unreleased]: https://github.com/dmytro-yemelianov/upyr/compare/macos-preview-0.2.0...HEAD
+[Unreleased]: https://github.com/dmytro-yemelianov/upyr/compare/macos-preview-0.3.0...HEAD
+[0.3.0]: https://github.com/dmytro-yemelianov/upyr/releases/tag/macos-preview-0.3.0
 [0.2.0]: https://github.com/dmytro-yemelianov/upyr/releases/tag/macos-preview-0.2.0
 [0.1.0]: https://github.com/dmytro-yemelianov/upyr/releases/tag/macos-preview-0.1.0

@@ -9,9 +9,9 @@
 
 Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in Rust. It turns text typed on the wrong physical layout into what you meant: `ghbdsn` → `привіт`, `руддщ` → `hello`.
 
-**Release status:** v0.2.0 public preview. **The current preview download is not Apple Developer ID signed and is not notarized; its macOS bundle is ad-hoc signed only, so Gatekeeper may block it.** macOS is the primary supported desktop target. Release CI is configured to build and smoke-test Windows and Linux/X11 packages, but those platforms remain preview targets. Upyr follows [Semantic Versioning](#versioning-and-releases); compatibility may change before 1.0.
+**Release status:** v0.3.0 public preview. **The current preview download is not Apple Developer ID signed and is not notarized; its macOS bundle is ad-hoc signed only, so Gatekeeper may block it.** macOS is the primary supported desktop target. Release CI is configured to build and smoke-test Windows and Linux/X11 packages, but those platforms remain preview targets. Upyr follows [Semantic Versioning](#versioning-and-releases); compatibility may change before 1.0.
 
-[Download from GitHub Releases](https://github.com/dmytro-yemelianov/upyr/releases) · [Product page](https://dmytro-yemelianov.github.io/upyr/) · [Report an issue](https://github.com/dmytro-yemelianov/upyr/issues/new/choose)
+[Download from GitHub Releases](https://github.com/dmytro-yemelianov/upyr/releases) · [Product page](https://upyr.org/) · [Report an issue](https://github.com/dmytro-yemelianov/upyr/issues/new/choose)
 
 ## What it does
 
