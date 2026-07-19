@@ -698,7 +698,7 @@ version = "4.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7331225604b9b097b41872d550134933d4be83465d70a2c4a132b929f99aaca"
 dependencies = [
- "macos-accessibility-client",
+ "macos-accessibility-client 0.0.1",
  "pkg-config",
  "readkey",
  "readmouse",
@@ -1911,6 +1911,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edf7710fbff50c24124331760978fb9086d6de6288dcdb38b25a97f8b1bdebbb"
 dependencies = [
  "core-foundation 0.9.4",
+ "core-foundation-sys 0.8.7",
+]
+
+[[package]]
+name = "macos-accessibility-client"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c33254f6f9b60b98eff934c3664530e5058ff7173e0c6b12419a17d5461e7145"
+dependencies = [
+ "core-foundation 0.10.1",
  "core-foundation-sys 0.8.7",
 ]
 
@@ -3480,7 +3490,7 @@ dependencies = [
  "enigo",
  "global-hotkey",
  "gtk",
- "macos-accessibility-client",
+ "macos-accessibility-client 0.0.2",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
