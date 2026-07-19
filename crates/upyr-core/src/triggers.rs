@@ -1,11 +1,14 @@
 //! Deterministic, high-precision correction rules consulted before the
 //! statistical scorer.
 //!
-//! This mirrors Punto Switcher's `triggers.dat`: a small table of physical key
-//! sequences whose intended layout is unambiguous, so a decision can be made
-//! without — or against — the n-gram model. Triggers give short and
-//! domain-specific words a deterministic path that the coverage model, tuned to
-//! abstain when uncertain, would otherwise miss.
+//! This mirrors the useful part of Punto Switcher's deterministic data files: a
+//! small table of physical key sequences whose intended layout is unambiguous,
+//! so a decision can be made without — or against — the n-gram model. Triggers
+//! give short and domain-specific words a deterministic path that the coverage
+//! model, tuned to abstain when uncertain, would otherwise miss. Patterns can
+//! use a leading and/or trailing `*`; `*text*` is the clean-room equivalent of
+//! Punto for Windows' live `A` tag, which reverse-engineering showed to mean
+//! "match at any word position."
 
 use std::sync::OnceLock;
 
@@ -25,9 +28,15 @@ pub enum TriggerAction {
     Keep,
 }
 
-/// A single deterministic rule: an exact physical key sequence and the action it
-/// forces. `physical` is stored normalized (trimmed and lowercased) so it
+/// A single deterministic rule: a physical key sequence pattern and the action
+/// it forces. `physical` is stored normalized (trimmed and lowercased) so it
 /// matches the tracker's physical word regardless of case.
+///
+/// Pattern syntax is deliberately tiny:
+/// - `text` matches the whole physical word exactly;
+/// - `text*` matches a prefix;
+/// - `*text` matches a suffix;
+/// - `*text*` matches anywhere in the physical word.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Trigger {
     pub physical: String,
@@ -58,11 +67,15 @@ impl Trigger {
             source_layout,
         }
     }
+
+    pub(crate) fn matches(&self, physical: &str, source_layout: InputLayout) -> bool {
+        self.source_layout == source_layout && pattern_matches(&self.physical, physical)
+    }
 }
 
 /// Parses a trigger table. Each non-empty, non-comment line is
-/// `physical <whitespace> action`, where action is `correct` or `keep`. A
-/// trailing `# comment` is ignored. Malformed lines are skipped.
+/// `physical-pattern <whitespace> action`, where action is `correct` or `keep`.
+/// A trailing `# comment` is ignored. Malformed lines are skipped.
 pub fn parse_triggers(text: &str) -> Vec<Trigger> {
     text.lines().filter_map(parse_line).collect()
 }
@@ -99,6 +112,22 @@ pub(crate) fn normalize_physical(word: &str) -> String {
     word.trim().to_lowercase()
 }
 
+fn pattern_matches(pattern: &str, physical: &str) -> bool {
+    let leading_wildcard = pattern.starts_with('*');
+    let trailing_wildcard = pattern.ends_with('*');
+    let needle = pattern.trim_matches('*');
+    if needle.is_empty() {
+        return false;
+    }
+
+    match (leading_wildcard, trailing_wildcard) {
+        (true, true) => physical.contains(needle),
+        (true, false) => physical.ends_with(needle),
+        (false, true) => physical.starts_with(needle),
+        (false, false) => physical == needle,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,5 +159,24 @@ mod tests {
         let table = builtin_triggers();
         assert!(table.len() >= 10, "expected a seeded built-in table");
         assert!(table.iter().all(|trigger| !trigger.physical.is_empty()));
+    }
+
+    #[test]
+    fn wildcard_patterns_match_by_word_position() {
+        assert!(pattern_matches("abc", "abc"));
+        assert!(!pattern_matches("abc", "xabc"));
+        assert!(pattern_matches("abc*", "abcdef"));
+        assert!(pattern_matches("*abc", "xxabc"));
+        assert!(pattern_matches("*abc*", "xxabcxx"));
+        assert!(!pattern_matches("*", "anything"));
+    }
+
+    #[test]
+    fn wildcard_triggers_remain_source_layout_scoped() {
+        let trigger =
+            Trigger::for_source_layout("*abc*", TriggerAction::Correct, InputLayout::English);
+
+        assert!(trigger.matches("xxabcxx", InputLayout::English));
+        assert!(!trigger.matches("xxabcxx", InputLayout::Ukrainian));
     }
 }

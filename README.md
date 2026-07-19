@@ -71,8 +71,10 @@ Upyr does not translate words. It reconstructs the characters produced by the sa
 1. The native input hook records physical key positions for the current short input boundary.
 2. The installed EN/UK layouts provide the positional map; a deterministic built-in map is the fallback.
 3. Upyr creates source and opposite-layout candidates while preserving case and punctuation.
-4. Exact dictionaries, technical-token guards, exceptions, and a compact language model score the pair.
+4. Deterministic triggers, exact dictionaries, technical-token guards, exceptions, and a compact language model score the pair.
 5. Only a candidate that clears the selected confidence policy is applied. Upyr replaces the text, switches the OS input source when configured, and, by default, attempts to restore the clipboard.
+
+The trigger layer covers high-certainty words that the statistical policy deliberately skips, especially short words. Built-in rules are exact physical-key matches today; the parser also supports leading/trailing `*` patterns (`word*`, `*word`, `*word*`) after the Punto reverse-engineering pass showed that Punto for Windows treats its `A` tag as an any-position wildcard. Upyr uses the finding as a rule-shape hint only; it does not ship Punto's rule data.
 
 The embedded model is a **signed character n-gram index**, not a general language model. It contains 173,964 packed 2–5-character records in about 2.8 MiB. Each record stores a character-sequence key and one signed confidence byte: negative for English, positive for Ukrainian. Evidence from the typed candidate is accumulated locally and looked up with binary search.
 

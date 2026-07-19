@@ -1,17 +1,23 @@
 # Built-in deterministic triggers, consulted before the statistical scorer.
 #
-# Format: <physical-keys>  <action>
-#   physical-keys : the US-QWERTY key sequence that was pressed (lowercase)
-#   action        : `correct` = always fix the layout for this sequence
-#                   `keep`    = never correct this sequence
+# Format: <physical-pattern>  <action>
+#   physical-pattern : the US-QWERTY key sequence that was pressed (lowercase)
+#                      with optional edge wildcards:
+#                      `word` exact, `word*` prefix, `*word` suffix,
+#                      `*word*` anywhere.
+#   action           : `correct` = always fix the layout for this sequence
+#                      `keep`    = never correct this sequence
 #
 # `correct` entries are high-frequency Ukrainian words whose physical form is
 # not a plausible English token, so fixing them is unambiguous even for short
 # words the n-gram model deliberately abstains on. Each one is validated in
 # tests (builtin_correct_triggers_are_genuinely_wrong_layout).
 #
-# Add domain vocabulary here or via user configuration to raise recall without
-# touching the scorer.
+# The wildcard form is the clean-room counterpart to Punto for Windows' live
+# `A` rule tag: a reverse-engineering pass showed that Windows treats `A` as an
+# unconditional word-position match, while the macOS build parses it but never
+# tests it. Add domain vocabulary here or via user configuration to raise recall
+# without touching the scorer.
 
 ghbdsn   correct   # привіт
 ckjdj    correct   # слово

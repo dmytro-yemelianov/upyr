@@ -1,307 +1,205 @@
-# A clean-room rebuild of Punto Switcher's trick, and what it taught me
+# What Punto Switcher actually does with its rule tags
 
-*How Upyr reconstructs the "you typed that in the wrong keyboard layout" behaviour for
-English ↔ Ukrainian — not by disassembling Punto Switcher, but by studying its public
-structure and observable behaviour and rebuilding the idea from scratch. The two-layer
-design, the part that turned out to be the actual hard problem, and the benchmark findings
-that contradicted my own intuitions.*
+*A reverse-engineering note on Punto Switcher's layout-detection engine, the
+Mac/Windows divergence hiding behind the same data files, and the one part Upyr
+adopted without importing Punto's code or rule data.*
 
 ---
 
-## The problem in one line
+## The short version
 
-You mean to type `привіт`, but the Ukrainian layout wasn't active, so the keys land
-as `ghbdsn`. Or you mean `hello` and get `руддщ`. Every Slavic-language desktop user
-does this a hundred times a day. [Punto Switcher](https://en.wikipedia.org/wiki/Punto_Switcher)
-— Yandex's long-running Russian tool — made its name by fixing it automatically: watch
-what gets typed, decide it's wrong-layout gibberish, and silently retype it in the other
-layout.
+Upyr started as a clean-room rebuild of the useful Punto Switcher behavior:
+recognize when a user typed the right physical keys on the wrong keyboard layout,
+then rewrite the text in the intended layout. The first implementation inferred
+the broad shape from behavior: deterministic rules for high-certainty cases, then
+a cautious statistical scorer for everything else.
 
-Upyr is a clean-room reimplementation of that behaviour in Rust, for English ↔ Ukrainian,
-that shares no code with Punto or with the other prior art it studied
-([KeyboardSwitch](https://github.com/TolikPylypchuk/KeyboardSwitch)). This is an account
-of what had to be reverse-engineered from *behaviour* — because the interesting parts were
-never documented — and what a deliberately harsh benchmark said once it worked.
+The later binary teardown answered a narrower question that behavior alone could
+not settle: what do Punto's rule tags actually mean?
 
-The two examples above are not hand-waving; they round-trip through Upyr's actual physical
-mapping table:
+The decisive result is that Punto's macOS and Windows builds do **not** agree on
+one tag:
 
+| Tag | macOS build | Windows build |
+| --- | --- | --- |
+| `A` | parsed into a bit, then never tested | live wildcard: match at any word position |
+| `B` | begin-position condition | begin-position condition |
+| `C` | case/condition bit in the rule checker | node-position condition |
+| `D` | negation/exception bit in the rule checker | node-position condition |
+| `E` | end-position condition | end-position condition |
+
+Same `ps.dat`, different engines. On macOS, `A` is vestigial. On Windows,
+`A` is consumed by the live matcher.
+
+Upyr incorporated the useful part conservatively: deterministic triggers now
+support leading/trailing `*` patterns. The form `*text*` is Upyr's clean-room
+way to express the Windows `A` finding: "this physical sequence may match
+anywhere in the current word." Upyr still ships its own tiny trigger table and
+does not include Punto's dictionaries or rule files.
+
+## What was found in the data files
+
+The Windows and macOS builds use the same family of data files:
+
+| File | Role established by the teardown |
+| --- | --- |
+| `ps.dat` | main layout-detection rule/dictionary data |
+| `triggers.dat` | deterministic switch-trigger data |
+| `translit-en.dat`, `translit-ru.dat` | transliteration tables |
+| `replace.dat` | user autoreplace/abbreviation data |
+| `prog_ex.dat`, `folders.dat`, `titles.dat` | program/path/title exceptions |
+| `diary.dat` | typed-text diary storage |
+
+The Windows binary also carries embedded SQLite and schema strings for the diary,
+clipboard history, and cookie-like state. That matches the long-standing privacy
+concern around Punto's Diary feature: it is not a layout heuristic; it is typed
+text persistence. Upyr deliberately has no equivalent feature, no telemetry, and
+no runtime network client.
+
+The important implementation detail for `ps.dat`: the payload is decoded with an
+XOR `0xaa` transform. In the Windows build, Ghidra identifies the loader around
+`FUN_0041ea80`; the decompiled body contains the `x ^ 0xaaaaaaaa` pattern and the
+Russian error path for failing to open `ps.dat`. The loader decodes and stores
+lines; the actual tag interpretation happens later in the matcher.
+
+## The macOS engine
+
+The macOS build uses a straightforward string-rule engine. A function named like
+`parseRule:` turns a rule suffix into a bitmask, then `checkStringWithRule:` tests
+the candidate with operations equivalent to prefix, suffix, substring, case, and
+negation checks.
+
+The useful part was easy to prove there:
+
+- `A` is parsed and assigned bit `0x20`.
+- No live checker reads that bit.
+- The rest of the rule bits are used by the rule evaluator.
+
+That makes `A` dead on macOS. It exists in the file format and in the parser, but
+it has no behavioral effect in that build.
+
+## The Windows engine
+
+The Windows binary resisted the quick methods because it is not shaped like the
+Mac engine. There is no useful sequence of direct character comparisons against
+`A`, `B`, `C`, `D`, or `E` in the first obvious parser path. The engine is a
+compiled automaton/trie walker over decoded rule data, and the tag handling is
+buried behind a predicate called by the walker.
+
+Ghidra made the difference. The live path is:
+
+| Function | Finding |
+| --- | --- |
+| `FUN_0041ea80` | opens and XOR-decodes `ps.dat` |
+| `FUN_004dfec0`, `FUN_004e02f0` | walk the compiled rule automaton |
+| `FUN_004b16a0` | checks whether a node's position/type satisfies a tag |
+
+The decisive predicate is `FUN_004b16a0(rule_state, tag_char)`. Its first branch
+is the whole answer:
+
+```c
+if (tag_char == 'A') {
+    return true;
+}
 ```
-ghbdsn → привіт
-[ks,   → хліб
+
+For `B`, `C`, `D`, and `E`, the function switches on a node/type field and checks
+whether the current automaton position satisfies the requested condition. For `A`,
+there is no condition. It is an unconditional match.
+
+That means the Windows interpretation of `A` is not "unused." It means "this rule
+can match anywhere."
+
+## Why the divergence matters
+
+The surprising part is not that the two builds use different implementation
+techniques. That is normal for mature cross-platform desktop software. The
+surprising part is that the same data file semantics are not preserved exactly.
+
+On macOS:
+
+```text
+read tag A -> set bit 0x20 -> never test bit 0x20
 ```
 
-That second one is the whole story in four characters. Hold that thought.
+On Windows:
 
-## What was actually there to reverse-engineer
-
-The layout conversion itself is trivial. US-QWERTY and Ukrainian ЙЦУКЕН are both fixed
-positional layouts, so the mapping is a static table:
-
-```
-English:    qwertyuiop[]asdfghjkl;'zxcvbnm,./`\
-Ukrainian:  йцукенгшщзхїфівапролджєячсмитьбю.'ґ
+```text
+read tag A -> call tag predicate -> return true
 ```
 
-If reversing keystrokes were the problem, this would be a fifty-line program. It isn't.
-**The hard problem is the decision, not the transformation:** given a word the user just
-finished, should you leave it alone or silently rewrite it? Get it wrong in the
-correcting direction and you have corrupted text the user *did* mean. That failure — a
-"false correction" — is the one that makes people uninstall the tool, because it destroys
-trust in a way that a missed correction never does.
+So a rule marked with `A` can affect correction behavior on Windows and do
+nothing on macOS. The small set of `_A` entries in `ps.dat` is therefore a real
+cross-platform behavioral divergence, not just an unused historical artifact.
 
-Punto's answer, learned from watching how it behaves rather than from any spec, is a
-**two-layer decision**:
+This also explains why the early byte-hunting pass was inconclusive. Looking for
+`cmp al, 'A'` or wide-character comparisons in the obvious parser code was the
+wrong shape for the Windows binary. The tag letter eventually appears in a small
+predicate called from the automaton walker, not in a Mac-style bitmask checker.
 
-1. A small table of **deterministic triggers** — physical key sequences whose intended
-   layout is unambiguous — consulted first, allowed to override everything.
-2. A **statistical language model** for everything else, tuned to abstain when unsure.
+## What Upyr adopted
 
-Upyr rebuilds both layers. The trigger layer is modelled directly on Punto's `triggers.dat`
-— the source comment says so in as many words — and the statistical layer is a signed
-character n-gram scorer trained from scratch on public corpora. The rest of this article
-is about the three things that made the rebuild non-obvious.
+Upyr should not copy Punto's data. It does not need to. The useful engineering
+lesson is the rule shape:
 
-## What's actually inside Punto Switcher — and what the teardown was (and wasn't)
+- exact deterministic rules are good for high-certainty short words;
+- position-aware deterministic rules are useful when a sequence is meaningful as
+  a prefix, suffix, or substring;
+- wildcard rules must be opt-in because they are more powerful and easier to
+  over-broaden.
 
-Fair question to ask of anything calling itself a teardown: what *is* Punto Switcher made
-of, and what tools cracked it open? Here are the parts that are publicly documented, and
-an honest account of the method.
+Upyr's trigger table now supports a deliberately tiny wildcard syntax:
 
-Punto Switcher is a Windows program (`punto.exe`) developed by Yandex. It decides the
-layout with a **dictionary of several million words** plus an "impossible-combination"
-heuristic — a Russian word can't begin with certain letters, so a run of them betrays the
-wrong layout — re-evaluated on every Space, Enter, or Tab.[^algo] Its state lives in a
-handful of binary, non-plaintext `.dat` files:[^files]
+```text
+word      exact match
+word*     prefix match
+*word     suffix match
+*word*    any-position match
+```
 
-| File | Role |
-|---|---|
-| `Data/triggers.dat` | the switching **trigger rules** — the file this project's source names as its model |
-| `Data/ps.dat` | the main language dictionary (the several-million-word list) |
-| `Data/translit.dat` | transliteration table |
-| `User Data/replace.dat` | autoreplace / abbreviation expansions |
-| `User Data/user.dic` | user exceptions dictionary |
-| `diary.dat` | the **keystroke diary** |
+The built-in table still uses exact rules. That is intentional. The production
+policy remains precision-first, and every broadening rule should be justified by
+a reproducible test or a domain-specific user need.
 
-That last file is the one worth staring at. Punto's **Diary (Дневник)** feature logs
-*every* keystroke to `diary.dat` — messenger chats, search queries, passwords in the
-clear, anything typed — and the program maintains its own network connection, which is why
-independent write-ups treat it as a keylogger and some antivirus vendors flag the bundle as
-a PUA.[^diary] That is not an incidental risk; it is a shipped, documented feature.
+The implementation lives in `crates/upyr-core/src/triggers.rs`; the evaluator in
+`auto_correct.rs` still consults triggers before the statistical scorer. This
+keeps the original two-layer design intact:
 
-**Now the honest part about the "tooling."** Those `.dat` files are encrypted binary blobs
-— even the autoreplace list can't be opened in a text editor.[^files] Upyr never cracked
-them. There was no disassembler, no unpacked `ps.dat`, no dictionary lifted from Yandex.
-The method was black-box: feed key sequences in, watch the corrections come out, and
-rebuild the *architecture those files imply* rather than their contents. That's the whole
-meaning of "clean-room" here — and it's also why you won't find Punto's dictionaries in
-this repo. What got reconstructed was the shape:
+1. deterministic triggers can force `correct` or `keep`;
+2. the signed n-gram model handles everything else;
+3. uncertainty still resolves to no correction.
 
-- `triggers.dat` → a 12-rule trigger table written from scratch;
-- the several-million-word `ps.dat` → **not** a big dictionary at all, but a 2.8 MiB signed
-  n-gram model plus a 296-word stop-list — a deliberately different, statistical answer to
-  the same question;
-- `diary.dat` → nothing. On purpose. The one Punto feature Upyr most wanted to *not* have.
+## What Upyr did not adopt
 
-Studying a program's public file layout and observable behaviour is a world away from
-copying its code, and keeping strictly to the former is what lets Upyr share nothing with
-Punto while still learning from it.
+The teardown also confirmed several things Upyr should continue to avoid:
 
-## Insight 1: model the *physical keys*, not the characters
+- no typed-text diary;
+- no clipboard-history database;
+- no cookies or network-linked runtime state;
+- no opaque multi-megabyte proprietary dictionary;
+- no hidden cross-platform rule semantics users cannot inspect.
 
-The naive design scores "is `ghbdsn` more English-like or Ukrainian-like?" That is already
-wrong, and `[ks,` shows why.
+The point of studying Punto was to recover the useful decision architecture, not
+to inherit the product's privacy model or proprietary assets.
 
-On a Ukrainian layout, the physical keys `[ ] ; ' \ , . /` are **letters**
-(`х ї ж є ґ б ю .`), not punctuation. So the four physical keys `[ k s ,` are not "a bracket,
-two letters, and a comma" — they are the Ukrainian word `хліб` (bread). A character-level
-model looking at the visible string `[ks,` sees punctuation-riddled noise and refuses to
-touch it. The correct interpretation is a perfectly ordinary common word.
+## The result
 
-Upyr's tracker therefore works in a **layout-independent physical-key space** (its key names
-deliberately mirror the browser `KeyboardEvent.code` values), and the scorer is asked about
-the *intended* candidate — the word those keys would produce in the other layout — not the
-bytes currently on screen. This one reframing is what lets `[ks, → хліб` work while still
-leaving a genuine `Jkmuf, → Ольга,` with its trailing comma intact.
+The final reverse-engineering result is sharper than the original black-box
+story:
 
-It also creates a landmine, which becomes Finding 3.
+- `ps.dat` is XOR-decoded, not just an unknowable blob.
+- Punto's Windows engine compiles and walks a rule automaton.
+- Punto's macOS engine uses a separate bitmask/string-rule evaluator.
+- The `A` tag is dead on macOS but live on Windows as an any-position wildcard.
+- Upyr now has a clean-room way to express that wildcard rule shape while keeping
+  its own data, benchmarks, and privacy boundary.
 
-## Insight 2: triggers exist to cover the model's deliberate blind spot
-
-The statistical model is tuned to **abstain under uncertainty** — precision over recall,
-because false corrections are the unforgivable failure. A direct consequence: it will not
-correct short words. There simply isn't enough signal in three characters to clear a
-confidence bar set high enough to be safe. And short words are exactly the most frequent
-words in any language (`не`, `як`, `на`, `що`…).
-
-That is what the trigger table is *for*. It is not a general dictionary — the seed is
-twelve entries. Each one is a specific physical sequence whose intended layout is not in
-doubt, given a deterministic path to correct (or to be explicitly preserved) that bypasses
-the model's confidence threshold and minimum-length floor entirely. Triggers are also
-source-layout-aware: a "correct this" rule for a Ukrainian word typed on the English layout
-must never fire against the already-correct Ukrainian text those same physical keys produce
-on the Ukrainian layout.
-
-The mental model that took longest to arrive: **the model and the triggers are not
-redundant.** The model is a high-precision instrument that is honest about not knowing.
-The triggers are where you encode the cases you *do* know for certain, including the ones
-the model is structurally designed to miss.
-
-## Insight 3: the scorer, and how it's kept honest
-
-The production scorer is a **signed character n-gram model**. It learns, per language, which
-character sequences are plausible, and scores a candidate word by how well its n-grams cover
-known-good sequences. "Signed" and "quantized strength" are the knobs; the artifact is a
-~2.9 MB table of ~174,000 retained grams, trained from pinned 1-million-sentence English and
-Ukrainian Leipzig news corpora.
-
-Two policy rules sit on top of the raw score, and both exist because the benchmark caught a
-real failure (below):
-
-- The **relaxed threshold** that helps physical punctuation keys become Ukrainian letters
-  runs in *one direction only*. Let it run in reverse and ordinary Ukrainian words like
-  `рубці` get mistaken for punctuation-heavy English gibberish like `he,ws`.
-- When *both* language interpretations already look natural, the pair is a genuine keyboard
-  collision, not a clear wrong-layout signal. The policy then demands an extra half-margin
-  of advantage rather than rewriting text on a narrow win.
-
-## The findings
-
-Two benchmark layers guard the behaviour. Both freeze their corpora by SHA-256 so a result
-is reproducible rather than a vibe.
-
-### Finding A — at the decision boundary, precision and recall both hit 1.000
-
-The signed-n-gram v1 boundary corpus is 191 hand-materialized cases — 90 that must correct,
-101 that must be left alone — spanning wrong-layout words both directions, native words in
-both languages, proper names, punctuation/physical-mapping edge cases, and technical tokens.
-
-| Metric | Result |
-|---|---:|
-| Cases | 191 |
-| Exact corrections | 90 / 90 |
-| False corrections | **0** |
-| Precision | **1.000** |
-| Recall | 1.000 |
-
-This is the number that matters most, because the 101 "keep" cases include the traps:
-`FAANG`, `SaaS`, `NASDAQ`, native words that happen to look cross-layout-plausible. Zero
-false corrections on that set is the whole point of the tool.
-
-### Finding B — "more data" made it *worse*, and that was the useful part
-
-The intuition going in was "bigger corpus → better model." The record says otherwise:
-
-- Original 100K-sentence model: **89/90** on the boundary set.
-- Naive 1M-sentence model at the same capacity: **88/90** — *worse*.
-- Increasing only the quantized-strength floor: back to 89/90.
-- The selected 1M / 1.75× / 32 configuration: **90/90**, with zero clean-holdout false
-  corrections.
-
-More corpus alone was actively counterproductive; the gain came from capacity and
-quantization tuning, not volume. This is the kind of thing you only learn by holding the
-evaluation fixed and changing one variable at a time — and it's why the benchmark exists
-before the "obvious" upgrade, not after.
-
-### Finding C — the safety net caught four real collisions
-
-An external clean-safety gate runs 10,000 English + 10,000 Ukrainian ordinary words —
-sampled from Wikipedia, a deliberately *different genre* from the news training data — and
-counts how many get falsely corrected. Result: **0 / 20,000.**
-
-But an earlier run surfaced four native Ukrainian collisions. Three were the one-directional
-relaxation firing in reverse; the fourth was a genuinely plausible pair (`дупу` vs the
-physically corresponding `lege`). Those four are now promoted into a committed regression
-corpus so they can never silently come back. The two policy rules in Insight 3 are their
-direct legacy.
-
-### Finding D — the most surprising result: the recall gap is a *choice*, not a limit
-
-The precision benchmarks say nothing about **recall** — how often a genuinely wrong-layout
-word actually gets fixed. A separate benchmark materializes 1,200 frequency-ranked Ukrainian
-words and 1,000 English words as the physical keys a user would press with the wrong layout,
-and runs them through production `evaluate`:
-
-| Profile | UK → EN | EN → UK |
-|---|---:|---:|
-| **Conservative (default)** | 75.1% | 94.3% |
-| Aggressive, `min_word_length = 2` | **92.3%** | **99.4%** |
-
-And by word length, on the default profile:
-
-| Length | Recall |
-|---|---:|
-| ≤ 3 chars | **0.0%** |
-| 4–6 chars | 93.1% |
-| 7+ chars | 98.5% |
-
-Three things fall out of this, and they reframe the whole project:
-
-1. **The default abstains on every short word — a flat 0%.** With `min_word_length = 4`,
-   the most frequent words in the language are never touched. That is the single largest
-   recall hole, and it is entirely deliberate.
-2. **The model is strong; the conservatism is policy.** Aggressive thresholds reach 92% / 99%
-   with *no model change*. So the ~25% of Ukrainian words the default misses is a precision-
-   over-recall decision, not a ceiling. You can have the recall whenever you decide the
-   false-correction cost is acceptable.
-3. **Broad coverage won't come from the trigger table.** Twelve targeted rules don't move
-   aggregate recall; real short-word coverage needs a proper dictionary (the current
-   exact-match set is 296 stop-words) or a less conservative default — not more triggers.
-
-That second point is the finding I'd least expected. I went in assuming the missed
-corrections were the model failing. The benchmark proved the model was fine and the *policy*
-was choosing to stay quiet — which is a far better problem to have, because a dial is easier
-to turn than a model is to retrain.
-
-## What this is, and isn't
-
-The honest boundaries, stated the way the benchmark docs state them:
-
-- Every result here is a **deterministic corpus sample**, not a real-world incidence claim.
-  "0 false corrections in 20,000 words" is a strong safety signal, not a promise about your
-  actual typing.
-- The boundary corpus evaluates the decision **at a single word boundary** (a Space). It is
-  not yet an event-sequence suite: navigation keys, mid-word layout changes, correction
-  timing, tracker resets, and post-correction layout state are a separate, unbuilt benchmark
-  layer.
-- Recall at the default setting is deliberately incomplete by design.
-
-## The takeaway
-
-The reverse-engineering that mattered wasn't the keyboard table — that's public and static.
-It was reconstructing the *judgement*: a two-layer decision where deterministic triggers
-cover the cases you know and a self-doubting statistical model handles the rest, all of it
-operating on physical keys rather than the characters on screen, and all of it pinned down
-by a benchmark harsh enough to overrule the author's intuitions twice (bigger corpus is not
-better; the recall gap is a policy dial, not a model wall).
-
-Punto Switcher shipped this behaviour twenty years ago and never had to explain how. Building
-it back from scratch, the surprise was how much of the design is really about knowing when
-*not* to act.
+That is the right kind of incorporation: not copying the old engine, but letting
+the old engine's proven edge case improve the new one.
 
 ---
 
-*Upyr is an independent Rust project; it is not affiliated with Yandex or Punto Switcher and
-shares no code with Punto Switcher or KeyboardSwitch. Benchmark artifacts and reproduction
-commands live under [`docs/benchmarks/`](../benchmarks/); the frozen corpora are pinned by
-SHA-256 in those documents.*
-
----
-
-### Sources on Punto Switcher
-
-The claims about Punto Switcher's internals are drawn from public write-ups, not from
-inspecting its code. They describe a third-party product and may be dated or
-version-specific; verify against a current build before relying on them.
-
-[^algo]: Overview of the dictionary-based "impossible-combination" algorithm and the
-    several-million-word dictionary — [softportal.com](https://www.softportal.com/en/punto-switcher/windows/software)
-    and general-overview write-ups.
-[^files]: Punto Switcher `Data/` and `User Data/` file layout (`triggers.dat`, `ps.dat`,
-    `translit.dat`, `replace.dat`, `user.dic`, `diary.dat`) and the note that the data files
-    are binary/encrypted rather than plain text —
-    [programmersforum.rocks: "Punto Switcher replace.dat"](https://www.programmersforum.rocks/t/punto-switcher-replace-dat/5448).
-[^diary]: The Diary (Дневник) keystroke-logging feature, `diary.dat`, and the keylogger /
-    PUA characterizations — [spy-soft.net](https://spy-soft.net/punto-switcher-shpion/),
-    codeby.net discussions of `diary.dat`, and
-    [Gridinsoft on PUABundler:Win32/YandexBundled](https://blog.gridinsoft.com/puabundler-win32-yandexbundled/).
+*Upyr is an independent Rust project; it is not affiliated with Yandex or Punto
+Switcher and shares no code or rule data with Punto Switcher. The reverse-
+engineering described here was used to understand file formats and rule
+semantics, then translated into a small, separately implemented trigger feature.*
