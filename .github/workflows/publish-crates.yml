@@ -1,0 +1,60 @@
+name: Publish crates.io package
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Cargo package to publish
+        required: true
+        type: choice
+        options:
+          - upyr-audio
+          - upyr-core
+          - upyr
+      dry_run:
+        description: Run cargo publish without uploading
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crates-io-publish-${{ inputs.package }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish ${{ inputs.package }}
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: 1.95.0
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev
+      - name: Verify crates.io token is configured
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: test -n "$CARGO_REGISTRY_TOKEN"
+      - name: Publish package
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          UPYR_PACKAGE: ${{ inputs.package }}
+          UPYR_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=(publish -p "$UPYR_PACKAGE" --locked)
+          if [[ "$UPYR_DRY_RUN" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+          cargo "${args[@]}"
