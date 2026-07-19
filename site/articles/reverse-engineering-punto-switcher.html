@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#16131c">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
 <title>Upyr: reverse-engineering Punto Switcher</title>
-<meta name="description" content="A three-day clean-room rebuild of Punto Switcher's layout-correction trick — what's inside PS, the benchmark findings, and why the rebuild is verifiably better.">
+<meta name="description" content="A clean-room rebuild of Punto Switcher's layout-correction trick, plus the binary reverse-engineering result that found a real Mac/Windows rule-tag divergence.">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="re-writeup.css">
 <script src="re-writeup.js" defer></script>
@@ -22,7 +22,7 @@
     <div>
       <p class="eyebrow">Field notes · a three-day build</p>
       <h1>Bringing dead text <span class="accent">back to life</span></h1>
-      <p class="lead">A clean-room rebuild of Punto Switcher's oldest trick — built in three days by watching what it does, never touching its code, then letting the benchmarks tell me where I'd got it wrong.</p>
+      <p class="lead">A clean-room rebuild of Punto Switcher's oldest trick — first shaped by behavior and benchmarks, then checked against the actual binaries to settle the rule tags Punto never documented.</p>
       <div class="hero-meta">
         <span class="tag">Rust · WASM</span>
         <span class="tag">EN ↔ UK</span>
@@ -120,10 +120,10 @@
   <div class="wrap col">
     <p class="eyebrow">The design, reverse-engineered from behaviour</p>
     <h2>A two-layer decision, because one layer can't be both safe and complete</h2>
-    <p>Punto never says how it decides, so I watched what it does — keys in, corrections out — until the shape showed through. It's two layers, and Upyr copies both. A short table of <strong>hard rules</strong> gets the first say and can overrule anything. Everything else goes to a <strong>statistical model that's happy to say "I don't know"</strong> and stay quiet. That rule table is lifted straight from Punto's <code>triggers.dat</code> — my source file admits as much in the comments.</p>
+    <p>Punto never says how it decides, so the first Upyr build watched behavior — keys in, corrections out — until the shape showed through. Later, radare2 and Ghidra confirmed the deeper split: Punto's Mac build uses bit flags and string checks, while the Windows build walks a compiled rule automaton. Upyr keeps the portable lesson: a short table of <strong>hard rules</strong> gets the first say and can overrule anything; everything else goes to a <strong>statistical model that's happy to say "I don't know"</strong> and stay quiet.</p>
     <div class="callout">
       <span class="label">On the ethics of the teardown</span>
-      No qualms here. Only Punto's <em>observable behaviour</em> was studied — key sequences in, corrections out — never its code; Upyr is clean-room and shares nothing with it. And there's a pointed irony in the subject: Punto Switcher ships a keystroke "diary" that records everything typed and uploads to Yandex — the textbook definition of the spyware problem Upyr's no-network runtime exists to refuse. Reverse-engineering the good idea out of a tool that logs your keystrokes felt less like a liberty than a correction.
+      No Punto code or rule data ships in Upyr. The binaries were inspected to understand file formats and rule semantics, then the useful idea was reimplemented separately in Rust. And there's a pointed irony in the subject: Punto Switcher ships a keystroke "diary" that records typed text — the textbook privacy problem Upyr's no-network runtime exists to refuse.
     </div>
   </div>
   <div class="wrap">
@@ -189,8 +189,8 @@
   <div class="wrap col">
     <p class="eyebrow">What the teardown was — and wasn't</p>
     <h2>What's actually inside Punto Switcher</h2>
-    <p>Fair thing to ask of anything calling itself a teardown: what <em>is</em> Punto made of, and what cracked it open? Here's what's publicly documented — and an honest account of the method.</p>
-    <p>Punto Switcher is a Windows program (<code>punto.exe</code>) from Yandex. It picks the layout with a <strong>dictionary of several million words</strong> plus an "impossible-combination" rule — a Russian word can't begin with certain letters, so a run of them betrays the wrong layout — re-checked on every Space, Enter or Tab. Its state lives in a handful of binary, non-plaintext <code>.dat</code> files:</p>
+    <p>Fair thing to ask of anything calling itself a teardown: what <em>is</em> Punto made of, and what cracked it open? The answer ended up being part public file layout, part binary work.</p>
+    <p>Punto Switcher is Yandex's long-running layout switcher, with Windows and macOS builds. The Windows executable (<code>punto.exe</code>) picks the layout with a <strong>dictionary of several million words</strong> plus an "impossible-combination" rule — a Russian word can't begin with certain letters, so a run of them betrays the wrong layout — re-checked on every Space, Enter or Tab. Its state lives in a handful of binary, non-plaintext <code>.dat</code> files:</p>
   </div>
   <div class="wrap">
     <div class="figure figure-full">
@@ -207,7 +207,7 @@
           </tbody>
         </table>
       </div>
-      <p class="figcap">Public file layout, from third-party write-ups — not from inspecting Punto's code. The data files are encrypted binary; even the autoreplace list won't open in a text editor.</p>
+      <p class="figcap">The public file layout matches what the binaries load. The reverse-engineering pass confirmed the same data family on Mac and Windows, including <code>ps.dat</code>, triggers, transliteration tables, replace rules, exceptions, title/path filters, and the diary store.</p>
     </div>
   </div>
   <div class="wrap col">
@@ -215,14 +215,26 @@
       <span class="label">The file worth staring at</span>
       Punto's <strong>Diary (Дневник)</strong> feature logs <em>every</em> keystroke to <code>diary.dat</code> — messenger chats, search queries, passwords in the clear — and the program keeps its own network connection, which is why independent write-ups treat it as a keylogger and some antivirus vendors flag the bundle as a PUA. Not an incidental risk: a shipped, documented feature.
     </div>
-    <h3>So what was the "tooling"? There wasn't any.</h3>
-    <p>Those <code>.dat</code> files are encrypted binary blobs. Upyr never cracked them — no disassembler, no unpacked <code>ps.dat</code>, no dictionary lifted from Yandex. The method was black-box: feed key sequences in, watch the corrections come out, and rebuild the <em>architecture those files imply</em> rather than their contents. That's the whole meaning of "clean-room" here — and it's why you won't find Punto's dictionaries anywhere in this project. What got reconstructed was the shape:</p>
-    <ul>
-      <li><code>triggers.dat</code> → a 12-rule trigger table written from scratch;</li>
-      <li>the several-million-word <code>ps.dat</code> → <strong>not a big dictionary at all</strong>, but a 2.8 MiB signed n-gram model plus a 296-word stop-list — a deliberately different, statistical answer to the same question;</li>
-      <li><code>diary.dat</code> → nothing. On purpose. The one Punto feature Upyr most wanted to <em>not</em> have.</li>
-    </ul>
-    <p>Studying a program's public file layout and observable behaviour is a world away from copying its code — and keeping strictly to the former is what lets Upyr share nothing with Punto while still learning from it. Sources on Punto's internals are listed at the foot of the page.</p>
+    <h3>The part Ghidra settled: the <code>A</code> tag</h3>
+    <p>The <code>.dat</code> files are still not part of Upyr, but <code>ps.dat</code> is no longer a mystery blob. The Windows loader around <code>FUN_0041ea80</code> XOR-decodes it with <code>0xaa</code>, stores decoded lines, and later feeds them into a trie-like automaton. The matcher functions <code>FUN_004dfec0</code> and <code>FUN_004e02f0</code> call a small tag predicate, <code>FUN_004b16a0</code>.</p>
+    <p>That predicate starts with the decisive branch: if the tag is <code>A</code>, return true. On Windows, <code>A</code> is a live any-position wildcard. On macOS, the string-rule parser sets the <code>A</code> bit and the checker never tests it. Same data, different behavior.</p>
+  </div>
+  <div class="wrap">
+    <div class="figure figure-full">
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Build</th><th>Engine shape</th><th><code>A</code> tag result</th></tr></thead>
+          <tbody>
+            <tr><td class="finding">macOS</td><td>bit flags plus prefix/suffix/substring string checks</td><td>parsed to <code>0x20</code>, never tested → dead</td></tr>
+            <tr><td class="finding">Windows</td><td>compiled trie/automaton with per-node tag predicate</td><td><code>return true</code> → live any-position wildcard</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="figcap"><b>This is the one finding Upyr adopted.</b> Trigger patterns now support <code>word</code>, <code>word*</code>, <code>*word</code>, and <code>*word*</code>. The built-in table stays exact; the wildcard is available when a rule genuinely needs Punto's Windows-style "match anywhere" behavior.</p>
+    </div>
+  </div>
+  <div class="wrap col">
+    <p>What Upyr reconstructs is still the shape, not the proprietary content: <code>triggers.dat</code> becomes a small rule table written from scratch; <code>ps.dat</code> becomes a 2.8 MiB signed n-gram model plus a small stop-list; <code>diary.dat</code> becomes nothing at all. Reverse-engineering answered the semantics. The shipped engine remains independent.</p>
   </div>
 </section>
 
@@ -459,7 +471,7 @@
           <thead><tr><th>Dimension</th><th>Punto Switcher</th><th>Upyr</th></tr></thead>
           <tbody>
             <tr><td class="dim">Languages</td><td class="ps">Russian-first</td><td class="up">EN ↔ UK first-class, incl. the Ukrainian punctuation row <span class="src">[];'\,./</span></td></tr>
-            <tr><td class="dim">Platforms</td><td class="ps">Windows only</td><td class="up">macOS primary; Windows / Linux preview; <strong>and the same engine in the browser via WASM</strong></td></tr>
+            <tr><td class="dim">Platforms</td><td class="ps">Windows and macOS builds; proprietary engines with divergent rule semantics</td><td class="up">macOS primary; Windows / Linux preview; <strong>and the same engine in the browser via WASM</strong></td></tr>
             <tr><td class="dim">Runtime privacy</td><td class="ps">Closed; ships a keystroke "diary" that records typed text and uploads to Yandex</td><td class="up">No telemetry, no HTTP client in the runtime — enforced by a <code>check_privacy.py</code> gate in CI</td></tr>
             <tr><td class="dim">Memory safety</td><td class="ps">Native, pre-Rust era</td><td class="up">Rust throughout</td></tr>
             <tr><td class="dim">Correctness evidence</td><td class="ps">None published</td><td class="up">Precision 1.000 on 191 boundary cases; 0 / 20,000 clean holdout; corpora pinned by SHA-256, one-command reproducible</td></tr>
@@ -495,7 +507,7 @@
   <div class="wrap col">
     <p>Sourced from the <span class="mono">upyr</span> repository — the frozen evaluation corpora are pinned by SHA-256 in <span class="mono">docs/benchmarks/signed-ngram-v1.md</span> and <span class="mono">docs/benchmarks/recall-v1.md</span>; every figure on this page traces to one of them. Reproduce with <span class="mono">cargo test -p upyr-core</span>.</p>
     <p class="mono">Upyr is an independent project, not affiliated with Yandex or Punto Switcher, and shares no code with Punto Switcher or KeyboardSwitch.</p>
-    <p><b>Sources on Punto Switcher's internals</b> — public write-ups describing a third-party product, not code inspection; may be dated or version-specific:
+    <p><b>Sources on Punto Switcher's internals</b> — public write-ups for product/file-layout context, plus local radare2/Ghidra notes for the binary-specific rule-tag findings:
       the dictionary-based algorithm, <a href="https://www.softportal.com/en/punto-switcher/windows/software">softportal.com</a>;
       the <code>.dat</code> file layout and its encrypted format, <a href="https://www.programmersforum.rocks/t/punto-switcher-replace-dat/5448">programmersforum.rocks</a>;
       the <code>diary.dat</code> keystroke logger and PUA characterizations, <a href="https://spy-soft.net/punto-switcher-shpion/">spy-soft.net</a> and <a href="https://blog.gridinsoft.com/puabundler-win32-yandexbundled/">Gridinsoft</a>.</p>

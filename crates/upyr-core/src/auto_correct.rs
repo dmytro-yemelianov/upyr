@@ -634,8 +634,9 @@ trait CandidateScorer {
     fn compare(&self, pair: CandidatePair<'_>) -> PairEvidence;
 }
 
-/// Applies a matching deterministic trigger, if any. Triggers match the physical
-/// key sequence (layout-independent), and either force a correction toward the
+/// Applies a matching deterministic trigger, if any. Triggers match the
+/// layout-independent physical key sequence, either exactly or with a tiny
+/// Punto-style positional wildcard, and either force a correction toward the
 /// other layout or preserve the current text outright — bypassing the scorer's
 /// confidence thresholds and `min_word_length`.
 fn trigger_decision(
@@ -650,9 +651,10 @@ fn trigger_decision(
     if physical.is_empty() {
         return None;
     }
-    let trigger = policy.triggers.iter().find(|trigger| {
-        trigger.physical == physical && trigger.source_layout == sample.source_layout
-    })?;
+    let trigger = policy
+        .triggers
+        .iter()
+        .find(|trigger| trigger.matches(&physical, sample.source_layout))?;
     match trigger.action {
         TriggerAction::Keep => Some(AutoDecision::Reset),
         TriggerAction::Correct => {
@@ -1692,6 +1694,27 @@ mod tests {
             super::evaluate(&sample("Ghbdsn", InputLayout::English), &policy, None),
             AutoDecision::Correct(_)
         ));
+    }
+
+    #[test]
+    fn wildcard_trigger_can_force_a_punto_style_any_position_rule() {
+        let policy = AutoCorrectPolicy {
+            triggers: vec![Trigger::for_source_layout(
+                "*zzz*",
+                TriggerAction::Correct,
+                InputLayout::English,
+            )],
+            ..AutoCorrectPolicy::default()
+        };
+        let correction = correction(super::evaluate(
+            &sample("azzzb", InputLayout::English),
+            &policy,
+            None,
+        ));
+
+        assert_eq!(correction.expected_source, "azzzb");
+        assert_eq!(correction.replacement, "фяяяи");
+        assert_eq!(correction.direction, Direction::EnglishToUkrainian);
     }
 
     #[test]
