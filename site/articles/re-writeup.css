@@ -55,11 +55,24 @@
   }
 
   * { box-sizing: border-box; }
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 112px;
+  }
   body {
     margin: 0; background: var(--ground); color: var(--ink);
     font-family: var(--sans); line-height: 1.65;
     -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
   }
+  img, svg { display: block; }
+  .skip-link {
+    position: fixed; top: 12px; left: 12px; z-index: 1000;
+    padding: 10px 15px; border-radius: 9px;
+    color: var(--ground); background: var(--ink);
+    font-weight: 750; text-decoration: none;
+    transform: translateY(-160%); transition: transform 160ms ease;
+  }
+  .skip-link:focus { transform: translateY(0); }
   .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
   .col { max-width: 660px; margin-left: auto; margin-right: auto; }
   section { padding: 64px 0; border-top: 1px solid var(--hair); }
@@ -76,12 +89,90 @@
     color: var(--garnet); margin: 0 0 14px; font-weight: 600;
   }
   a { color: var(--garnet); text-underline-offset: 3px; }
+  .article-header a { text-decoration: none; }
   strong { font-weight: 650; }
   code, .mono { font-family: var(--mono); }
   .src { font-family: var(--mono); color: var(--steel); font-weight: 600; }
   .dst { font-family: var(--serif); color: var(--garnet); font-weight: 700; font-style: normal; }
   ul { padding-left: 20px; }
   li { margin-bottom: 8px; }
+
+  /* ---------- site navigation ---------- */
+  .article-header {
+    position: sticky; top: 0; z-index: 80;
+    border-bottom: 1px solid color-mix(in srgb, var(--hair) 82%, transparent);
+    background: color-mix(in srgb, var(--ground) 88%, transparent);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+  }
+  .article-header-inner {
+    display: grid; grid-template-columns: auto auto; align-items: center;
+    gap: 12px 18px; min-height: 72px; padding-top: 10px; padding-bottom: 10px;
+  }
+  .article-brand {
+    display: inline-flex; align-items: center; gap: 11px;
+    color: var(--ink); font-size: 17px; font-weight: 770; letter-spacing: -.02em;
+  }
+  .article-brand img {
+    border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.18);
+  }
+  .article-nav {
+    display: flex; grid-column: 1 / -1; align-items: center; gap: 18px;
+    overflow-x: auto; padding: 4px 2px 2px; color: var(--muted);
+    font-size: 14px; font-weight: 650; scrollbar-width: none; white-space: nowrap;
+  }
+  .article-nav::-webkit-scrollbar { display: none; }
+  .article-nav a,
+  .article-github-link,
+  .article-language-link {
+    transition: color 160ms ease, background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  }
+  .article-nav a:hover { color: var(--ink); }
+  .article-nav a.is-current {
+    position: relative; color: var(--ink);
+  }
+  .article-nav a.is-current::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: -6px;
+    height: 2px; border-radius: 2px; background: var(--garnet);
+  }
+  .article-actions {
+    display: flex; justify-self: end; align-items: center; gap: 10px;
+  }
+  .article-language-switch {
+    display: flex; padding: 3px; border: 1px solid var(--hair);
+    border-radius: 10px; background: var(--surface);
+  }
+  .article-language-link {
+    min-width: 38px; min-height: 32px; padding: 4px 8px;
+    border-radius: 7px; color: var(--muted);
+    font-family: var(--mono); font-size: 12px; font-weight: 760;
+    letter-spacing: .04em; text-align: center;
+  }
+  .article-language-link:hover { color: var(--ink); }
+  .article-language-link.is-active {
+    color: var(--ground); background: var(--ink);
+    box-shadow: 0 4px 12px rgba(0,0,0,.16);
+  }
+  .article-github-link {
+    display: grid; width: 38px; height: 38px; place-items: center;
+    border: 1px solid var(--hair); border-radius: 10px;
+    color: var(--muted); background: var(--surface);
+  }
+  .article-github-link:hover {
+    color: var(--ink); border-color: var(--faint);
+    background: var(--surface-2);
+  }
+  .article-github-link svg { width: 19px; fill: currentColor; }
+  @media (min-width: 900px) {
+    .article-header-inner {
+      display: flex; min-height: 72px; gap: 30px;
+      padding-top: 0; padding-bottom: 0;
+    }
+    .article-nav {
+      grid-column: auto; margin-left: auto; gap: clamp(18px, 2.5vw, 34px);
+      padding: 0; font-size: 14.5px;
+    }
+  }
 
   /* ---------- HERO ---------- */
   .hero { padding: clamp(72px, 12vh, 128px) 0 72px; border-top: none; }
