@@ -39,10 +39,10 @@ Release builds target macOS 11 or newer and contain Apple Silicon and Intel bina
 
 These channels build Upyr from source. They avoid the downloaded `.app` Gatekeeper quarantine path, but they are not Apple-notarized app bundles. On macOS, grant Accessibility permission to the `upyr-background` process when prompted.
 
-Install from Git with Cargo:
+Install from crates.io with Cargo:
 
 ```sh
-cargo install --git https://github.com/dmytro-yemelianov/upyr --locked --force
+cargo install upyr --locked
 upyr convert ghbdsn
 upyr settings
 ```
@@ -56,7 +56,7 @@ brew services start upyr
 upyr settings
 ```
 
-Crates.io publishing is not enabled yet because the workspace packages still need registry metadata and a crates.io publish token.
+For source-latest testing before the next package release, install directly from Git with `cargo install --git https://github.com/dmytro-yemelianov/upyr --locked --force`.
 
 ## Build and run
 
