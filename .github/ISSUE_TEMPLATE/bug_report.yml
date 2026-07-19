@@ -18,7 +18,7 @@ body:
     attributes:
       label: Upyr version
       description: Find this in About, the release filename, or `upyr --version`.
-      placeholder: "0.2.0"
+      placeholder: "0.3.0"
     validations:
       required: true
 
