@@ -71,8 +71,12 @@ Pull requests and the default branch are checked with:
   signatures.
 
 Tagged macOS and Windows releases must use the configured platform signing
-identities; macOS packages are also notarized. Verification reduces risk but does
-not guarantee that the software is vulnerability-free.
+identities; macOS packages are also notarized. Current `macos-preview-*`
+artifacts are intentionally marked as previews and are not Apple Developer ID
+signed or notarized, so Gatekeeper can report that Apple could not verify Upyr.
+Upyr has no automatic update checker; users should check GitHub Releases for a
+newer notarized build. Verification reduces risk but does not guarantee that the
+software is vulnerability-free.
 
 ### Verifying a release
 
@@ -97,6 +101,9 @@ gh attestation verify <artifact> --repo dmytro-yemelianov/upyr
 ```
 
 macOS: `spctl -a -vv Upyr.app` and `codesign --verify --deep --strict Upyr.app`.
+For the current preview, `spctl` is expected to reject the app because no
+notarization ticket is stapled. A notarized release should pass Gatekeeper
+assessment.
 Windows: `signtool verify /pa /v <file>`.
 
 ## High-value report areas
