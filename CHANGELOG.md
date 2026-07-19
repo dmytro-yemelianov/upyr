@@ -19,6 +19,9 @@ change between minor releases while the version is below 1.0.
   GTK/AppIndicator stack; layout feedback uses a Freedesktop notification.
 - The project MSRV is now Rust 1.87 so AccessKit can use the quick-xml-free
   `zbus_xml` parser line.
+- macOS preview documentation now names the exact Gatekeeper warning users see
+  for the unnotarized build and clarifies that updates are checked manually via
+  GitHub Releases.
 
 ### Security
 
