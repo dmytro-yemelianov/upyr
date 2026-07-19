@@ -22,6 +22,8 @@ change between minor releases while the version is below 1.0.
 - macOS preview documentation now names the exact Gatekeeper warning users see
   for the unnotarized build and clarifies that updates are checked manually via
   GitHub Releases.
+- README and upyr.org now document the source-built Cargo Git install and
+  Homebrew tap install paths alongside the GitHub Releases preview.
 
 ### Security
 
