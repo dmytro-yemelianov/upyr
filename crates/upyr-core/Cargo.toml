@@ -6,7 +6,18 @@ rust-version.workspace = true
 description = "Portable English-Ukrainian layout conversion and correction engine for Upyr"
 license.workspace = true
 repository.workspace = true
-publish = false
+homepage.workspace = true
+readme = "README.md"
+keywords = ["keyboard", "layout", "ukrainian", "text"]
+categories = ["internationalization", "text-processing"]
+include = [
+  "/Cargo.toml",
+  "/README.md",
+  "/THIRD_PARTY_NOTICES.md",
+  "/assets/**",
+  "/fixtures/**",
+  "/src/**",
+]
 
 [dependencies]
 serde.workspace = true

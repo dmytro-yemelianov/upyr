@@ -28,9 +28,17 @@ repository.workspace = true
 homepage.workspace = true
 readme = "README.md"
 default-run = "upyr"
-publish = false
 keywords = ["keyboard", "layout", "ukrainian", "productivity", "accessibility"]
 categories = ["command-line-utilities", "internationalization"]
+include = [
+  "/Cargo.lock",
+  "/Cargo.toml",
+  "/LICENSE",
+  "/README.md",
+  "/THIRD_PARTY_NOTICES.md",
+  "/src/**",
+  "/tests/**",
+]
 
 [[bin]]
 name = "upyr"
@@ -59,8 +67,8 @@ single-instance = "0.3.3"
 toml = "1.1.3"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-upyr-core = { path = "crates/upyr-core" }
-upyr-audio = { path = "crates/upyr-audio" }
+upyr-core = { path = "crates/upyr-core", version = "=0.3.0" }
+upyr-audio = { path = "crates/upyr-audio", version = "=0.3.0" }
 winit = { version = "0.30.12", default-features = false, features = ["rwh_06", "x11"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
