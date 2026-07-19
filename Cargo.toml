@@ -1,13 +1,12 @@
 [workspace]
 members = [".", "crates/upyr-audio", "crates/upyr-core", "crates/upyr-wasm"]
 default-members = ["."]
-exclude = ["vendor/wayland-scanner-0.31.10"]
 resolver = "3"
 
 [workspace.package]
 version = "0.3.0"
 edition = "2024"
-rust-version = "1.86"
+rust-version = "1.87"
 license = "MIT"
 repository = "https://github.com/dmytro-yemelianov/upyr"
 homepage = "https://upyr.org/"
@@ -51,7 +50,7 @@ arboard = "3.6.1"
 clap = { version = "4.6.2", features = ["derive"] }
 directories = "6.0.0"
 device_query = "4.0.1"
-eframe = { version = "0.32.3", default-features = false, features = ["default_fonts", "glow", "x11"] }
+eframe = { version = "0.32.3", default-features = false, features = ["accesskit", "default_fonts", "glow", "x11"] }
 enigo = "0.6.1"
 global-hotkey = "0.8.0"
 rdev = "0.5.3"
@@ -60,15 +59,18 @@ single-instance = "0.3.3"
 toml = "1.1.3"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-tray-icon = { version = "0.24.1", default-features = false, features = ["gtk"] }
 upyr-core = { path = "crates/upyr-core" }
 upyr-audio = { path = "crates/upyr-audio" }
 winit = { version = "0.30.12", default-features = false, features = ["rwh_06", "x11"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-gtk = "0.18.2"
+ksni = { version = "0.3.6", default-features = false, features = ["async-io", "blocking"] }
 x11-dl = "2.21.0"
 xkbcommon = "0.9.0"
+zbus = { version = "5.13.2", default-features = false, features = ["async-io", "blocking-api"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+tray-icon = { version = "0.24.1", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 macos-accessibility-client = "0.0.2"
@@ -83,10 +85,9 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graph
 lto = "thin"
 strip = true
 
-# RUSTSEC-2026-0194 / RUSTSEC-2026-0195: eframe's mandatory egui-winit
-# clipboard backend still resolves smithay-clipboard and wayland-scanner even
-# on X11-only Linux builds, so the vulnerable parser cannot simply be removed.
-# The vendored crate is the exact 0.31.10 release with quick-xml bumped from
-# 0.39 to 0.41 and its one required API rename; see vendor/README.md.
+# RUSTSEC-2026-0194 / RUSTSEC-2026-0195: crates.io still publishes
+# wayland-scanner 0.31.10 with quick-xml 0.39, while upstream master's
+# scanner code is no longer compatible with released wayland-client 0.31.14.
+# Keep the minimal compatible scanner backport until a patched release lands.
 [patch.crates-io]
 wayland-scanner = { path = "vendor/wayland-scanner-0.31.10" }

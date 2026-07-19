@@ -1,4 +1,13 @@
 use anyhow::{Context, Result};
+#[cfg(target_os = "linux")]
+use ksni::{
+    Icon as KsniIcon, ToolTip,
+    blocking::{Handle as KsniHandle, TrayMethods},
+    menu::{CheckmarkItem as KsniCheckmarkItem, MenuItem as KsniMenuItem, StandardItem},
+};
+#[cfg(target_os = "linux")]
+use std::sync::Arc;
+#[cfg(not(target_os = "linux"))]
 use tray_icon::{
     Icon, TrayIcon, TrayIconBuilder,
     menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem},
@@ -21,6 +30,7 @@ pub enum TrayAction {
     Quit,
 }
 
+#[cfg(not(target_os = "linux"))]
 pub struct Tray {
     _icon: TrayIcon,
     status: MenuItem,
@@ -34,6 +44,22 @@ pub struct Tray {
     quit: MenuItem,
 }
 
+#[cfg(target_os = "linux")]
+pub struct Tray {
+    handle: KsniHandle<LinuxTray>,
+}
+
+#[cfg(target_os = "linux")]
+struct LinuxTray {
+    config: Config,
+    paused: bool,
+    frame: u8,
+    autostart_label: String,
+    autostart_checked: bool,
+    send_action: Arc<dyn Fn(TrayAction) + Send + Sync>,
+}
+
+#[cfg(not(target_os = "linux"))]
 impl Tray {
     pub fn new(config: &Config) -> Result<Self> {
         let status = MenuItem::new(status_text(config, false), false, None);
@@ -134,6 +160,129 @@ impl Tray {
     }
 }
 
+#[cfg(target_os = "linux")]
+impl Tray {
+    pub fn new<F>(config: &Config, send_action: F) -> Result<Self>
+    where
+        F: Fn(TrayAction) + Send + Sync + 'static,
+    {
+        let autostart_status = autostart::status()?;
+        let (autostart_label, autostart_checked) = autostart_presentation(autostart_status.state);
+        let tray = LinuxTray {
+            config: config.clone(),
+            paused: false,
+            frame: 0,
+            autostart_label: autostart_label.to_owned(),
+            autostart_checked,
+            send_action: Arc::new(send_action),
+        };
+        let handle = tray
+            .assume_sni_available(true)
+            .spawn()
+            .context("failed to create StatusNotifierItem tray icon")?;
+        Ok(Self { handle })
+    }
+
+    pub fn update(&self, config: &Config, paused: bool) -> Result<()> {
+        let autostart_status = autostart::status()?;
+        let (autostart_label, autostart_checked) = autostart_presentation(autostart_status.state);
+        self.handle
+            .update(|tray| {
+                tray.config = config.clone();
+                tray.paused = paused;
+                tray.autostart_label = autostart_label.to_owned();
+                tray.autostart_checked = autostart_checked;
+            })
+            .context("tray service is not running")?;
+        Ok(())
+    }
+
+    pub fn set_flip_frame(&self, frame: u8) -> Result<()> {
+        self.handle
+            .update(|tray| {
+                tray.frame = frame;
+            })
+            .context("tray service is not running")?;
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl LinuxTray {
+    fn emit(&self, action: TrayAction) {
+        (self.send_action)(action);
+    }
+
+    fn action_item(&self, label: &str, action: TrayAction) -> KsniMenuItem<Self> {
+        StandardItem {
+            label: label.to_owned(),
+            activate: Box::new(move |tray: &mut Self| tray.emit(action)),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl ksni::Tray for LinuxTray {
+    const MENU_ON_ACTIVATE: bool = true;
+
+    fn id(&self) -> String {
+        "dev.upyr.Upyr".to_owned()
+    }
+
+    fn title(&self) -> String {
+        status_text(&self.config, self.paused)
+    }
+
+    fn icon_pixmap(&self) -> Vec<KsniIcon> {
+        vec![ksni_icon(self.frame)]
+    }
+
+    fn tool_tip(&self) -> ToolTip {
+        ToolTip {
+            title: "Upyr".to_owned(),
+            description: tooltip(&self.config, self.paused),
+            icon_pixmap: self.icon_pixmap(),
+            ..Default::default()
+        }
+    }
+
+    fn menu(&self) -> Vec<KsniMenuItem<Self>> {
+        vec![
+            StandardItem {
+                label: status_text(&self.config, self.paused),
+                enabled: false,
+                ..Default::default()
+            }
+            .into(),
+            KsniMenuItem::Separator,
+            self.action_item("Fix previous word", TrayAction::ConvertPreviousWord),
+            self.action_item("Convert selected text", TrayAction::ConvertSelection),
+            KsniCheckmarkItem {
+                label: "Pause shortcut".to_owned(),
+                checked: self.paused,
+                activate: Box::new(|tray: &mut Self| tray.emit(TrayAction::TogglePaused)),
+                ..Default::default()
+            }
+            .into(),
+            KsniMenuItem::Separator,
+            self.action_item("Settings...", TrayAction::OpenSettings),
+            self.action_item("About Upyr...", TrayAction::OpenAbout),
+            self.action_item("Reload configuration", TrayAction::ReloadConfiguration),
+            KsniCheckmarkItem {
+                label: self.autostart_label.clone(),
+                checked: self.autostart_checked,
+                activate: Box::new(|tray: &mut Self| tray.emit(TrayAction::ToggleAutostart)),
+                ..Default::default()
+            }
+            .into(),
+            KsniMenuItem::Separator,
+            self.action_item("Quit Upyr", TrayAction::Quit),
+        ]
+    }
+}
+
 fn autostart_presentation(state: autostart::AutostartState) -> (&'static str, bool) {
     match state {
         autostart::AutostartState::Disabled => ("Launch at login", false),
@@ -159,6 +308,19 @@ fn tooltip(config: &Config, paused: bool) -> String {
             "Upyr — selection: {}; previous word: {}",
             config.hotkey, config.last_word_hotkey
         )
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn ksni_icon(frame: u8) -> KsniIcon {
+    let mut data = icon_rgba(frame);
+    for pixel in data.chunks_exact_mut(4) {
+        pixel.rotate_right(1);
+    }
+    KsniIcon {
+        width: ICON_SIZE as i32,
+        height: ICON_SIZE as i32,
+        data,
     }
 }
 

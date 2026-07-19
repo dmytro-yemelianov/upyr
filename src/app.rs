@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState, hotkey::HotKey};
 use single_instance::SingleInstance;
 use tracing::{debug, error, info, warn};
+#[cfg(not(target_os = "linux"))]
 use tray_icon::menu::MenuEvent;
 use upyr_audio::KeyCue;
 use winit::{
@@ -34,7 +35,10 @@ use crate::{
 #[derive(Debug)]
 enum AppEvent {
     HotKey(GlobalHotKeyEvent),
+    #[cfg(not(target_os = "linux"))]
     Menu(MenuEvent),
+    #[cfg(target_os = "linux")]
+    Tray(TrayAction),
     ModifierGesture(GestureAction),
     AutoKey(AutoKeyEvent),
     KeySound(KeyCue),
@@ -86,9 +90,6 @@ pub fn run(config: Config) -> Result<()> {
     }
     let (hotkey, last_word_hotkey) = parse_hotkeys(&config)?;
 
-    #[cfg(target_os = "linux")]
-    gtk::init().context("failed to initialize GTK for the system tray")?;
-
     let manager = GlobalHotKeyManager::new().context("failed to initialize global hotkeys")?;
     manager
         .register_all(&[hotkey, last_word_hotkey])
@@ -116,12 +117,15 @@ pub fn run(config: Config) -> Result<()> {
             error!(%error, "failed to forward a global hotkey event");
         }
     }));
-    let menu_proxy = event_proxy.clone();
-    MenuEvent::set_event_handler(Some(move |event| {
-        if let Err(error) = menu_proxy.send_event(AppEvent::Menu(event)) {
-            error!(%error, "failed to forward a tray menu event");
-        }
-    }));
+    #[cfg(not(target_os = "linux"))]
+    {
+        let menu_proxy = event_proxy.clone();
+        MenuEvent::set_event_handler(Some(move |event| {
+            if let Err(error) = menu_proxy.send_event(AppEvent::Menu(event)) {
+                error!(%error, "failed to forward a tray menu event");
+            }
+        }));
+    }
     #[cfg(target_os = "macos")]
     let accessibility_blocked = !accessibility::is_trusted();
     let gesture = create_gesture_monitor_or_log(&config, &event_proxy);
@@ -602,8 +606,7 @@ impl App {
         Ok(())
     }
 
-    fn handle_menu(&mut self, event_loop: &ActiveEventLoop, event: &MenuEvent) {
-        let action = self.tray.as_ref().and_then(|tray| tray.action(event));
+    fn handle_tray_action(&mut self, event_loop: &ActiveEventLoop, action: Option<TrayAction>) {
         let result = match action {
             Some(TrayAction::ConvertPreviousWord) => {
                 self.perform_conversion(true);
@@ -630,6 +633,12 @@ impl App {
             self.play_error_sound();
             let _ = self.update_tray();
         }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn handle_menu(&mut self, event_loop: &ActiveEventLoop, event: &MenuEvent) {
+        let action = self.tray.as_ref().and_then(|tray| tray.action(event));
+        self.handle_tray_action(event_loop, action);
     }
 
     fn toggle_autostart(&self) -> Result<()> {
@@ -724,7 +733,19 @@ impl App {
 impl ApplicationHandler<AppEvent> for App {
     fn resumed(&mut self, _event_loop: &ActiveEventLoop) {
         if self.tray.is_none() {
-            match Tray::new(&self.config) {
+            #[cfg(target_os = "linux")]
+            let tray_result = {
+                let tray_proxy = self.event_proxy.clone();
+                Tray::new(&self.config, move |action| {
+                    if let Err(error) = tray_proxy.send_event(AppEvent::Tray(action)) {
+                        error!(%error, "failed to forward a tray menu event");
+                    }
+                })
+            };
+            #[cfg(not(target_os = "linux"))]
+            let tray_result = Tray::new(&self.config);
+
+            match tray_result {
                 Ok(tray) => {
                     self.tray = Some(tray);
                     info!("system tray control is ready");
@@ -747,7 +768,10 @@ impl ApplicationHandler<AppEvent> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
             AppEvent::HotKey(event) => self.handle_hotkey(event),
+            #[cfg(not(target_os = "linux"))]
             AppEvent::Menu(event) => self.handle_menu(event_loop, &event),
+            #[cfg(target_os = "linux")]
+            AppEvent::Tray(action) => self.handle_tray_action(event_loop, Some(action)),
             AppEvent::ModifierGesture(action) if !self.paused => {
                 self.perform_conversion(action == GestureAction::PreviousWord);
             }
@@ -780,19 +804,6 @@ impl ApplicationHandler<AppEvent> for App {
             AppEvent::HideLayoutIndicator(_) => {}
             AppEvent::TrayFlipFrame { .. } => {}
         }
-    }
-
-    #[cfg(target_os = "linux")]
-    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        use std::time::{Duration, Instant};
-        use winit::event_loop::ControlFlow;
-
-        while gtk::events_pending() {
-            gtk::main_iteration_do(false);
-        }
-        event_loop.set_control_flow(ControlFlow::WaitUntil(
-            Instant::now() + Duration::from_millis(50),
-        ));
     }
 }
 

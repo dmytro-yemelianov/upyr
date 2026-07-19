@@ -276,61 +276,47 @@ mod platform {
 
 #[cfg(target_os = "linux")]
 mod platform {
-    use std::cell::RefCell;
+    use std::collections::HashMap;
 
-    use device_query::{DeviceQuery, DeviceState};
-    use gtk::prelude::*;
+    use zbus::{
+        blocking::{Connection, Proxy},
+        zvariant::OwnedValue,
+    };
 
     use super::{SystemLayout, indicator_text};
 
-    struct Indicator {
-        window: gtk::Window,
-        label: gtk::Label,
-    }
-
-    thread_local! {
-        static INDICATOR: RefCell<Option<Indicator>> = const { RefCell::new(None) };
-    }
-
     pub fn show_indicator(layout: SystemLayout) -> bool {
-        if !gtk::is_initialized() {
-            return false;
+        if let Err(error) = show_notification(indicator_text(layout)) {
+            tracing::debug!(%error, "could not show layout notification");
+            false
+        } else {
+            true
         }
-        INDICATOR.with_borrow_mut(|indicator| {
-            let indicator = indicator.get_or_insert_with(|| {
-                let window = gtk::Window::new(gtk::WindowType::Popup);
-                window.set_decorated(false);
-                window.set_keep_above(true);
-                window.set_skip_taskbar_hint(true);
-                window.set_skip_pager_hint(true);
-                window.set_accept_focus(false);
-                window.set_resizable(false);
-                window.set_default_size(104, 42);
-                let label = gtk::Label::new(None);
-                label.set_margin_start(14);
-                label.set_margin_end(14);
-                label.set_margin_top(10);
-                label.set_margin_bottom(10);
-                window.add(&label);
-                Indicator { window, label }
-            });
-            indicator.label.set_markup(&format!(
-                "<b><span size=\"large\">{}</span></b>",
-                indicator_text(layout)
-            ));
-            let pointer = DeviceState::new().get_mouse().coords;
-            indicator.window.move_(pointer.0 + 16, pointer.1 + 18);
-            indicator.window.show_all();
-        });
-        true
     }
 
-    pub fn hide_indicator() {
-        INDICATOR.with_borrow(|indicator| {
-            if let Some(indicator) = indicator.as_ref() {
-                indicator.window.hide();
-            }
-        });
+    pub fn hide_indicator() {}
+
+    fn show_notification(summary: &str) -> zbus::Result<u32> {
+        let connection = Connection::session()?;
+        let proxy = Proxy::new(
+            &connection,
+            "org.freedesktop.Notifications",
+            "/org/freedesktop/Notifications",
+            "org.freedesktop.Notifications",
+        )?;
+        proxy.call(
+            "Notify",
+            &(
+                "Upyr",
+                0_u32,
+                "",
+                summary,
+                "",
+                Vec::<String>::new(),
+                HashMap::<String, OwnedValue>::new(),
+                1500_i32,
+            ),
+        )
     }
 }
 

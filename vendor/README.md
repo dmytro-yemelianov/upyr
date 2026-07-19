@@ -22,3 +22,9 @@ git diff --no-index \
 
 Remove this vendored copy when a compatible patched release is available on
 crates.io. Progress is tracked in GitHub issue #2.
+
+As of 2026-07-19, Smithay's `master` branch has the same `quick-xml` update,
+but its generated protocol surface is no longer compatible with the released
+`wayland-client` 0.31.14 stack used by `winit`/`eframe`. Upyr therefore keeps
+this release-compatible backport instead of pinning the whole unreleased
+Wayland workspace.

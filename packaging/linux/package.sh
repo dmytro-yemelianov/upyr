@@ -36,7 +36,7 @@ Priority: optional
 Architecture: $ARCH
 Maintainer: Upyr contributors
 Homepage: https://upyr.org/
-Depends: libgtk-3-0, libayatana-appindicator3-1, libx11-6, libgl1
+Depends: dbus, libx11-6, libgl1
 Description: Private English-Ukrainian keyboard layout fixer
  Upyr fixes selected text or the previous word and follows the correction
  with the matching installed X11 keyboard layout.

@@ -3,7 +3,7 @@
 [![CI](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml/badge.svg)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml)
 [![Security](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml/badge.svg)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml)
 [![OSV-Scanner](https://github.com/dmytro-yemelianov/upyr/actions/workflows/osv-scanner.yml/badge.svg)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/osv-scanner.yml)
-[![Rust 1.86+](https://img.shields.io/badge/rust-1.86%2B-b7410e.svg?logo=rust)](#build-and-run)
+[![Rust 1.87+](https://img.shields.io/badge/rust-1.87%2B-b7410e.svg?logo=rust)](#build-and-run)
 [![No telemetry](https://img.shields.io/badge/telemetry-none-58d6a8.svg)](#privacy-and-security)
 [![License: MIT](https://img.shields.io/badge/license-MIT-58d6a8.svg)](LICENSE)
 
@@ -37,7 +37,7 @@ Release builds target macOS 11 or newer and contain Apple Silicon and Intel bina
 
 ## Build and run
 
-Upyr requires Rust 1.86 or newer.
+Upyr requires Rust 1.87 or newer.
 
 ```sh
 cargo build --release --locked
@@ -50,8 +50,7 @@ On Windows, use `target\release\upyr-background.exe` for the tray app without a 
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev \
-  libwayland-dev libgtk-3-dev libayatana-appindicator3-dev
+sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev
 ```
 
 To build a local universal macOS bundle:
@@ -147,8 +146,8 @@ Sound-pack synthesis is offline and dependency-free in `upyr-audio`. Its pfxr-st
 | Platform | Status | Notes |
 | --- | --- | --- |
 | macOS 11+ | Primary public-preview target | Native AppKit settings and feedback, universal Apple Silicon/Intel package, native input-source and rich pasteboard integration |
-| Windows | Preview | Tray app, installer and portable ZIP, foreground-layout mapping, broad clipboard snapshot/restore support; the settings screen-reader bridge is temporarily unavailable |
-| Linux/X11 | Preview | DEB and tar package, XKB layout mapping and GTK tray/feedback; the settings screen-reader bridge is temporarily unavailable, and native Wayland global input awaits a portal-backed design |
+| Windows | Preview | Tray app, installer and portable ZIP, foreground-layout mapping, broad clipboard snapshot/restore support, and AccessKit-backed settings accessibility |
+| Linux/X11 | Preview | DEB and tar package, XKB layout mapping, StatusNotifierItem tray, desktop-notification feedback, and AccessKit-backed settings accessibility; native Wayland global input awaits a portal-backed design |
 | WebAssembly | Engine preview | DOM-independent `upyr-core` binding with generated TypeScript contracts; browser adapter and npm delivery are planned |
 
 ## Architecture
