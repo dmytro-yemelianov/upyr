@@ -302,7 +302,7 @@ mod tests {
         for length in 1..=63 {
             for seed in 0_u64..32 {
                 let mut state = seed + length as u64 * 33;
-                let mut name = String::from([b'a', b'C', b'm', b'Z'][seed as usize % 4] as char);
+                let mut name = String::from(b"aCmZ"[seed as usize % 4] as char);
                 for _ in 1..length {
                     state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
                     name.push(alphabet[(state >> 32) as usize % alphabet.len()] as char);

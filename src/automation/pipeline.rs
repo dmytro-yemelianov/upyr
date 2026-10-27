@@ -13,6 +13,7 @@ pub(crate) enum Request {
     Undo {
         expected: String,
         replacement: String,
+        #[cfg(target_os = "macos")]
         source_id: String,
     },
     Automatic {
@@ -25,6 +26,7 @@ impl Request {
     pub fn automatic(&self) -> bool {
         matches!(self, Self::Automatic { .. })
     }
+    #[cfg(target_os = "macos")]
     fn tracked(&self) -> bool {
         matches!(self, Self::Automatic { .. } | Self::Undo { .. })
     }
@@ -773,6 +775,7 @@ mod tests {
                 Request::Undo {
                     expected: "привіт ".into(),
                     replacement: "ghbdsn ".into(),
+                    #[cfg(target_os = "macos")]
                     source_id: "ABC".into(),
                 },
                 true,
