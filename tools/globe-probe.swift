@@ -207,7 +207,7 @@ case "convert":
     }
     let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 420, height: 70), styleMask: [.titled], backing: .buffered, defer: false)
     window.title = "Upyr conversion probe"
-    let field = NSTextField(frame: NSRect(x: 10, y: 15, width: 400, height: 28))
+    var field = NSTextField(frame: NSRect(x: 10, y: 15, width: 400, height: 28))
     field.stringValue = "ghbdsn"
     window.contentView?.addSubview(field)
     window.makeKeyAndOrderFront(nil)
@@ -287,6 +287,13 @@ case "convert":
                 enter.post(tap: .cghidEventTap)
             }
             pumpEvents(100)
+            if mode == "terminal-slash-undo-refocus" {
+                // Same window, new actual editor. No pointer/key event resets
+                // the tracked line; undo must bind to the field being edited.
+                field.isHidden = true
+                field = NSTextField(frame: NSRect(x: 10, y: 15, width: 400, height: 28))
+                window.contentView?.addSubview(field)
+            }
             window.makeFirstResponder(field)
             field.stringValue = ""
             field.currentEditor()?.string = ""
@@ -295,7 +302,7 @@ case "convert":
         let phrase: String
         let expectedText: String
         switch mode {
-        case "terminal-slash-undo":
+        case "terminal-slash-undo", "terminal-slash-undo-refocus":
             phrase = "/c"
             expectedText = ".с"
         case "terminal-slash", "terminal-slash-fast":
@@ -396,7 +403,7 @@ case "convert":
                 || (currentText() == "привіт ф" && currentID() == "com.apple.keylayout.Ukrainian-PC"))
             : currentText() == expectedText
         let needsABC = ["terminal-cancel","terminal-undo","terminal-undo-punctuation","auto-undo"].contains(mode)
-        let needsUkr = ["terminal-slash-undo","terminal-undo-after-input","terminal-undo-after-navigation"].contains(mode)
+        let needsUkr = ["terminal-slash-undo","terminal-slash-undo-refocus","terminal-undo-after-input","terminal-undo-after-navigation"].contains(mode)
         let layoutMatches = (!needsABC || currentID() == "com.apple.keylayout.ABC") && (!needsUkr || currentID() == "com.apple.keylayout.Ukrainian-PC")
         let wantsIndicator = mode.hasPrefix("terminal-feedback") || mode == "terminal-overlay" || ["terminal-slash", "terminal-slash-fast"].contains(mode)
         let indicatorVisible = !wantsIndicator || ((CGWindowListCopyWindowInfo(.optionOnScreenOnly, 0) as? [[String: Any]]) ?? []).contains { window in

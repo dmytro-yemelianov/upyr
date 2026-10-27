@@ -28,6 +28,9 @@ change between minor releases while the version is below 1.0.
 
 ### Fixed
 
+- Capture the undo target at the correction itself. Slash-command tracking can
+  outlive a focused editor within the same window; undo now binds to the field
+  actually edited while still refusing changes after focus moves elsewhere.
 - Send terminal replacements as single-character keypresses. Multi-character
   Unicode input can take Chromium's composition path and let a following letter
   reach the terminal before the replacement. Add an opt-in Superset regression

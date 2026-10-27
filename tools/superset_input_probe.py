@@ -48,7 +48,14 @@ def fixture(root: Path) -> None:
         write_json(state, dict(pid=os.getpid(), nonce=nonce, ready=ready,
                                text=''.join(text), cursor=cursor, enters=enters))
         visible = ''.join(text).replace('\n', '↵')
-        sys.stdout.write('\r\x1b[2KUPYR-PROBE-' + nonce[:8] + '> ' + visible + '\x1b[K')
+        try:
+            bits = f'{int(nonce[:8], 16):032b}'
+        except ValueError:
+            bits = '0' * 32
+        colors = {'0': '40;180;255', '1': '255;40;120', 'g': '80;255;80'}
+        barcode = ''.join('\x1b[48;2;' + colors[bit] + 'm  \x1b[0m ' for bit in 'g' + bits + 'g')
+        sys.stdout.write('\x1b[H\x1b[2KUpyr isolated probe: this field never executes commands.\r\n'
+                         '\x1b[2K' + barcode + '\r\n\x1b[2KPROBE> ' + visible + '\x1b[J')
         if len(text) > cursor:
             sys.stdout.write(f'\x1b[{len(text) - cursor}D')
         sys.stdout.flush()
@@ -176,7 +183,7 @@ def main(workspace: str, override_pid: int | None = None) -> None:
             check_pane()
             image = root / 'fixture.png'
             run(['cua-driver', 'call', 'get_window_state', json.dumps(dict(pid=window['pid'], window_id=window['window_id'], session=session, screenshot_out_file=str(image), include_accessibility_tree=False))])
-            visible = json.loads(run([str(helper), 'ocr', str(image), state()['nonce'][:8]]))
+            visible = json.loads(run([str(helper), 'marker', str(image), state()['nonce'][:8]]))
             if not visible['ownedFixtureVisible']:
                 raise RuntimeError('Owned fixture marker is not visible; no physical input sent')
             plan = dict(actions=actions, upyrPID=upyr_pid)

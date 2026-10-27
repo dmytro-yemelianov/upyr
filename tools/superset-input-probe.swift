@@ -1,7 +1,6 @@
 // Test-only physical input for tools/superset_input_probe.py. Never shipped.
 import Carbon
 import Cocoa
-import Vision
 
 func sourceID() -> String {
     let source = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
@@ -26,27 +25,32 @@ if args.count == 1 {
           "postAccess": CGPreflightPostEventAccess()])
     exit(0)
 }
-if args.count == 4 && args[1] == "ocr" {
-    let request = VNRecognizeTextRequest()
-    request.recognitionLevel = .fast
-    request.usesLanguageCorrection = false
-    try VNImageRequestHandler(url: URL(fileURLWithPath: args[2])).perform([request])
-    let lines = (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
-    func fold(_ text: String) -> String {
-        var result = text.lowercased().filter { $0.isLetter || $0.isNumber }
-        for (letter, digit) in [("o", "0"), ("l", "1"), ("i", "1")] {
-            result = result.replacingOccurrences(of: letter, with: digit)
+if args.count == 4 && args[1] == "marker" {
+    guard let bitmap = NSBitmapImageRep(data: try Data(contentsOf: URL(fileURLWithPath: args[2]))),
+          let code = UInt32(args[3], radix: 16) else { exit(2) }
+    let bits = (0..<32).reversed().map { code & (1 << $0) == 0 ? "b" : "r" }.joined()
+    let expected = "g" + bits + "g"
+    var matched = false
+    // Read only the exact window image returned by Cua Driver. The opaque
+    // background blocks survive display scaling; text recognition is unused.
+    for y in stride(from: 0, to: bitmap.pixelsHigh, by: 3) {
+        var line = "", previous = ".", run = 0
+        func finishRun() { if previous != "." && run >= 3 { line += previous } }
+        for x in 0..<bitmap.pixelsWide {
+            var symbol = "."
+            if let c = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) {
+                let red = c.redComponent * 255, green = c.greenComponent * 255, blue = c.blueComponent * 255
+                // Display profiles and terminal renderers can shift channels.
+                // Match distinct color families; the complete 32-bit code must
+                // still match exactly, between two green sentinels.
+                if red > 220 && green < 140 && blue > 65 && blue < 200 { symbol = "r" }
+                else if blue > 220 && red < 140 && green > 100 && green < 230 { symbol = "b" }
+                else if green > 220 && green > red + 80 && green > blue + 80 { symbol = "g" }
+            }
+            if symbol == previous { run += 1 } else { finishRun(); previous = symbol; run = 1 }
         }
-        return result
-    }
-    let recognized = fold(lines.joined())
-    let expected = fold(args[3])
-    let marker = fold("upyrprobe")
-    var matched = recognized.contains(marker + expected)
-    if !matched, let range = recognized.range(of: marker) {
-        let code = String(recognized[range.upperBound...].prefix(expected.count))
-        // One OCR substitution is allowed in an otherwise unique run code.
-        matched = code.count == expected.count && zip(code, expected).filter { $0 != $1 }.count <= 1
+        finishRun()
+        if line.contains(expected) { matched = true; break }
     }
     emit(["ownedFixtureVisible": matched])
     exit(0)

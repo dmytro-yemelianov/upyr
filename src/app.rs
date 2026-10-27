@@ -503,7 +503,10 @@ impl App {
                 expected,
                 replacement,
             } => {
-                let target = self.auto_target.clone().or_else(FocusTarget::capture);
+                // Trackers retain window identity across input boundaries.
+                // The actual editor may have been replaced inside that window;
+                // undo must bind to the editor this conversion is about to use.
+                let target = FocusTarget::capture();
                 let source = system_layout::current().ok().flatten();
                 target.zip(source).map(|(target, source)| UndoRecord {
                     original: expected.clone(),
@@ -682,6 +685,10 @@ impl App {
         }
         #[cfg(target_os = "macos")]
         if event.id == self.undo_hotkey.id() {
+            debug!(
+                available = self.undo_record.is_some(),
+                "received correction undo shortcut"
+            );
             if let Some(record) = self.undo_record.take() {
                 let now = std::time::Instant::now();
                 if record.expires > now && record.target.is_current() {
@@ -711,6 +718,9 @@ impl App {
 
     #[cfg(target_os = "macos")]
     fn clear_undo(&mut self) {
+        if self.undo_record.is_some() || self.pending_undo.is_some() {
+            debug!("invalidated correction undo state");
+        }
         self.undo_record = None;
         self.pending_undo = None;
         // Input can arrive after the native edit commits but before its
@@ -760,6 +770,7 @@ impl App {
             || now >= pending.expires
             || !pending.record.target.is_current()
         {
+            debug!("undo cancelled before applying to its original window");
             return;
         }
         if !crate::automation::modifiers_released() {
@@ -768,6 +779,7 @@ impl App {
             return;
         }
         if !pending.record.target.is_current_for_undo() {
+            debug!("undo cancelled because its focused element changed");
             return;
         }
         let mut config = self.config.clone();
