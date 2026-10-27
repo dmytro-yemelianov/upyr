@@ -22,4 +22,4 @@ wasm-bindgen.workspace = true
 wasm-bindgen-test = "0.3.76"
 
 [build-dependencies]
-sha2 = "0.10.9"
+sha2 = "0.11.0"

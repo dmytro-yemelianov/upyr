@@ -24,6 +24,10 @@ class ContentSecurityPolicyTests(unittest.TestCase):
     def test_accepts_exact_required_directives(self) -> None:
         self.assertEqual(validate_csp(VALID_POLICY, Path("site/index.html")), [])
 
+    def test_accepts_stricter_static_page_connection_policy(self) -> None:
+        policy = VALID_POLICY.replace("connect-src 'self'", "connect-src 'none'")
+        self.assertEqual(validate_csp(policy, Path("site/privacy.html")), [])
+
     def test_rejects_an_additional_connect_source(self) -> None:
         policy = VALID_POLICY.replace("connect-src 'self'", "connect-src 'self' https://example.com")
         errors = validate_csp(policy, Path("site/index.html"))

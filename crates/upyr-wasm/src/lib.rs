@@ -264,6 +264,7 @@ impl SessionEngine {
                 sensitivity: options.sensitivity,
                 min_word_length: options.min_word_length,
                 exceptions: options.exceptions,
+                triggers: upyr_core::builtin_triggers(),
             },
             mode: options.mode,
             source_layout: options.source_layout,

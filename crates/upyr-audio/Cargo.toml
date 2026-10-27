@@ -6,7 +6,14 @@ rust-version.workspace = true
 description = "Dependency-free procedural sound packs for Upyr"
 license.workspace = true
 repository.workspace = true
-publish = false
+homepage.workspace = true
+keywords = ["audio", "sound", "synthesis", "feedback"]
+categories = ["multimedia::audio"]
+include = [
+  "/Cargo.toml",
+  "/README.md",
+  "/THIRD_PARTY_NOTICES.md",
+  "/src/**",
+]
 
 [dependencies]
-

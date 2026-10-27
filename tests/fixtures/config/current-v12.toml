@@ -1,0 +1,48 @@
+# Synthetic preferences from the integrated preview before headphone/undo settings.
+config_version = 12
+undo_hotkey = "CmdOrCtrl+Alt+Shift+Z"
+hotkey = "CmdOrCtrl+Shift+Space"
+last_word_hotkey = "CmdOrCtrl+Shift+Backspace"
+direction = "ukrainian-to-english"
+copy_delay_ms = 125
+paste_delay_ms = 70
+switch_layout = false
+show_layout_indicator = true
+layout_indicator_duration_ms = 1500
+auto_correct = true
+auto_correct_sensitivity = "aggressive"
+auto_correct_min_word_length = 5
+auto_correct_delay_ms = 80
+auto_correct_exceptions = ["FAANG", "SaaS", "custom-word"]
+modifier_gesture = "double-shift"
+modifier_gesture_action = "selection"
+modifier_gesture_timeout_ms = 700
+restore_clipboard = false
+restore_delay_ms = 400
+
+indicator_style = "flag"
+terminal_typing_apps = ["com.superset.desktop"]
+slash_command_apps = ["com.superset.desktop"]
+
+[sounds]
+headphone_volume_percent = 9
+enabled = true
+volume_percent = 37
+pack = "anime"
+key_clicks = true
+auto_correct = false
+manual_conversion = true
+layout_switch = false
+pause = true
+resume = false
+error = true
+
+[globe_switch]
+enabled = true
+tap_window_ms = 450
+cycle_order = "recent"
+skipped_layouts = ["com.apple.keylayout.French"]
+
+[globe_switch.layout_flags]
+"com.apple.keylayout.ABC" = "GB"
+"com.apple.keylayout.Ukrainian-PC" = "UA"

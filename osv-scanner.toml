@@ -1,0 +1,21 @@
+# OSV-Scanner accepted-advisory list.
+#
+# These advisories are already tolerated by the project's cargo-audit policy:
+# they are RustSec "unmaintained"/"unsound" categories, which cargo-audit
+# reports as warnings rather than failures. Listing them here keeps
+# OSV-Scanner (which fails on any finding) as a meaningful gate that trips only
+# on new, actionable issues, while staying consistent with cargo-audit.
+#
+# `ignoreUntil` forces a quarterly revisit so the acceptance cannot silently
+# rot.
+#
+# The GTK3 desktop stack was removed in favor of `ksni`/D-Bus StatusNotifierItem
+# tray support and a direct Freedesktop Notifications D-Bus call. Keep only
+# live, verified exceptions.
+
+# --- egui/eframe font stack — tracked for an egui update ---
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0192"
+ignoreUntil = 2026-10-18
+reason = "ttf-parser via egui/eframe (ab_glyph) font rendering; resolved by an egui/ab_glyph update"

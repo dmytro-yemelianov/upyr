@@ -152,7 +152,7 @@ pub(super) fn current() -> OutputRoute {
         )
     } == 0
         && size <= 4096
-        && size % 4 == 0
+        && size.is_multiple_of(4)
     {
         let mut streams = vec![0_u32; size as usize / 4];
         if unsafe {

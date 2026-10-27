@@ -2,13 +2,16 @@
 
 [![CI](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml/badge.svg)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml)
 [![Security](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml/badge.svg)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml)
-[![MIT License](https://img.shields.io/badge/license-MIT-58d6a8.svg)](LICENSE)
+[![OSV-Scanner](https://github.com/dmytro-yemelianov/upyr/actions/workflows/osv-scanner.yml/badge.svg)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/osv-scanner.yml)
+[![Rust 1.87+](https://img.shields.io/badge/rust-1.87%2B-b7410e.svg?logo=rust)](#build-and-run)
+[![No telemetry](https://img.shields.io/badge/telemetry-none-58d6a8.svg)](#privacy-and-security)
+[![License: MIT](https://img.shields.io/badge/license-MIT-58d6a8.svg)](LICENSE)
 
 Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in Rust. It turns text typed on the wrong physical layout into what you meant: `ghbdsn` → `привіт`, `руддщ` → `hello`.
 
-**Release status:** v0.2.0 public preview. **The current preview download is not Apple Developer ID signed and is not notarized; its macOS bundle is ad-hoc signed only, so Gatekeeper may block it.** macOS is the primary supported desktop target. Release CI is configured to build and smoke-test Windows and Linux/X11 packages, but those platforms remain preview targets. Upyr follows [Semantic Versioning](#versioning-and-releases); compatibility may change before 1.0.
+**Release status:** v0.4.0 public preview. **There is no Apple-verified Upyr build yet.** The current macOS preview is ad-hoc signed, not Apple Developer ID signed, and not notarized; Gatekeeper may show "Apple could not verify Upyr is free of malware." Upyr has no automatic update checker, so check GitHub Releases manually for newer or notarized builds. macOS is the primary supported desktop target. Release CI is configured to build and smoke-test Windows and Linux/X11 packages, but those platforms remain preview targets. Upyr follows [Semantic Versioning](#versioning-and-releases); compatibility may change before 1.0.
 
-[Download from GitHub Releases](https://github.com/dmytro-yemelianov/upyr/releases) · [Product page](https://upyr.org) · [Report an issue](https://github.com/dmytro-yemelianov/upyr/issues/new/choose)
+[Download from GitHub Releases](https://github.com/dmytro-yemelianov/upyr/releases) · [Package-manager installs](#package-manager-installs) · [Product page](https://upyr.org/) · [Report an issue](https://github.com/dmytro-yemelianov/upyr/issues/new/choose)
 
 ## What it does
 
@@ -33,11 +36,34 @@ The menu-bar or system-tray app can convert text, pause or resume correction, op
 3. Grant **Accessibility** access when macOS asks. Upyr needs it to observe opted-in word boundaries and send Copy/Paste keystrokes.
 4. Return to Upyr. When a new grant is detected, the app offers to restart so every input monitor starts with the permission.
 
-Release builds target macOS 11 or newer and contain Apple Silicon and Intel binaries. Tagged macOS releases fail closed unless signing and notarization complete; check the release notes and artifact provenance rather than bypassing Gatekeeper.
+Release builds target macOS 11 or newer and contain Apple Silicon and Intel binaries. If macOS says Apple could not verify Upyr, that means the downloaded preview is not notarized; it is not an in-app update prompt and it is not something Upyr can fix after download. The recommended paths are to wait for a Developer ID/notarized release tracked in [issue #4](https://github.com/dmytro-yemelianov/upyr/issues/4), verify the release artifacts yourself, or build from source. Tagged macOS releases fail closed unless signing and notarization complete; check the release notes and artifact provenance rather than bypassing Gatekeeper.
+
+## Package-manager installs
+
+These channels build Upyr from source. They avoid the downloaded `.app` Gatekeeper quarantine path, but they are not Apple-notarized app bundles. On macOS, grant Accessibility permission to the `upyr-background` process when prompted.
+
+Install from crates.io with Cargo:
+
+```sh
+cargo install upyr --locked
+upyr convert ghbdsn
+upyr settings
+```
+
+Install from the Homebrew tap:
+
+```sh
+brew tap dmytro-yemelianov/upyr
+brew install upyr
+brew services start upyr
+upyr settings
+```
+
+For source-latest testing before the next package release, install directly from Git with `cargo install --git https://github.com/dmytro-yemelianov/upyr --locked --force`.
 
 ## Build and run
 
-Upyr requires Rust 1.86 or newer.
+Upyr requires Rust 1.87 or newer.
 
 ```sh
 cargo build --release --locked
@@ -50,8 +76,7 @@ On Windows, use `target\release\upyr-background.exe` for the tray app without a 
 
 ```sh
 sudo apt-get update
-sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev \
-  libwayland-dev libgtk-3-dev libayatana-appindicator3-dev
+sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev
 ```
 
 To build a local universal macOS bundle:
@@ -147,7 +172,7 @@ Upyr does not translate words. It reconstructs the characters produced by the sa
 1. The native input hook records physical key positions for the current short input boundary.
 2. The installed EN/UK layouts provide the positional map; a deterministic built-in map is the fallback.
 3. Upyr creates source and opposite-layout candidates while preserving case and punctuation.
-4. Exact dictionaries, technical-token guards, exceptions, and a compact language model score the pair.
+4. Deterministic triggers, exact dictionaries, technical-token guards, exceptions, and a compact language model score the pair.
 5. Only a candidate that clears the selected confidence policy is applied. Upyr replaces the text, switches the OS input source when configured, and, by default, attempts to restore the clipboard.
 
 On macOS, Copy/Paste delays yield to the application event loop so Globe taps
@@ -157,6 +182,8 @@ characters. Clipboard cleanup continues after replacement without pausing
 tracking for the next word, and preserves anything copied meanwhile.
 Automatic correction uses AppKit's main-thread global event monitor and the
 event's rendered characters, avoiding background Carbon layout queries.
+
+The trigger layer covers high-certainty words that the statistical policy deliberately skips, especially short words. Built-in rules are exact physical-key matches today; the parser also supports leading/trailing `*` patterns (`word*`, `*word`, `*word*`) after the Punto reverse-engineering pass showed that Punto for Windows treats its `A` tag as an any-position wildcard. Upyr uses the finding as a rule-shape hint only; it does not ship Punto's rule data.
 
 The embedded model is a **signed character n-gram index**, not a general language model. It contains 173,964 packed 2–5-character records in about 2.8 MiB. Each record stores a character-sequence key and one signed confidence byte: negative for English, positive for Ukrainian. Evidence from the typed candidate is accumulated locally and looked up with binary search.
 
@@ -321,8 +348,8 @@ only an intact original word or a complete replacement with that letter preserve
 | Platform | Status | Notes |
 | --- | --- | --- |
 | macOS 11+ | Primary public-preview target | Native AppKit settings and feedback, universal Apple Silicon/Intel package, native input-source and rich pasteboard integration |
-| Windows | Preview | Tray app, installer and portable ZIP, foreground-layout mapping, broad clipboard snapshot/restore support; the settings screen-reader bridge is temporarily unavailable |
-| Linux/X11 | Preview | DEB and tar package, XKB layout mapping and GTK tray/feedback; the settings screen-reader bridge is temporarily unavailable, and native Wayland global input awaits a portal-backed design |
+| Windows | Preview | Tray app, installer and portable ZIP, foreground-layout mapping, broad clipboard snapshot/restore support, and AccessKit-backed settings accessibility |
+| Linux/X11 | Preview | DEB and tar package, XKB layout mapping, StatusNotifierItem tray, desktop-notification feedback, and AccessKit-backed settings accessibility; native Wayland global input awaits a portal-backed design |
 | WebAssembly | Engine preview | DOM-independent `upyr-core` binding with generated TypeScript contracts; browser adapter and npm delivery are planned |
 
 ## Architecture

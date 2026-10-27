@@ -248,6 +248,9 @@ def validate_csp(policy: str, relative: Path) -> list[str]:
         expected = f"{name} {' '.join(required_sources)}"
         if actual_sources is None:
             errors.append(f"{relative}: CSP is missing `{expected}`")
+        elif name == "connect-src" and actual_sources == ("'none'",):
+            # Pages without the WASM demo can forbid connections entirely.
+            continue
         elif actual_sources != required_sources:
             actual = " ".join(actual_sources) or "<empty>"
             errors.append(

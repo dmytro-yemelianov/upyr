@@ -759,6 +759,63 @@ mod tests {
     use super::*;
 
     #[test]
+    fn release_upgrade_preserves_old_preferences_through_save_and_reload() {
+        fn preserved(before: &toml::Value, after: &toml::Value, path: &str) {
+            if let Some(table) = before.as_table() {
+                for (name, value) in table {
+                    if path.is_empty() && name == "config_version" {
+                        continue;
+                    }
+                    let next = format!("{path}.{name}");
+                    preserved(value, after.get(name).expect(&next), &next);
+                }
+            } else {
+                assert_eq!(before, after, "preference changed: {path}");
+            }
+        }
+        let directory = env::temp_dir().join(format!("upyr-upgrade-test-{}", process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        for (name, source) in [
+            (
+                "published-v6",
+                include_str!("../tests/fixtures/config/published-v6.toml"),
+            ),
+            (
+                "integrated-v11",
+                include_str!("../tests/fixtures/config/integrated-v11.toml"),
+            ),
+            (
+                "current-v12",
+                include_str!("../tests/fixtures/config/current-v12.toml"),
+            ),
+        ] {
+            let original: toml::Value = toml::from_str(source).unwrap();
+            let config = Config::decode(source).unwrap();
+            let upgraded = toml::Value::try_from(&config).unwrap();
+            preserved(&original, &upgraded, "");
+            assert_eq!(config.config_version, CURRENT_CONFIG_VERSION);
+            if !original.as_table().unwrap().contains_key("globe_switch") {
+                assert!(!config.globe_switch.enabled);
+                assert!(config.terminal_typing_apps.is_empty());
+                assert!(config.slash_command_apps.is_empty());
+            }
+            if original["sounds"].get("headphone_volume_percent").is_none() {
+                assert_eq!(config.sounds.headphone_volume_percent, 12);
+            }
+            let path = directory.join(format!("{name}.toml"));
+            write_config_file(
+                &path,
+                toml::to_string_pretty(&config).unwrap().as_bytes(),
+                false,
+            )
+            .unwrap();
+            let reloaded = Config::decode(&fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(upgraded, toml::Value::try_from(reloaded).unwrap());
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn upgrade_adds_quiet_headphones_without_altering_existing_audio_or_hotkeys() {
         let config = Config::decode("config_version = 11\nhotkey = 'CmdOrCtrl+Alt+Z'\nauto_correct = true\n[sounds]\nenabled = true\nvolume_percent = 65\npack = 'anime'\n").unwrap();
         assert_eq!(config.config_version, CURRENT_CONFIG_VERSION);

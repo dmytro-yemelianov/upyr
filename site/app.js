@@ -5,17 +5,20 @@
     skip: "Перейти до вмісту",
     navWhy: "Навіщо Upyr",
     navExperience: "Огляд",
+    navHome: "Головна",
     navHow: "Як це працює",
+    navFeatures: "Можливості",
     navPrivacy: "Приватність",
     navPlatforms: "Платформи",
     navReleases: "Релізи",
     navToggleLabel: "Перемкнути навігацію",
-    heroEyebrow: "Публічна попередня версія · v0.2.0",
+    navStory: "Історія створення",
+    heroEyebrow: "Публічна попередня версія · v0.4.0",
     heroTitle: "Розкладка може помилятися. Ваші слова — ні.",
     heroLead: "Upyr миттєво відновлює англійський та український текст, набраний у неправильній розкладці. Нативна швидкість Rust, локальні рішення, жодного стеження.",
-    downloadMac: "Завантажити Upyr для macOS",
+    downloadMac: "Відкрити прев’ю macOS",
     viewSource: "Переглянути код",
-    releaseNote: "Універсальний для Apple Silicon та Intel · macOS 11+ · поточне прев’ю має ad-hoc підпис і не нотаризоване Apple",
+    releaseNote: "Універсальний для Apple Silicon та Intel · macOS 11+ · поточне прев’ю не перевірене Apple",
     localOnly: "Лише локально",
     youTyped: "Ви набрали",
     physicalRow: "Ті самі фізичні клавіші",
@@ -104,9 +107,9 @@
     macCopy: "Універсальний застосунок для Apple Silicon та Intel, нативні налаштування AppKit, мапінг джерел вводу, підтримка знімка й відновлення багатого буфера, відгук і запуск при вході.",
     macDownload: "Відкрити релізи",
     statusPreview: "ПРЕВ’Ю",
-    windowsCopy: "Трей-застосунок, мапінг розкладки, підтримка знімка й відновлення буфера, інсталятор, портативний ZIP та CI-перевірки. Місток для скринрідерів у налаштуваннях тимчасово недоступний.",
+    windowsCopy: "Трей-застосунок, мапінг розкладки, підтримка знімка й відновлення буфера, інсталятор, портативний ZIP, CI-перевірки та доступність налаштувань через AccessKit.",
     statusPreview2: "ПРЕВ’Ю",
-    linuxCopy: "XKB-мапінг, GTK-трей, пакунки DEB та tar. Місток для скринрідерів у налаштуваннях тимчасово недоступний; глобальний ввід нативного Wayland очікує дизайну через портали.",
+    linuxCopy: "XKB-мапінг, трей StatusNotifierItem, сповіщення про зміну розкладки, пакунки DEB і tar та доступність налаштувань через AccessKit. Глобальний ввід нативного Wayland очікує дизайну через портали.",
     statusEngine: "ЯДРО",
     wasmCopy: "Незалежне від DOM ядро й згенеровані контракти TypeScript готові. Далі — браузерний адаптер, демо та npm-пакунок.",
     aboutKicker: "Про назву",
@@ -116,14 +119,17 @@
     mitLicense: "Ліцензія MIT",
     downloadKicker: "Публічна попередня версія",
     downloadTitle: "Продовжуйте набирати. Решту перекине Upyr.",
-    downloadCopy: "Поточне прев’ю для macOS має ad-hoc підпис і не нотаризоване Apple, тому Gatekeeper може його заблокувати. Також ви можете переглянути й зібрати кожен рядок самостійно.",
-    downloadButton: "Завантажити для macOS",
+    downloadCopy: "Якщо macOS повідомляє, що Apple не може перевірити Upyr, ви використовуєте поточне прев’ю з ad-hoc підписом без нотаризації. В Upyr немає автоматичного оновлювача; використовуйте Releases для app bundle або встановіть зібрані з коду пакунки Cargo/Homebrew нижче.",
+    installCargoLabel: "Cargo",
+    installBrewLabel: "Homebrew",
+    downloadButton: "Відкрити релізи",
     reportIssue: "Повідомити про проблему",
     footerTagline: "Набирайте те, що мали на увазі.",
     footerSource: "Код",
     footerReleases: "Релізи",
     footerIssues: "Проблеми",
     footerSecurity: "Безпека",
+    footerStory: "Історія створення",
     footerMeta: "Без cookies · Без аналітики · Без зовнішніх ресурсів",
     homeLabel: "Головна сторінка Upyr",
     navLabel: "Основна навігація",
@@ -131,6 +137,7 @@
     githubLabel: "Upyr на GitHub",
     demoLabel: "Приклади перетворення Upyr",
     principlesLabel: "Принципи продукту",
+    installOptionsLabel: "Команди встановлення через менеджери пакунків",
     settingsScreenshotAlt: "Налаштування Upyr у macOS із контролями мовного індикатора та звукового відгуку",
     ngramKeyPairsLabel: "g відповідає п, h — р, b — и, d — в, s — і, n — т",
     ngramTokensLabel: "Перекривні n-грами довжиною від двох до п’яти символів",
@@ -144,18 +151,25 @@
     ngramStep4Label: "Крок 4: ухвалити захищене рішення"
   };
 
-  const englishMetadata = {
-    title: "Upyr — type what you meant",
-    description: "Upyr is a private, native English–Ukrainian keyboard-layout fixer for macOS, built in Rust and powered by a compact local character n-gram model.",
-    socialTitle: "Upyr — type what you meant",
-    socialDescription: "Private English ↔ Ukrainian layout correction. Local, fast, open source."
+  // Per-page metadata: the English base is read from each page's own head, and
+  // the Ukrainian strings come from data-* attributes on <html>. This keeps every
+  // page's title/description its own, across the multi-page site.
+  const metaContent = (selector) => {
+    const node = document.querySelector(selector);
+    return node ? node.getAttribute("content") || "" : "";
   };
-
+  const pageData = document.documentElement.dataset;
+  const englishMetadata = {
+    title: document.title,
+    description: metaContent('meta[name="description"]'),
+    socialTitle: metaContent('meta[property="og:title"]') || document.title,
+    socialDescription: metaContent('meta[property="og:description"]')
+  };
   const ukrainianMetadata = {
-    title: "Upyr — набирайте те, що мали на увазі",
-    description: "Upyr — приватний нативний перемикач англійської та української розкладок для macOS, створений на Rust із компактною локальною моделлю символьних n-грам.",
-    socialTitle: "Upyr — набирайте те, що мали на увазі",
-    socialDescription: "Приватне виправлення розкладки EN ↔ УК. Локально, швидко, з відкритим кодом."
+    title: pageData.titleUk || englishMetadata.title,
+    description: pageData.descriptionUk || englishMetadata.description,
+    socialTitle: pageData.titleUk || englishMetadata.socialTitle,
+    socialDescription: pageData.socialUk || englishMetadata.socialDescription
   };
 
   document.documentElement.classList.remove("no-js");
