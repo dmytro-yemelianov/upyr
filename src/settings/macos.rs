@@ -1596,7 +1596,7 @@ fn make_automatic_page(
         mtm,
     ));
     let slash_commands = checkbox(
-        "Correct /commands at the start of Superset input lines",
+        "Correct freshly typed /commands in Superset",
         rect(24.0, 124.0, 610.0, 26.0),
         mtm,
     );

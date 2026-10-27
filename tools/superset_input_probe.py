@@ -195,6 +195,22 @@ def main(workspace: str, override_pid: int | None = None) -> None:
 
         abc, ukr = 'com.apple.keylayout.ABC', 'com.apple.keylayout.Ukrainian-PC'
         scenarios = [
+            ('slash-after-escape', ukr, [dict(key=53), dict(text='/command'), dict(wait=500)], ['/command'], abc),
+            ('slash-after-reset-undo', ukr, [dict(key=53), dict(text='/c'), dict(wait=500), dict(undo=True)], ['.с'], ukr),
+            ('leading-bracket-short', abc, [dict(text='[ez '), dict(wait=500)], ['хуя '], ukr),
+            ('leading-bracket-short-stem', abc, [dict(text='[eq '), dict(wait=500)], ['хуй '], ukr),
+            ('leading-semicolon-short', abc, [dict(text=';er '), dict(wait=500)], ['жук '], ukr),
+            ('leading-right-bracket', abc, [dict(text='];f '), dict(wait=500)], ['їжа '], ukr),
+            ('leading-quote', abc, [dict(text="'yjn "), dict(wait=500)], ['єнот '], ukr),
+            ('leading-period', abc, [dict(text='.yfr '), dict(wait=500)], ['юнак '], ukr),
+            ('native-backslash-map', abc, [dict(text='\\fyjr '), dict(wait=500)], ['ʼанок '], ukr),
+            ('native-backquote-ge', abc, [dict(text='`fyjr '), dict(wait=500)], ['ґанок '], ukr),
+            ('preserved-comma', abc, [dict(text='ghbdsn, '), dict(wait=500)], ['привіт, '], ukr),
+            ('preserved-dots', abc, [dict(text='ghbdsn... '), dict(wait=500)], ['привіт... '], ukr),
+            ('slash-after-reset-fast', ukr, [dict(key=53), dict(text='/command', gap=15), dict(wait=500)], ['/command'], abc),
+            ('literal-dot-env', abc, [dict(text='.env '), dict(wait=500)], ['.env '], abc),
+            ('literal-bracket-identifier', abc, [dict(text='[raw '), dict(wait=500)], ['[raw '], abc),
+            ('literal-semicolon-command', abc, [dict(text=';ls '), dict(wait=500)], [';ls '], abc),
             ('ukrainian-word', abc, [dict(text='ghbdsn '), dict(wait=500)], ['привіт '], ukr),
             ('english-contraction', ukr, [dict(text="it's not so good for the english "), dict(wait=500)], ["it's not so good for the english "], abc),
             ('mixed-language', abc, [dict(text="it's not nfr lj,ht zr [jnskjcz , "), dict(wait=600)], ["it's not так добре як хотілося б "], ukr),

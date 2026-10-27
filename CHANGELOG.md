@@ -12,6 +12,28 @@ change between minor releases while the version is below 1.0.
 - Broader Windows and Linux desktop validation.
 - Browser adapter and npm delivery for `upyr-wasm`.
 
+## [0.4.1] - 2026-10-27
+
+### Fixed
+
+- Keep accepted terminal corrections with trailing punctuation reversible,
+  validate mapped punctuation against the installed keyboard map, and support
+  macOS's backquote position for `ґ` in typing replacement.
+- Preserve punctuation runs such as `...` without turning earlier periods into
+  `ю`; keep a known word's last letter before the remaining marks.
+- Cover custom slash commands containing digits, hyphens and underscores with
+  generated editing sequences. Add an offline headless corpus/runner and a
+  read-only native macOS layout-map integration check.
+- Re-arm freshly typed slash-command prefixes after clicks, Escape, navigation,
+  shortcuts and edits, without requiring an extra Return. Discard the previous
+  tracked span and keep known inline prose unchanged.
+- Recognize three-letter terminal words whose first physical punctuation key
+  produces a Ukrainian letter (`[ez` → `хуя`, `;er` → `жук`, `];f` → `їжа`).
+  Retain dictionary/model confidence, configured exceptions, technical-token
+  guards and explicit minimum lengths above four characters.
+- Expand the compact Ukrainian lexicon for common initial-letter and colloquial
+  word forms, and cover the reported cases in the opt-in Superset input probe.
+
 ## [0.4.0] - 2026-10-27
 
 Integrated GlobeSwitch, guarded terminal correction and output-aware feedback.
@@ -173,7 +195,8 @@ Initial public preview.
 - Public preview artifacts may be explicitly marked unnotarized; users should
   check each release's signing status before installing.
 
-[Unreleased]: https://github.com/dmytro-yemelianov/upyr/compare/macos-preview-0.4.0...HEAD
+[Unreleased]: https://github.com/dmytro-yemelianov/upyr/compare/macos-preview-0.4.1...HEAD
+[0.4.1]: https://github.com/dmytro-yemelianov/upyr/releases/tag/macos-preview-0.4.1
 [0.4.0]: https://github.com/dmytro-yemelianov/upyr/releases/tag/macos-preview-0.4.0
 [0.3.0]: https://github.com/dmytro-yemelianov/upyr/releases/tag/macos-preview-0.3.0
 [0.2.0]: https://github.com/dmytro-yemelianov/upyr/releases/tag/macos-preview-0.2.0

@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "4272ffffc243ebd0b8987b13cb1c643cba65832c",
-    "indexed_at": "2026-10-27T15:01:29Z",
+    "commit": "82ccd85fe631309d0ed8b9f745fafd867c8975bd",
+    "indexed_at": "2026-10-27T21:00:47Z",
     "project": "upyr",
-    "nodes": 2647,
-    "edges": 10392,
+    "nodes": 2677,
+    "edges": 10621,
     "original_size": 9109504,
-    "compressed_size": 2214123,
+    "compressed_size": 2243554,
     "compression_level": 3
 }

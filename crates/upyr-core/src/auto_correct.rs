@@ -550,13 +550,30 @@ impl Candidates {
         {
             return None;
         }
-        let delimiter = full.source_word.chars().last()?;
-        if !is_terminal_delimiter(delimiter) {
+        let stem = full.source_word.trim_end_matches(is_terminal_delimiter);
+        let mut delimiters = &full.source_word[stem.len()..];
+        if delimiters.is_empty() {
             return None;
         }
-
+        // Keep the longest known word before a run: its last physical period
+        // can itself be a Ukrainian letter (`hjpevs...` -> `розумію..`).
+        let mut probe = sample.physical_word.clone();
+        for count in 1..=delimiters.chars().count() {
+            probe.pop()?;
+            let target = match sample.source_layout {
+                InputLayout::English => to_ukrainian(&probe, mapping),
+                InputLayout::Ukrainian => probe.clone(),
+            };
+            if known(full.target_language, &normalize_word(&target)) {
+                let start = full.source_word.char_indices().rev().nth(count - 1)?.0;
+                delimiters = &full.source_word[start..];
+                break;
+            }
+        }
         let mut physical_word = sample.physical_word.clone();
-        physical_word.pop()?;
+        for _ in delimiters.chars() {
+            physical_word.pop()?;
+        }
         if physical_word.is_empty() {
             return None;
         }
@@ -578,8 +595,8 @@ impl Candidates {
             }
             InputLayout::Ukrainian => format!("{physical_prefix}{physical_word}"),
         };
-        let target_word = format!("{physical_target_word}{delimiter}");
-        let target_context = format!("{physical_target_context}{delimiter}{boundary}");
+        let target_word = format!("{physical_target_word}{delimiters}");
+        let target_context = format!("{physical_target_context}{delimiters}{boundary}");
 
         Some(Self {
             source_word: full.source_word.clone(),
@@ -1277,6 +1294,19 @@ mod tests {
     fn preserves_terminal_punctuation_when_it_is_more_likely_than_a_layout_letter() {
         for (physical, layout, expected_source, expected_replacement) in [
             ("Jkmuf,", InputLayout::English, "Jkmuf, ", "Ольга, "),
+            (
+                "ghbdsn...",
+                InputLayout::English,
+                "ghbdsn... ",
+                "привіт... ",
+            ),
+            ("ghbdsn?", InputLayout::English, "ghbdsn? ", "привіт, "),
+            (
+                "hjpevs...",
+                InputLayout::English,
+                "hjpevs... ",
+                "розумію.. ",
+            ),
             ("Jkmuf.", InputLayout::English, "Jkmuf. ", "Ольга. "),
             ("Olha?", InputLayout::Ukrainian, "Щдрф, ", "Olha? "),
             ("Olha/", InputLayout::Ukrainian, "Щдрф. ", "Olha. "),

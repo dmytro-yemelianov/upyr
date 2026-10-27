@@ -351,10 +351,16 @@ impl Effects for Desktop {
         if !crate::input_context::terminal_typing_enabled(&self.config) {
             return Ok(None);
         }
-        let plan = if self.restore_source.is_some() {
-            super::terminal_typing::plan_undo(expected, replacement)
-        } else {
-            super::terminal_typing::plan(expected, replacement)
+        let mapping = crate::system_layout::installed_mapping().ok().flatten();
+        let plan = match (self.restore_source.is_some(), mapping.as_deref()) {
+            (true, Some(mapping)) => {
+                super::terminal_typing::plan_undo_with_mapping(expected, replacement, Some(mapping))
+            }
+            (false, Some(mapping)) => {
+                super::terminal_typing::plan_with_mapping(expected, replacement, Some(mapping))
+            }
+            (true, None) => super::terminal_typing::plan_undo(expected, replacement),
+            (false, None) => super::terminal_typing::plan(expected, replacement),
         };
         let Some(plan) = plan else {
             return Ok(Some(SelectionOutcome::NoConvertibleText));

@@ -1,4 +1,4 @@
-//! Fresh input-line prefixes in explicitly opted-in command interfaces.
+//! Freshly typed command prefixes in explicitly opted-in command interfaces.
 //! No dictionary, terminal history, clipboard, or submission events are used.
 
 use crate::{
@@ -16,12 +16,11 @@ pub(crate) struct SlashTracker {
 }
 
 impl SlashTracker {
-    /// A click, navigation, paste shortcut, or other unknown edit loses the
-    /// line boundary. Only a subsequently observed Return establishes it again.
+    /// Drop the previous edit span after pointer, navigation or shortcut
+    /// activity. A newly typed physical slash can establish a fresh command
+    /// token; it never includes text from before the reset.
     pub fn invalidate(&mut self) {
-        self.physical.clear();
-        self.visible.clear();
-        self.blocked = true;
+        *self = Self::default();
     }
 
     /// True while the first token belongs to the slash-command namespace;
@@ -38,15 +37,21 @@ impl SlashTracker {
                 return false;
             }
             Keycode::LShift | Keycode::RShift => return !self.blocked && !self.physical.is_empty(),
-            Keycode::Backspace if !self.blocked => {
+            Keycode::Space => {
+                self.invalidate();
+                self.blocked = true;
+                return false;
+            }
+            Keycode::Backspace if self.blocked => {
+                self.invalidate();
+                return false;
+            }
+            Keycode::Backspace => {
                 self.physical.pop();
                 self.visible.pop();
                 return !self.physical.is_empty();
             }
             _ => {}
-        }
-        if self.blocked {
-            return false;
         }
         let physical = physical_key(event.key)
             .and_then(|key| {
@@ -70,6 +75,13 @@ impl SlashTracker {
                 (Keycode::Key9, false) => Some('9'),
                 _ => None,
             });
+        if physical.is_none() {
+            self.invalidate();
+            return false;
+        }
+        if self.blocked {
+            return false;
+        }
         let Some(physical) = physical.filter(|c| {
             if self.physical.is_empty() {
                 *c == '/'
@@ -78,10 +90,12 @@ impl SlashTracker {
             }
         }) else {
             self.invalidate();
+            self.blocked = true; // A known preceding word/space is still inline prose.
             return false;
         };
         if self.physical.len() == 64 || layout.is_none() {
             self.invalidate();
+            self.blocked = true;
             return false;
         }
         let visible = if layout == Some(SystemLayout::Ukrainian) {
@@ -187,15 +201,46 @@ mod tests {
         assert!(tracker.correction(&[]).is_none());
     }
     #[test]
-    fn requires_line_start_and_does_not_reset_after_words_or_spaces() {
-        for initial in [
-            Keycode::A,
-            Keycode::Space,
-            Keycode::Left,
+    fn fresh_slash_prefix_recovers_after_unknown_editor_activity_without_return() {
+        let mut tracker = command();
+        tracker.invalidate(); // Pointer activity loses the old input position.
+        key(&mut tracker, Keycode::Slash, SystemLayout::Ukrainian);
+        key(&mut tracker, Keycode::C, SystemLayout::Ukrainian);
+        assert_eq!(tracker.correction(&[]).unwrap().replacement, "/c");
+        for edit in [
             Keycode::Escape,
+            Keycode::Left,
             Keycode::LControl,
             Keycode::LMeta,
         ] {
+            key(&mut tracker, edit, SystemLayout::Ukrainian);
+            key(&mut tracker, Keycode::Slash, SystemLayout::Ukrainian);
+            key(&mut tracker, Keycode::C, SystemLayout::Ukrainian);
+            assert_eq!(
+                tracker.correction(&[]).unwrap().replacement,
+                "/c",
+                "{edit:?}"
+            );
+        }
+        let mut tracker = SlashTracker::default();
+        key(&mut tracker, Keycode::A, SystemLayout::Ukrainian);
+        key(&mut tracker, Keycode::Backspace, SystemLayout::Ukrainian);
+        key(&mut tracker, Keycode::Slash, SystemLayout::Ukrainian);
+        key(&mut tracker, Keycode::C, SystemLayout::Ukrainian);
+        assert_eq!(tracker.correction(&[]).unwrap().replacement, "/c");
+    }
+
+    #[test]
+    fn reset_never_reuses_a_previously_typed_command_span() {
+        let mut tracker = command();
+        tracker.invalidate();
+        key(&mut tracker, Keycode::C, SystemLayout::Ukrainian);
+        assert!(tracker.correction(&[]).is_none());
+    }
+
+    #[test]
+    fn requires_line_start_and_does_not_reset_after_words_or_spaces() {
+        for initial in [Keycode::A, Keycode::Space] {
             let mut tracker = SlashTracker::default();
             key(&mut tracker, initial, SystemLayout::Ukrainian);
             key(&mut tracker, Keycode::Slash, SystemLayout::Ukrainian);
@@ -229,5 +274,71 @@ mod tests {
             assert!(!is_command(token));
         }
         assert!(!is_command(&format!("/{}", "a".repeat(64))));
+    }
+
+    #[test]
+    fn generated_commands_preserve_exact_spans_across_commit_reset_and_backspace() {
+        fn event(c: char) -> AutoKeyEvent {
+            let key = match c.to_ascii_lowercase() {
+                'a' => Keycode::A,
+                'c' => Keycode::C,
+                'm' => Keycode::M,
+                'z' => Keycode::Z,
+                '0' => Keycode::Key0,
+                '1' => Keycode::Key1,
+                '9' => Keycode::Key9,
+                '-' | '_' => Keycode::Minus,
+                '/' => Keycode::Slash,
+                _ => panic!("unexpected generator alphabet"),
+            };
+            AutoKeyEvent {
+                key,
+                shifted: c.is_ascii_uppercase() || c == '_',
+            }
+        }
+        let mapping = upyr_core::default_physical_mapping();
+        let alphabet = b"acmzACMZ019-_";
+        let mut checked = 0;
+        for length in 1..=63 {
+            for seed in 0_u64..32 {
+                let mut state = seed + length as u64 * 33;
+                let mut name = String::from([b'a', b'C', b'm', b'Z'][seed as usize % 4] as char);
+                for _ in 1..length {
+                    state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                    name.push(alphabet[(state >> 32) as usize % alphabet.len()] as char);
+                }
+                let command = format!("/{name}");
+                assert!(is_command(&command));
+                for commit in [false, true] {
+                    let mut tracker = super::tests::command();
+                    tracker.invalidate();
+                    let mut layout = SystemLayout::Ukrainian;
+                    for (index, c) in command.chars().enumerate() {
+                        assert!(
+                            tracker.observe(event(c), Some(layout), &mapping),
+                            "{command} at {index} ({c})"
+                        );
+                        if commit && index == 1 {
+                            assert_eq!(tracker.correction(&[]).unwrap().replacement, command[..2]);
+                            tracker.committed();
+                            layout = SystemLayout::English;
+                        }
+                    }
+                    if commit {
+                        assert!(tracker.correction(&[]).is_none());
+                    } else {
+                        assert_eq!(tracker.correction(&[]).unwrap().replacement, command);
+                    }
+                    for _ in 0..command.len() {
+                        key(&mut tracker, Keycode::Backspace, layout);
+                    }
+                    key(&mut tracker, Keycode::Slash, SystemLayout::Ukrainian);
+                    key(&mut tracker, Keycode::C, SystemLayout::Ukrainian);
+                    assert_eq!(tracker.correction(&[]).unwrap().expected_source, ".с");
+                    checked += 1;
+                }
+            }
+        }
+        println!("{checked} generated command sequences with commit/reset/backspace");
     }
 }

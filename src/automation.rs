@@ -31,6 +31,17 @@ pub(crate) use input_guard::modifiers_released;
 #[cfg(target_os = "macos")]
 pub(crate) use pipeline::{ConversionTask, Progress, Request};
 
+#[cfg(test)]
+pub(crate) fn terminal_plan_counts_for_test(
+    source: &str,
+    replacement: &str,
+    mapping: Option<&[(char, char)]>,
+) -> Option<(usize, usize)> {
+    let forward = terminal_typing::plan_with_mapping(source, replacement, mapping)?;
+    let undo = terminal_typing::plan_undo_with_mapping(replacement, source, mapping)?;
+    Some((forward.backspaces, undo.backspaces))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionOutcome {
     Converted {

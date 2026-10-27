@@ -156,7 +156,7 @@ if let sourceID = plan["source"] as? String {
     guard let source = list.first, TISSelectInputSource(source) == noErr else { exit(2) }
     pump(160)
 }
-let codes: [Character: CGKeyCode] = ["a":0,"b":11,"c":8,"d":2,"e":14,"f":3,"g":5,"h":4,"i":34,"j":38,"k":40,"l":37,"m":46,"n":45,"o":31,"p":35,"q":12,"r":15,"s":1,"t":17,"u":32,"v":9,"w":13,"x":7,"y":16,"z":6,"'":39,"[":33,"]":30,";":41,",":43,".":47,"/":44," ":49]
+let codes: [Character: CGKeyCode] = ["a":0,"b":11,"c":8,"d":2,"e":14,"f":3,"g":5,"h":4,"i":34,"j":38,"k":40,"l":37,"m":46,"n":45,"o":31,"p":35,"q":12,"r":15,"s":1,"t":17,"u":32,"v":9,"w":13,"x":7,"y":16,"z":6,"'":39,"[":33,"]":30,";":41,",":43,".":47,"/":44," ":49,"\\":42,"`":50]
 for action in plan["actions"] as? [[String: Any]] ?? [] {
     requireFocus()
     if let wait = action["wait"] as? Int { pump(wait); continue }

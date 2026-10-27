@@ -9,7 +9,7 @@
 
 Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in Rust. It turns text typed on the wrong physical layout into what you meant: `ghbdsn` → `привіт`, `руддщ` → `hello`.
 
-**Release status:** v0.4.0 public preview. **There is no Apple-verified Upyr build yet.** The current macOS preview is ad-hoc signed, not Apple Developer ID signed, and not notarized; Gatekeeper may show "Apple could not verify Upyr is free of malware." Upyr has no automatic update checker, so check GitHub Releases manually for newer or notarized builds. macOS is the primary supported desktop target. Release CI is configured to build and smoke-test Windows and Linux/X11 packages, but those platforms remain preview targets. Upyr follows [Semantic Versioning](#versioning-and-releases); compatibility may change before 1.0.
+**Release status:** v0.4.1 public preview. **There is no Apple-verified Upyr build yet.** The current macOS preview is ad-hoc signed, not Apple Developer ID signed, and not notarized; Gatekeeper may show "Apple could not verify Upyr is free of malware." Upyr has no automatic update checker, so check GitHub Releases manually for newer or notarized builds. macOS is the primary supported desktop target. Release CI is configured to build and smoke-test Windows and Linux/X11 packages, but those platforms remain preview targets. Upyr follows [Semantic Versioning](#versioning-and-releases); compatibility may change before 1.0.
 
 [Download from GitHub Releases](https://github.com/dmytro-yemelianov/upyr/releases) · [Package-manager installs](#package-manager-installs) · [Product page](https://upyr.org/) · [Report an issue](https://github.com/dmytro-yemelianov/upyr/issues/new/choose)
 
@@ -299,13 +299,28 @@ changes. Keep the window unobstructed and avoid typing or clicking during the
 run. Test text, results and an exact app-window screenshot stay in the printed
 temporary directory; the probe leaves Upyr preferences and clipboard intact.
 
+For an isolated, repeatable edge-case run (no GUI input), use:
+
+```sh
+python3 tools/run_terminal_edge_tests.py
+```
+
+The offline runner uses cached Cargo dependencies and writes a JSON report and
+full log under `target/`. It checks the curated terminal corpus against portable
+and frozen macOS keyboard maps, generated slash-command editing sequences,
+control/format characters, punctuation, replacement and undo. On macOS, a
+separate main-thread check reads the real installed layout map without switching
+input sources. The live Superset probe above is optional and opens its own tab.
+
 `slash_command_apps` additionally opts an interface into English `/commands`.
 At the start of a freshly tracked input line, `.сщььфтв` becomes `/command`,
 including the leading slash. Correction starts as soon as the prefix has a
 letter (`.с` → `/c`), so command menus can open before Space. Custom names,
 digits, hyphens and underscores work without dictionary entries. Upyr never
-submits a command. Navigation, clicks and paste invalidate the line boundary;
-a subsequent Return starts a fresh line. Existing terminal history is not read.
+submits a command. Navigation, clicks and shortcuts discard the old tracked
+span. A newly typed slash prefix can then start again without an extra Return;
+only that fresh prefix is replaced. Known inline prose and pasted text are not
+reinterpreted. Existing terminal history is not read.
 
 The macOS Feedback settings include an embedded flag preview and a layout
 selector. **All Country Flags…** opens a searchable picker of all 259 bundled

@@ -7,6 +7,14 @@ pub(super) struct Plan<'a> {
 }
 
 pub(super) fn plan<'a>(expected: &str, replacement: &'a str) -> Option<Plan<'a>> {
+    plan_with_mapping(expected, replacement, None)
+}
+
+pub(super) fn plan_with_mapping<'a>(
+    expected: &str,
+    replacement: &'a str,
+    mapping: Option<&[(char, char)]>,
+) -> Option<Plan<'a>> {
     // Command prefixes are corrected before Space so command menus can open.
     // This path accepts only the bounded, tracked single-token namespace.
     #[cfg(any(target_os = "macos", test))]
@@ -24,6 +32,37 @@ pub(super) fn plan<'a>(expected: &str, replacement: &'a str) -> Option<Plan<'a>>
     }
     let source_word = expected.strip_suffix(' ')?;
     let target_word = replacement.strip_suffix(' ')?;
+    if source_word.chars().count() > 64 || target_word.chars().count() > 64 {
+        return None;
+    }
+    // A trailing separator must already be present, either literally or at the
+    // same physical key in the other layout. Never introduce a new separator.
+    let mut source_body = source_word;
+    let mut target_body = target_word;
+    let fallback;
+    let mapping = match mapping {
+        Some(mapping) => mapping,
+        None => {
+            fallback = upyr_core::default_physical_mapping();
+            &fallback
+        }
+    };
+    while let Some(delimiter) = target_body
+        .chars()
+        .last()
+        .filter(|c| matches!(c, ',' | '.' | '!' | '?' | ':' | ';' | '…'))
+    {
+        let source = source_body.chars().last()?;
+        if source != delimiter
+            && !mapping.iter().any(|(a, b)| {
+                (*a == source && *b == delimiter) || (*b == source && *a == delimiter)
+            })
+        {
+            return None;
+        }
+        source_body = source_body.strip_suffix(source)?;
+        target_body = target_body.strip_suffix(delimiter)?;
+    }
     let word = |text: &str, physical_punctuation: bool| {
         !text.is_empty()
             && text.chars().count() <= 64
@@ -35,12 +74,12 @@ pub(super) fn plan<'a>(expected: &str, replacement: &'a str) -> Option<Plan<'a>>
                     || (physical_punctuation
                         && matches!(
                             c,
-                            '[' | ']' | ';' | '\\' | ',' | '.' | '/' | '{' | '}' | ':'
+                            '[' | ']' | ';' | '\\' | '`' | ',' | '.' | '/' | '{' | '}' | ':'
                                 | '"' | '|' | '<' | '>' | '?'
                         ))
             })
     };
-    if source_word == target_word || !word(source_word, true) || !word(target_word, false) {
+    if source_word == target_word || !word(source_body, true) || !word(target_body, false) {
         return None;
     }
     Some(Plan {
@@ -51,7 +90,15 @@ pub(super) fn plan<'a>(expected: &str, replacement: &'a str) -> Option<Plan<'a>>
 
 /// Undo only an edit which the forward terminal planner could have produced.
 pub(super) fn plan_undo<'a>(expected: &str, original: &'a str) -> Option<Plan<'a>> {
-    plan(original, expected)?;
+    plan_undo_with_mapping(expected, original, None)
+}
+
+pub(super) fn plan_undo_with_mapping<'a>(
+    expected: &str,
+    original: &'a str,
+    mapping: Option<&[(char, char)]>,
+) -> Option<Plan<'a>> {
+    plan_with_mapping(original, expected, mapping)?;
     Some(Plan {
         backspaces: expected.chars().count(),
         replacement: original,
@@ -181,6 +228,34 @@ pub(super) use native::{Prepared, warm_target};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn control_and_format_characters_cannot_enter_either_side_of_an_edit() {
+        let forbidden = [
+            '\n', '\r', '\t', '\x1b', '\0', '\x08', '\x7f', '\u{200b}', '\u{200d}', '\u{202e}',
+            '\u{2066}', '\u{0301}',
+        ];
+        let mut checked = 0;
+        for control in forbidden {
+            for position in 0..=4 {
+                let mut bad = String::from("word");
+                bad.insert(position, control);
+                bad.push(' ');
+                assert!(plan(&bad, "слово ").is_none(), "{bad:?}");
+                assert!(plan("слово ", &bad).is_none(), "{bad:?}");
+                assert!(plan_undo("слово ", &bad).is_none(), "{bad:?}");
+                checked += 3;
+            }
+        }
+        for delimiter in [',', '.', '!', '?', ':', ';', '…'] {
+            let source = format!("ghbdsn{delimiter} ");
+            let target = format!("привіт{delimiter} ");
+            assert!(plan(&source, &target).is_some());
+            assert!(plan_undo(&target, &source).is_some());
+            assert!(plan("ghbdsn ", &target).is_none());
+        }
+        println!("{checked} control/format injection checks and 7 retained delimiters");
+    }
 
     #[test]
     fn undo_restores_physical_punctuation_and_slash_prefixes_without_submission() {

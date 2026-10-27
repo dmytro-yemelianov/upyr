@@ -9,6 +9,10 @@ pub use upyr_core::{AutoCorrection, AutoDecision};
 
 const MAX_TRACKED_CONTEXT_CHARACTERS: usize = 256;
 
+#[cfg(test)]
+#[path = "auto_correct_edge_tests.rs"]
+mod edge_tests;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AutoKeyEvent {
     pub key: Keycode,
@@ -255,6 +259,28 @@ fn evaluate_terminal_with_mapping(
         .to_lowercase(),
         SystemLayout::Ukrainian => word,
     };
+    // A leading physical punctuation key can be a Ukrainian initial letter.
+    // Keep the normal lexical/model decision, but do not discard a three-letter
+    // word such as `;er` -> `жук` before that evidence can be considered.
+    if policy.min_word_length <= 4
+        && sample.source_layout == SystemLayout::English
+        && sample
+            .physical_word
+            .chars()
+            .next()
+            .zip(intended_word.chars().next())
+            .is_some_and(|(source, target)| {
+                source.is_ascii_punctuation()
+                    && target.is_alphabetic()
+                    && !matches!(target, '\'' | '’' | 'ʼ')
+            })
+        && intended_word.chars().count() >= 3
+        && intended_word
+            .chars()
+            .all(|c| c.is_alphabetic() || matches!(c, '\'' | '’'))
+    {
+        policy.min_word_length = policy.min_word_length.min(3);
+    }
     // Common short words can establish either layout at a sentence boundary.
     // Keep the user's threshold for other tokens and explicit stricter settings.
     if policy.min_word_length <= 4
@@ -526,6 +552,67 @@ mod tests {
             assert_eq!(correction.replacement, expected);
         }
         assert!(failures.is_empty(), "{}", failures.join("; "));
+    }
+
+    #[test]
+    fn terminal_corrects_words_starting_on_punctuation_keys() {
+        let mut failures = Vec::new();
+        for (physical, replacement) in [
+            ("[ez", "хуя"),
+            ("[eq", "хуй"),
+            (";er", "жук"),
+            ("];f", "їжа"),
+            (";jgf", "жопа"),
+            ("[b;f", "хижа"),
+            ("[jxe", "хочу"),
+            ("'yjn", "єнот"),
+            (".yfr", "юнак"),
+            ("\\fyjr", "ґанок"),
+            ("[eqyz", "хуйня"),
+        ] {
+            let sample = terminal_sample(physical, &format!("{physical} "), SystemLayout::English);
+            let decision = evaluate_terminal_with_mapping(&sample, &Config::default(), None);
+            match decision {
+                AutoDecision::Correct(correction) => {
+                    assert_eq!(correction.expected_source, format!("{physical} "));
+                    assert_eq!(correction.replacement, format!("{replacement} "));
+                }
+                _ => failures.push(format!("{physical}: {decision:?}")),
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("; "));
+    }
+
+    #[test]
+    fn leading_punctuation_keeps_technical_tokens_exceptions_and_strict_limits() {
+        for physical in [
+            ".env", ".git", "[id", "[raw", "[foo", "[bar", ";ls", "[x]", "/tmp", "./a", "\\n",
+        ] {
+            let sample = terminal_sample(physical, &format!("{physical} "), SystemLayout::English);
+            assert!(
+                !matches!(
+                    evaluate_terminal_with_mapping(&sample, &Config::default(), None),
+                    AutoDecision::Correct(_)
+                ),
+                "{physical}"
+            );
+        }
+        let sample = terminal_sample("[ez", "[ez ", SystemLayout::English);
+        for config in [
+            Config {
+                auto_correct_min_word_length: 5,
+                ..Config::default()
+            },
+            Config {
+                auto_correct_exceptions: vec!["[ez".to_owned()],
+                ..Config::default()
+            },
+        ] {
+            assert!(!matches!(
+                evaluate_terminal_with_mapping(&sample, &config, None),
+                AutoDecision::Correct(_)
+            ));
+        }
     }
 
     #[test]

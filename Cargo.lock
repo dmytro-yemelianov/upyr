@@ -3541,7 +3541,7 @@ checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
 
 [[package]]
 name = "upyr"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3576,18 +3576,18 @@ dependencies = [
 
 [[package]]
 name = "upyr-audio"
-version = "0.4.0"
+version = "0.4.1"
 
 [[package]]
 name = "upyr-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "upyr-wasm"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "js-sys",
  "serde",
