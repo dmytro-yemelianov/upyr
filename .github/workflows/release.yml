@@ -19,9 +19,7 @@ jobs:
     timeout-minutes: 40
     runs-on: ubuntu-latest
     permissions:
-      checks: write
       contents: read
-      issues: write
     steps:
       - name: Check out source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -38,15 +36,19 @@ jobs:
       - name: Install validation dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev zstd
+          sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev zstd shellcheck
       - name: Verify codebase graph artifact
         run: python3 tools/check_codebase_graph.py
+      - name: Test graph repository identity checks
+        run: python3 -m unittest tools.test_check_codebase_graph
       - name: Verify release version synchronization
         run: python3 tools/check_version_sync.py
       - name: Verify privacy architecture
         run: python3 tools/check_privacy.py
       - name: Check formatting
         run: cargo fmt --all -- --check
+      - name: Check packaging shell scripts
+        run: shellcheck packaging/version.sh packaging/macos/*.sh packaging/linux/*.sh tools/*.sh
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - name: Run workspace tests

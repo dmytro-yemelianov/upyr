@@ -1,3 +1,7 @@
+#[cfg(any(target_os = "macos", test))]
+pub(crate) mod globe_flags;
+#[cfg(target_os = "macos")]
+pub(crate) mod globe_indicator;
 mod sound;
 
 use anyhow::{Result, bail};
@@ -5,7 +9,7 @@ use tracing::debug;
 use upyr_audio::KeyCue;
 
 use crate::{
-    config::{Config, SoundEvent, SoundSettings},
+    config::{Config, IndicatorStyle, SoundEvent, SoundSettings},
     system_layout::SystemLayout,
 };
 
@@ -17,7 +21,12 @@ pub fn preview_sound(event: SoundEvent, settings: &SoundSettings) -> Result<()> 
     if !settings.event_enabled(event) {
         bail!("{} sound is disabled or its volume is zero", event.label());
     }
-    sound::play_event(event, settings.pack, settings.volume_percent)
+    sound::play_event(
+        event,
+        settings.pack,
+        settings.volume_percent,
+        settings.headphone_volume_percent,
+    )
 }
 
 /// Previews the selected keyboard pack without requiring the live monitor to
@@ -26,7 +35,13 @@ pub fn preview_key_sound(cue: KeyCue, settings: &SoundSettings) -> Result<()> {
     if !settings.key_clicks_enabled() {
         bail!("keyboard sounds are disabled or their volume is zero");
     }
-    sound::play_key(cue, settings.pack, settings.volume_percent, true)
+    sound::play_key(
+        cue,
+        settings.pack,
+        settings.volume_percent,
+        settings.headphone_volume_percent,
+        true,
+    )
 }
 
 /// Plays the configured cue for an application event.
@@ -38,8 +53,16 @@ pub fn play_sound_event(event: SoundEvent, config: &Config) -> bool {
         return false;
     }
 
-    match sound::play_event(event, config.sounds.pack, config.sounds.volume_percent) {
-        Ok(()) => true,
+    match sound::play_event(
+        event,
+        config.sounds.pack,
+        config.sounds.volume_percent,
+        config.sounds.headphone_volume_percent,
+    ) {
+        Ok(()) => {
+            debug!(?event, "sound feedback queued");
+            true
+        }
         Err(error) => {
             debug!(?event, %error, "sound feedback unavailable");
             false
@@ -51,7 +74,13 @@ pub fn play_key_sound(cue: KeyCue, config: &Config) -> bool {
     if !config.sounds.key_clicks_enabled() {
         return false;
     }
-    match sound::play_key(cue, config.sounds.pack, config.sounds.volume_percent, false) {
+    match sound::play_key(
+        cue,
+        config.sounds.pack,
+        config.sounds.volume_percent,
+        config.sounds.headphone_volume_percent,
+        false,
+    ) {
         Ok(()) => true,
         Err(error) => {
             debug!(?cue, %error, "keyboard sound feedback unavailable");
@@ -76,18 +105,57 @@ fn sound_pack_needs_prewarm(settings: &SoundSettings) -> bool {
 /// Shows the enabled visual feedback for a confirmed OS input-source change.
 /// Sound dispatch stays separate so each action can produce at most one cue.
 pub fn layout_switched(layout: SystemLayout, config: &Config) -> bool {
-    config.show_layout_indicator && platform::show_indicator(layout)
+    #[cfg(target_os = "macos")]
+    if config.show_layout_indicator && config.indicator_style == IndicatorStyle::Flag {
+        return globe_indicator::show(None, None, config);
+    }
+    config.show_layout_indicator && platform::show_indicator(layout, config.indicator_style)
+}
+
+#[cfg(target_os = "macos")]
+pub fn input_source_switched(
+    source: &crate::system_layout::ActiveInputSource,
+    config: &Config,
+) -> bool {
+    if config.show_layout_indicator && config.indicator_style == IndicatorStyle::Flag {
+        return globe_indicator::show(Some(&source.source_id), None, config);
+    }
+    config.show_layout_indicator && platform::show_text(&source.source_name)
+}
+
+#[cfg(target_os = "macos")]
+pub fn globe_switched(
+    previous: Option<&str>,
+    source: &crate::system_layout::ActiveInputSource,
+    config: &Config,
+) -> bool {
+    if !config.show_layout_indicator {
+        return false;
+    }
+    if config.indicator_style == IndicatorStyle::Flag {
+        globe_indicator::show(Some(&source.source_id), previous, config)
+    } else if let Some(layout) = source.layout {
+        platform::show_indicator(layout, config.indicator_style)
+    } else {
+        input_source_switched(source, config)
+    }
 }
 
 pub fn hide_layout_indicator() {
+    #[cfg(target_os = "macos")]
+    globe_indicator::hide();
     platform::hide_indicator();
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux", test))]
-fn indicator_text(layout: SystemLayout) -> &'static str {
-    match layout {
-        SystemLayout::English => "EN  🇬🇧",
-        SystemLayout::Ukrainian => "UK  🇺🇦",
+pub(crate) fn indicator_text(layout: SystemLayout, style: IndicatorStyle) -> &'static str {
+    match (layout, style) {
+        (SystemLayout::English, IndicatorStyle::Letters) => "EN",
+        (SystemLayout::English, IndicatorStyle::Flag) => "🇬🇧",
+        (SystemLayout::English, IndicatorStyle::Both) => "EN  🇬🇧",
+        (SystemLayout::Ukrainian, IndicatorStyle::Letters) => "UK",
+        (SystemLayout::Ukrainian, IndicatorStyle::Flag) => "🇺🇦",
+        (SystemLayout::Ukrainian, IndicatorStyle::Both) => "UK  🇺🇦",
     }
 }
 
@@ -103,7 +171,7 @@ mod platform {
     };
     use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 
-    use super::{SystemLayout, indicator_text};
+    use super::{IndicatorStyle, SystemLayout, indicator_text};
 
     struct Indicator {
         panel: Retained<NSPanel>,
@@ -114,15 +182,17 @@ mod platform {
         static INDICATOR: RefCell<Option<Indicator>> = const { RefCell::new(None) };
     }
 
-    pub fn show_indicator(layout: SystemLayout) -> bool {
+    pub fn show_indicator(layout: SystemLayout, style: IndicatorStyle) -> bool {
+        show_text(indicator_text(layout, style))
+    }
+
+    pub fn show_text(text: &str) -> bool {
         let Some(main_thread) = MainThreadMarker::new() else {
             return false;
         };
         INDICATOR.with_borrow_mut(|indicator| {
             let indicator = indicator.get_or_insert_with(|| make_indicator(main_thread));
-            indicator
-                .label
-                .setStringValue(&NSString::from_str(indicator_text(layout)));
+            indicator.label.setStringValue(&NSString::from_str(text));
             let pointer = NSEvent::mouseLocation();
             indicator
                 .panel
@@ -197,14 +267,14 @@ mod platform {
         },
     };
 
-    use super::{SystemLayout, indicator_text};
+    use super::{IndicatorStyle, SystemLayout, indicator_text};
 
     thread_local! {
         static INDICATOR: Cell<HWND> = const { Cell::new(ptr::null_mut()) };
     }
 
-    pub fn show_indicator(layout: SystemLayout) -> bool {
-        let text = wide(indicator_text(layout));
+    pub fn show_indicator(layout: SystemLayout, style: IndicatorStyle) -> bool {
+        let text = wide(indicator_text(layout, style));
         let class = wide("STATIC");
         let mut pointer = POINT { x: 0, y: 0 };
         unsafe {
@@ -283,10 +353,10 @@ mod platform {
         zvariant::OwnedValue,
     };
 
-    use super::{SystemLayout, indicator_text};
+    use super::{IndicatorStyle, SystemLayout, indicator_text};
 
-    pub fn show_indicator(layout: SystemLayout) -> bool {
-        if let Err(error) = show_notification(indicator_text(layout)) {
+    pub fn show_indicator(layout: SystemLayout, style: IndicatorStyle) -> bool {
+        if let Err(error) = show_notification(indicator_text(layout, style)) {
             tracing::debug!(%error, "could not show layout notification");
             false
         } else {
@@ -322,12 +392,17 @@ mod platform {
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 mod platform {
-    use super::SystemLayout;
+    use super::{IndicatorStyle, SystemLayout};
 
-    pub fn show_indicator(_layout: SystemLayout) -> bool {
+    pub fn show_indicator(_layout: SystemLayout, _style: IndicatorStyle) -> bool {
         false
     }
     pub fn hide_indicator() {}
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn stop_rerouted_audio(generation: u64) {
+    sound::stop_before(generation);
 }
 
 #[cfg(test)]
@@ -335,9 +410,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn indicator_uses_short_language_labels_and_flags() {
-        assert_eq!(indicator_text(SystemLayout::English), "EN  🇬🇧");
-        assert_eq!(indicator_text(SystemLayout::Ukrainian), "UK  🇺🇦");
+    fn indicator_style_selects_letters_flag_or_both() {
+        assert_eq!(
+            indicator_text(SystemLayout::English, IndicatorStyle::Letters),
+            "EN"
+        );
+        assert_eq!(
+            indicator_text(SystemLayout::English, IndicatorStyle::Flag),
+            "🇬🇧"
+        );
+        assert_eq!(
+            indicator_text(SystemLayout::English, IndicatorStyle::Both),
+            "EN  🇬🇧"
+        );
+        assert_eq!(
+            indicator_text(SystemLayout::Ukrainian, IndicatorStyle::Letters),
+            "UK"
+        );
+        assert_eq!(
+            indicator_text(SystemLayout::Ukrainian, IndicatorStyle::Flag),
+            "🇺🇦"
+        );
+        assert_eq!(
+            indicator_text(SystemLayout::Ukrainian, IndicatorStyle::Both),
+            "UK  🇺🇦"
+        );
     }
 
     #[test]

@@ -3,25 +3,37 @@ use std::{
     sync::{
         Arc, Mutex, OnceLock,
         atomic::{AtomicU8, AtomicU64, Ordering},
-        mpsc,
     },
+};
+
+use anyhow::Result;
+#[cfg(not(target_os = "macos"))]
+use anyhow::{Context, bail};
+#[cfg(not(target_os = "macos"))]
+use std::{
+    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
 
-use anyhow::{Context, Result, bail};
+#[cfg(target_os = "macos")]
+mod macos;
 use device_query::Keycode;
 #[cfg(target_os = "macos")]
 use device_query::{DeviceQuery, DeviceState};
 use rdev::{EventType, Key};
+#[cfg(not(target_os = "macos"))]
 use tracing::error;
 use upyr_audio::KeyCue;
 
 use crate::auto_correct::{AutoKeyEvent, AutoWordTracker};
 
+#[cfg(not(target_os = "macos"))]
 const START_TIMEOUT: Duration = Duration::from_millis(250);
+#[cfg(not(target_os = "macos"))]
 const START_POLL_INTERVAL: Duration = Duration::from_millis(2);
 const LISTENER_IDLE: u8 = 0;
+#[cfg(not(target_os = "macos"))]
 const LISTENER_STARTING: u8 = 1;
 const LISTENER_RUNNING: u8 = 2;
 const LISTENER_FAILED: u8 = 3;
@@ -32,6 +44,15 @@ const MISSING_RIGHT_OPTION: u8 = 1 << 3;
 const MISSING_LEFT_META: u8 = 1 << 4;
 const MISSING_RIGHT_META: u8 = 1 << 5;
 const MAX_DEFERRED_TEXT_EVENTS: usize = 128;
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ActivityEvent {
+    Pointer,
+    Key { code: u16, flags: usize },
+}
+#[cfg(target_os = "macos")]
+type ActivityCallback = Box<dyn FnMut(ActivityEvent) + Send + 'static>;
 
 type KeyCallback = Box<dyn FnMut(AutoKeyEvent) + Send + 'static>;
 type KeySoundCallback = Box<dyn FnMut(KeyCue) + Send + 'static>;
@@ -45,6 +66,8 @@ struct Subscription {
     deferred_overflowed: bool,
     on_key_down: KeyCallback,
     on_key_sound: KeySoundCallback,
+    #[cfg(target_os = "macos")]
+    on_activity: Option<ActivityCallback>,
 }
 
 struct ListenerState {
@@ -441,6 +464,8 @@ impl AutoCorrectMonitor {
             auto_correct_enabled,
             key_sounds_enabled,
             suspended: false,
+            #[cfg(target_os = "macos")]
+            on_activity: None,
             deferred_text_events: VecDeque::new(),
             deferred_overflowed: false,
             on_key_down: Box::new(on_key_down),
@@ -456,6 +481,15 @@ impl AutoCorrectMonitor {
             state,
             subscription_id,
         }))
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn set_activity_handler(&self, callback: impl FnMut(ActivityEvent) + Send + 'static) {
+        if let Ok(mut slot) = self.state.subscription.lock() {
+            if let Some(subscription) = slot.as_mut().filter(|s| s.id == self.subscription_id) {
+                subscription.on_activity = Some(Box::new(callback));
+            }
+        }
     }
 
     pub fn set_suspended(&self, suspended: bool) {
@@ -505,6 +539,21 @@ impl Drop for AutoCorrectMonitor {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn ensure_listener(state: &Arc<ListenerState>) -> Result<()> {
+    let result = macos::start(Arc::clone(state));
+    state.status.store(
+        if result.is_ok() {
+            LISTENER_RUNNING
+        } else {
+            LISTENER_FAILED
+        },
+        Ordering::Release,
+    );
+    result
+}
+
+#[cfg(not(target_os = "macos"))]
 fn ensure_listener(state: &Arc<ListenerState>) -> Result<()> {
     let deadline = Instant::now() + START_TIMEOUT;
     loop {
@@ -535,6 +584,7 @@ fn ensure_listener(state: &Arc<ListenerState>) -> Result<()> {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 fn spawn_listener(state: &Arc<ListenerState>) -> Result<()> {
     let (start_tx, start_rx) = mpsc::sync_channel(1);
     let listener_state = Arc::clone(state);
@@ -549,40 +599,12 @@ fn spawn_listener(state: &Arc<ListenerState>) -> Result<()> {
             let mut capture_state = initial_capture_state();
             let callback_state = Arc::clone(&listener_state);
             let result = rdev::listen(move |event| {
-                #[cfg(target_os = "macos")]
-                if capture_state.momentary_modifier_active()
-                    && is_ordinary_key_press(event.event_type)
-                {
-                    if let Some(device) = device_state.as_ref() {
-                        // rdev's first flags-changed event can classify release as
-                        // press when the key predated its event tap. Reconcile only
-                        // while a modifier appears active, keeping normal typing on
-                        // the zero-query fast path.
-                        capture_state.synchronize_momentary_modifiers(
-                            &device.get_keys(),
-                            event.name.as_deref(),
-                        );
-                    }
-                }
-                if let Some(key) = raw_key_down(event.event_type) {
-                    let cue = key_sound_cue(key);
-                    if !capture_state.chord_modifier_active() || cue != KeyCue::Character {
-                        dispatch_key_sound(&callback_state, cue);
-                    }
-                }
-                let captured = capture_state.observe(event.event_type, event.name.as_deref());
-                #[cfg(target_os = "macos")]
-                if matches!(
+                handle_event(
+                    &mut capture_state,
+                    &callback_state,
                     event.event_type,
-                    EventType::KeyRelease(Key::ShiftLeft | Key::ShiftRight)
-                ) {
-                    if let Some(device) = device_state.as_ref() {
-                        capture_state.reconcile_shift_release(&device.get_keys());
-                    }
-                }
-                if let Some(captured) = captured {
-                    dispatch_key(&callback_state, captured);
-                }
+                    event.name.as_deref(),
+                );
             });
 
             listener_state
@@ -891,6 +913,53 @@ fn map_key(key: Key) -> Option<Keycode> {
     })
 }
 
+fn handle_event(
+    capture_state: &mut CaptureState,
+    state: &ListenerState,
+    event_type: EventType,
+    name: Option<&str>,
+    #[cfg(target_os = "macos")] device_state: Option<&DeviceState>,
+) {
+    #[cfg(target_os = "macos")]
+    if capture_state.momentary_modifier_active() && is_ordinary_key_press(event_type) {
+        if let Some(device) = device_state {
+            // rdev's first flags-changed event can classify release as
+            // press when the key predated its event tap. Reconcile only
+            // while a modifier appears active, keeping normal typing on
+            // the zero-query fast path.
+            capture_state.synchronize_momentary_modifiers(&device.get_keys(), name);
+        }
+    }
+    if let Some(key) = raw_key_down(event_type) {
+        let cue = key_sound_cue(key);
+        if !capture_state.chord_modifier_active() || cue != KeyCue::Character {
+            dispatch_key_sound(state, cue);
+        }
+    }
+    let captured = capture_state.observe(event_type, name);
+    #[cfg(target_os = "macos")]
+    if matches!(
+        event_type,
+        EventType::KeyRelease(Key::ShiftLeft | Key::ShiftRight)
+    ) {
+        if let Some(device) = device_state {
+            capture_state.reconcile_shift_release(&device.get_keys());
+        }
+    }
+    if let Some(captured) = captured {
+        dispatch_key(state, captured);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn dispatch_activity(state: &ListenerState, event: ActivityEvent) {
+    if let Ok(mut slot) = state.subscription.lock() {
+        if let Some(callback) = slot.as_mut().and_then(|s| s.on_activity.as_mut()) {
+            callback(event);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -905,6 +974,8 @@ mod tests {
             auto_correct_enabled: true,
             key_sounds_enabled: true,
             suspended: false,
+            #[cfg(target_os = "macos")]
+            on_activity: None,
             deferred_text_events: VecDeque::new(),
             deferred_overflowed: false,
             on_key_down: Box::new(move |event| {
@@ -974,6 +1045,8 @@ mod tests {
             auto_correct_enabled: false,
             key_sounds_enabled: true,
             suspended: false,
+            #[cfg(target_os = "macos")]
+            on_activity: None,
             deferred_text_events: VecDeque::new(),
             deferred_overflowed: false,
             on_key_down: Box::new(|_| {}),
@@ -1094,7 +1167,7 @@ mod tests {
                 }
                 if let Some(sample) = tracker.observe(event) {
                     decision = upyr_core::evaluate(
-                        &sample,
+                        &sample.inner,
                         &upyr_core::AutoCorrectPolicy::default(),
                         None,
                     );

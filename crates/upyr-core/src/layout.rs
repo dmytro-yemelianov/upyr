@@ -155,7 +155,8 @@ pub fn resolve_direction(input: &str, requested: Direction) -> Direction {
 }
 
 fn is_ukrainian_letter(character: char) -> bool {
-    UKRAINIAN_LOWER.contains(character) || UKRAINIAN_UPPER.contains(character)
+    character.is_alphabetic()
+        && (UKRAINIAN_LOWER.contains(character) || UKRAINIAN_UPPER.contains(character))
 }
 
 #[cfg(test)]
@@ -186,6 +187,23 @@ mod tests {
         assert_eq!(
             resolve_direction("руддщ", Direction::Smart),
             Direction::UkrainianToEnglish
+        );
+    }
+
+    #[test]
+    fn punctuation_does_not_outvote_letters_in_smart_mode() {
+        assert_eq!(
+            resolve_direction("a....", Direction::Smart),
+            Direction::EnglishToUkrainian
+        );
+        assert_eq!(convert("a....", Direction::Smart).text, "фюююю");
+        assert_eq!(
+            resolve_direction("ф....", Direction::Smart),
+            Direction::UkrainianToEnglish
+        );
+        assert_eq!(
+            resolve_direction("test,,'₴", Direction::Smart),
+            Direction::EnglishToUkrainian
         );
     }
 

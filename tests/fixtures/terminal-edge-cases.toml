@@ -1,0 +1,601 @@
+# Curated independent expectations. Tests never post input or access the clipboard.
+[[cases]]
+name = "ukrainian-[ez"
+physical = "[ez"
+layout = "english"
+expected = "хуя"
+visible = "[ez"
+
+[[cases]]
+name = "ukrainian-[eq"
+physical = "[eq"
+layout = "english"
+expected = "хуй"
+visible = "[eq"
+
+[[cases]]
+name = "ukrainian-;er"
+physical = ";er"
+layout = "english"
+expected = "жук"
+visible = ";er"
+
+[[cases]]
+name = "ukrainian-];f"
+physical = "];f"
+layout = "english"
+expected = "їжа"
+visible = "];f"
+
+[[cases]]
+name = "ukrainian-;jgf"
+physical = ";jgf"
+layout = "english"
+expected = "жопа"
+visible = ";jgf"
+
+[[cases]]
+name = "ukrainian-[b;f"
+physical = "[b;f"
+layout = "english"
+expected = "хижа"
+visible = "[b;f"
+
+[[cases]]
+name = "ukrainian-[jxe"
+physical = "[jxe"
+layout = "english"
+expected = "хочу"
+visible = "[jxe"
+
+[[cases]]
+name = "ukrainian-'yjn"
+physical = "'yjn"
+layout = "english"
+expected = "єнот"
+visible = "'yjn"
+
+[[cases]]
+name = "ukrainian-.yfr"
+physical = ".yfr"
+layout = "english"
+expected = "юнак"
+visible = ".yfr"
+
+[[cases]]
+name = "ukrainian-[eqyz"
+physical = "[eqyz"
+layout = "english"
+expected = "хуйня"
+visible = "[eqyz"
+
+[[cases]]
+name = "ukrainian-[ks,"
+physical = "[ks,"
+layout = "english"
+expected = "хліб"
+visible = "[ks,"
+
+[[cases]]
+name = "ukrainian-ghbdsn"
+physical = "ghbdsn"
+layout = "english"
+expected = "привіт"
+visible = "ghbdsn"
+
+[[cases]]
+name = "ukrainian-lj,ht"
+physical = "lj,ht"
+layout = "english"
+expected = "добре"
+visible = "lj,ht"
+
+[[cases]]
+name = "ukrainian-hjpevs."
+physical = "hjpevs."
+layout = "english"
+expected = "розумію"
+visible = "hjpevs."
+
+[[cases]]
+name = "ukrainian-nfr"
+physical = "nfr"
+layout = "english"
+expected = "так"
+visible = "nfr"
+
+[[cases]]
+name = "ukrainian-zr"
+physical = "zr"
+layout = "english"
+expected = "як"
+visible = "zr"
+
+[[cases]]
+name = "ukrainian-wtq"
+physical = "wtq"
+layout = "english"
+expected = "цей"
+visible = "wtq"
+
+[[cases]]
+name = "ukrainian-{nj"
+physical = "{nj"
+layout = "english"
+expected = "Хто"
+visible = "{nj"
+
+[[cases]]
+name = "ukrainian-GhbdSn"
+physical = "GhbdSn"
+layout = "english"
+expected = "ПривІт"
+visible = "GhbdSn"
+
+[[cases]]
+name = "preserved-,"
+physical = "ghbdsn,"
+layout = "english"
+expected = "привіт,"
+visible = "ghbdsn,"
+
+[[cases]]
+name = "preserved-."
+physical = "ghbdsn."
+layout = "english"
+expected = "привіт."
+visible = "ghbdsn."
+
+[[cases]]
+name = "preserved-!"
+physical = "ghbdsn!"
+layout = "english"
+expected = "привіт!"
+visible = "ghbdsn!"
+
+[[cases]]
+name = "preserved-?"
+physical = "ghbdsn?"
+layout = "english"
+expected = "привіт,"
+visible = "ghbdsn?"
+
+[[cases]]
+name = "preserved-:"
+physical = "ghbdsn:"
+layout = "english"
+expected = "привіт:"
+visible = "ghbdsn:"
+
+[[cases]]
+name = "preserved-;"
+physical = "ghbdsn;"
+layout = "english"
+expected = "привіт;"
+visible = "ghbdsn;"
+
+[[cases]]
+name = "preserved-…"
+physical = "ghbdsn…"
+layout = "english"
+expected = "привіт…"
+visible = "ghbdsn…"
+
+[[cases]]
+name = "english-hello"
+physical = "hello"
+layout = "ukrainian"
+expected = "hello"
+
+[[cases]]
+name = "english-it's"
+physical = "it's"
+layout = "ukrainian"
+expected = "it's"
+
+[[cases]]
+name = "english-not"
+physical = "not"
+layout = "ukrainian"
+expected = "not"
+
+[[cases]]
+name = "english-so"
+physical = "so"
+layout = "ukrainian"
+expected = "so"
+
+[[cases]]
+name = "english-good"
+physical = "good"
+layout = "ukrainian"
+expected = "good"
+
+[[cases]]
+name = "english-for"
+physical = "for"
+layout = "ukrainian"
+expected = "for"
+
+[[cases]]
+name = "english-the"
+physical = "the"
+layout = "ukrainian"
+expected = "the"
+
+[[cases]]
+name = "english-don't"
+physical = "don't"
+layout = "ukrainian"
+expected = "don't"
+
+[[cases]]
+name = "preserve-hello"
+physical = "hello"
+layout = "english"
+
+[[cases]]
+name = "preserve-fucking"
+physical = "fucking"
+layout = "english"
+
+[[cases]]
+name = "preserve-ones"
+physical = "ones"
+layout = "english"
+
+[[cases]]
+name = "preserve-layout"
+physical = "layout"
+layout = "english"
+
+[[cases]]
+name = "preserve-it's"
+physical = "it's"
+layout = "english"
+
+[[cases]]
+name = "preserve-not"
+physical = "not"
+layout = "english"
+
+[[cases]]
+name = "preserve-so"
+physical = "so"
+layout = "english"
+
+[[cases]]
+name = "preserve-good"
+physical = "good"
+layout = "english"
+
+[[cases]]
+name = "preserve-for"
+physical = "for"
+layout = "english"
+
+[[cases]]
+name = "preserve-the"
+physical = "the"
+layout = "english"
+
+[[cases]]
+name = "preserve-git"
+physical = "git"
+layout = "english"
+
+[[cases]]
+name = "preserve-ls"
+physical = "ls"
+layout = "english"
+
+[[cases]]
+name = "preserve-cd"
+physical = "cd"
+layout = "english"
+
+[[cases]]
+name = "preserve-rm"
+physical = "rm"
+layout = "english"
+
+[[cases]]
+name = "preserve-ps"
+physical = "ps"
+layout = "english"
+
+[[cases]]
+name = "preserve-npm"
+physical = "npm"
+layout = "english"
+
+[[cases]]
+name = "preserve-npx"
+physical = "npx"
+layout = "english"
+
+[[cases]]
+name = "preserve-curl"
+physical = "curl"
+layout = "english"
+
+[[cases]]
+name = "preserve-ssh"
+physical = "ssh"
+layout = "english"
+
+[[cases]]
+name = "preserve-awk"
+physical = "awk"
+layout = "english"
+
+[[cases]]
+name = "preserve-sed"
+physical = "sed"
+layout = "english"
+
+[[cases]]
+name = "preserve-uv"
+physical = "uv"
+layout = "english"
+
+[[cases]]
+name = "preserve-rg"
+physical = "rg"
+layout = "english"
+
+[[cases]]
+name = "preserve-fd"
+physical = "fd"
+layout = "english"
+
+[[cases]]
+name = "preserve-.env"
+physical = ".env"
+layout = "english"
+
+[[cases]]
+name = "preserve-.git"
+physical = ".git"
+layout = "english"
+
+[[cases]]
+name = "preserve-.config"
+physical = ".config"
+layout = "english"
+
+[[cases]]
+name = "preserve-[id"
+physical = "[id"
+layout = "english"
+
+[[cases]]
+name = "preserve-[raw"
+physical = "[raw"
+layout = "english"
+
+[[cases]]
+name = "preserve-[foo"
+physical = "[foo"
+layout = "english"
+
+[[cases]]
+name = "preserve-[bar"
+physical = "[bar"
+layout = "english"
+
+[[cases]]
+name = "preserve-[id]"
+physical = "[id]"
+layout = "english"
+
+[[cases]]
+name = "preserve-;ls"
+physical = ";ls"
+layout = "english"
+
+[[cases]]
+name = "preserve-/tmp"
+physical = "/tmp"
+layout = "english"
+
+[[cases]]
+name = "preserve-./a"
+physical = "./a"
+layout = "english"
+
+[[cases]]
+name = "preserve-../foo"
+physical = "../foo"
+layout = "english"
+
+[[cases]]
+name = "preserve-foo/bar"
+physical = "foo/bar"
+layout = "english"
+
+[[cases]]
+name = "preserve-https://example.com"
+physical = "https://example.com"
+layout = "english"
+
+[[cases]]
+name = "preserve-mail@example.com"
+physical = "mail@example.com"
+layout = "english"
+
+[[cases]]
+name = "preserve-snake_case"
+physical = "snake_case"
+layout = "english"
+
+[[cases]]
+name = "preserve-CamelCase"
+physical = "CamelCase"
+layout = "english"
+
+[[cases]]
+name = "preserve-file.rs"
+physical = "file.rs"
+layout = "english"
+
+[[cases]]
+name = "preserve-a.json"
+physical = "a.json"
+layout = "english"
+
+[[cases]]
+name = "preserve-C:\\Users\\name"
+physical = "C:\\Users\\name"
+layout = "english"
+
+[[cases]]
+name = "preserve-\\n"
+physical = "\\n"
+layout = "english"
+
+[[cases]]
+name = "already-ukrainian-[ez"
+physical = "[ez"
+layout = "ukrainian"
+
+[[cases]]
+name = "already-ukrainian-;er"
+physical = ";er"
+layout = "ukrainian"
+
+[[cases]]
+name = "already-ukrainian-];f"
+physical = "];f"
+layout = "ukrainian"
+
+[[cases]]
+name = "already-ukrainian-'yjn"
+physical = "'yjn"
+layout = "ukrainian"
+
+[[cases]]
+name = "already-ukrainian-.yfr"
+physical = ".yfr"
+layout = "ukrainian"
+
+[[cases]]
+name = "already-ukrainian-ghbdsn"
+physical = "ghbdsn"
+layout = "ukrainian"
+
+[[cases]]
+name = "already-ukrainian-lj,ht"
+physical = "lj,ht"
+layout = "ukrainian"
+
+[[cases]]
+name = "already-ukrainian-nfr"
+physical = "nfr"
+layout = "ukrainian"
+
+[[cases]]
+name = "already-ukrainian-zr"
+physical = "zr"
+layout = "ukrainian"
+
+[[cases]]
+name = "strict-five-[ez"
+physical = "[ez"
+layout = "english"
+minimum = 5
+
+[[cases]]
+name = "strict-five-[eq"
+physical = "[eq"
+layout = "english"
+minimum = 5
+
+[[cases]]
+name = "strict-five-;er"
+physical = ";er"
+layout = "english"
+minimum = 5
+
+[[cases]]
+name = "strict-five-];f"
+physical = "];f"
+layout = "english"
+minimum = 5
+
+[[cases]]
+name = "strict-five-nfr"
+physical = "nfr"
+layout = "english"
+minimum = 5
+
+[[cases]]
+name = "strict-five-zr"
+physical = "zr"
+layout = "english"
+minimum = 5
+
+[[cases]]
+name = "exception"
+physical = "[ez"
+layout = "english"
+exceptions = ["[ez"]
+
+[[cases]]
+name = "portable-ge"
+physical = "\\fyjr"
+layout = "english"
+mapping = "portable"
+expected = "ґанок"
+visible = "\\fyjr"
+
+[[cases]]
+name = "native-ge"
+physical = "`fyjr"
+layout = "english"
+mapping = "macos"
+expected = "ґанок"
+visible = "`fyjr"
+
+[[cases]]
+name = "native-apostrophe"
+physical = "\\fyjr"
+layout = "english"
+mapping = "macos"
+expected = "ʼанок"
+visible = "\\fyjr"
+
+[[cases]]
+name = "repeated-..."
+physical = "ghbdsn..."
+layout = "english"
+expected = "привіт..."
+visible = "ghbdsn..."
+
+[[cases]]
+name = "repeated-?!"
+physical = "ghbdsn?!"
+layout = "english"
+expected = "привіт,!"
+visible = "ghbdsn?!"
+
+[[cases]]
+name = "repeated-!!!"
+physical = "ghbdsn!!!"
+layout = "english"
+expected = "привіт!!!"
+visible = "ghbdsn!!!"
+
+[[cases]]
+name = "repeated-,,"
+physical = "ghbdsn,,"
+layout = "english"
+expected = "привіт,,"
+visible = "ghbdsn,,"
+
+[[cases]]
+name = "known-last-letter-before-punctuation"
+physical = "hjpevs..."
+layout = "english"
+visible = "hjpevs..."
+expected = "розумію.."

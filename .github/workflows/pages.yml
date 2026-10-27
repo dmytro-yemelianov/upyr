@@ -1,10 +1,10 @@
-name: GitHub Pages
+name: Site validation
 
 # Note: "Validate site" is a required status check on main, so it must report a
 # result on every PR. The pull_request trigger is therefore not path-filtered —
 # filtering it left the required check permanently "Expected" and blocked
-# unrelated PRs from merging. The job is fast, and the deploy job stays gated to
-# non-PR pushes, so only the push trigger keeps a path filter.
+# unrelated PRs from merging. This workflow validates the site; Cloudflare
+# deployment is handled by deploy-site.yml. Only pushes keep a path filter.
 
 on:
   push:
@@ -38,7 +38,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pages: read
     steps:
       - name: Check out source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -56,27 +55,3 @@ jobs:
         run: python3 -m unittest tools.test_check_site_content tools.test_check_privacy
       - name: Verify non-tracking site resources
         run: python3 tools/check_privacy.py
-      - name: Configure Pages
-        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-        with:
-          path: site
-          retention-days: 1
-
-  deploy:
-    name: Deploy site
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    timeout-minutes: 10
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      pages: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

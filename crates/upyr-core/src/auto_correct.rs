@@ -151,6 +151,13 @@ pub struct PhysicalKeyEvent {
     pub shifted: bool,
 }
 
+/// Returns the layout-independent ASCII character represented by a physical
+/// writing key. This is useful for platform adapters that need to preserve
+/// layout transitions while still feeding a single physical context to Upyr.
+pub fn physical_character(event: PhysicalKeyEvent) -> Option<char> {
+    physical_english_character(event.key, event.shifted)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WordSample {
     physical_word: String,
@@ -346,9 +353,21 @@ fn evaluate_with_scorer<S: CandidateScorer + ?Sized>(
     // punctuation-preserving interpretation first, then fall back to the
     // ordinary whole-token conversion. This keeps `[ks,` -> `хліб`, while
     // allowing `Jkmuf,` -> `Ольга,`.
+    let full_word_known = known(
+        candidates.target_language,
+        &normalize_word(&candidates.target_word),
+    );
     if let Some(preserved) = Candidates::preserving_terminal_delimiter(sample, &candidates, mapping)
     {
-        if terminal_delimiter_is_likely(&preserved, policy, scorer) {
+        // Do not turn a known whole word's last letter into punctuation just
+        // because its shorter stem also looks plausible to the language model.
+        let preserved_word_known = known(
+            preserved.target_language,
+            &normalize_word(&preserved.target_word),
+        );
+        if (!full_word_known || preserved_word_known)
+            && terminal_delimiter_is_likely(&preserved, policy, scorer)
+        {
             if let AutoDecision::Correct(correction) =
                 evaluate_candidates(&preserved, policy, scorer)
             {
@@ -531,13 +550,30 @@ impl Candidates {
         {
             return None;
         }
-        let delimiter = full.source_word.chars().last()?;
-        if !is_terminal_delimiter(delimiter) {
+        let stem = full.source_word.trim_end_matches(is_terminal_delimiter);
+        let mut delimiters = &full.source_word[stem.len()..];
+        if delimiters.is_empty() {
             return None;
         }
-
+        // Keep the longest known word before a run: its last physical period
+        // can itself be a Ukrainian letter (`hjpevs...` -> `розумію..`).
+        let mut probe = sample.physical_word.clone();
+        for count in 1..=delimiters.chars().count() {
+            probe.pop()?;
+            let target = match sample.source_layout {
+                InputLayout::English => to_ukrainian(&probe, mapping),
+                InputLayout::Ukrainian => probe.clone(),
+            };
+            if known(full.target_language, &normalize_word(&target)) {
+                let start = full.source_word.char_indices().rev().nth(count - 1)?.0;
+                delimiters = &full.source_word[start..];
+                break;
+            }
+        }
         let mut physical_word = sample.physical_word.clone();
-        physical_word.pop()?;
+        for _ in delimiters.chars() {
+            physical_word.pop()?;
+        }
         if physical_word.is_empty() {
             return None;
         }
@@ -559,8 +595,8 @@ impl Candidates {
             }
             InputLayout::Ukrainian => format!("{physical_prefix}{physical_word}"),
         };
-        let target_word = format!("{physical_target_word}{delimiter}");
-        let target_context = format!("{physical_target_context}{delimiter}{boundary}");
+        let target_word = format!("{physical_target_word}{delimiters}");
+        let target_context = format!("{physical_target_context}{delimiters}{boundary}");
 
         Some(Self {
             source_word: full.source_word.clone(),
@@ -1258,6 +1294,19 @@ mod tests {
     fn preserves_terminal_punctuation_when_it_is_more_likely_than_a_layout_letter() {
         for (physical, layout, expected_source, expected_replacement) in [
             ("Jkmuf,", InputLayout::English, "Jkmuf, ", "Ольга, "),
+            (
+                "ghbdsn...",
+                InputLayout::English,
+                "ghbdsn... ",
+                "привіт... ",
+            ),
+            ("ghbdsn?", InputLayout::English, "ghbdsn? ", "привіт, "),
+            (
+                "hjpevs...",
+                InputLayout::English,
+                "hjpevs... ",
+                "розумію.. ",
+            ),
             ("Jkmuf.", InputLayout::English, "Jkmuf. ", "Ольга. "),
             ("Olha?", InputLayout::Ukrainian, "Щдрф, ", "Olha? "),
             ("Olha/", InputLayout::Ukrainian, "Щдрф. ", "Olha. "),
@@ -1406,6 +1455,17 @@ mod tests {
 
         assert_eq!(correction.expected_source, ",j ]] ';b [e.v,f ,'. ,'. ");
         assert_eq!(correction.replacement, "бо її єжи хуюмба бєю бєю ");
+    }
+
+    #[test]
+    fn later_confidence_resolves_a_consistent_ambiguous_prefix() {
+        let correction = correction(evaluate(
+            &context_sample("dvsnb", "nb dvsnb ", InputLayout::English),
+            &AutoCorrectPolicy::default(),
+        ));
+
+        assert_eq!(correction.expected_source, "nb dvsnb ");
+        assert_eq!(correction.replacement, "ти вміти ");
     }
 
     #[test]

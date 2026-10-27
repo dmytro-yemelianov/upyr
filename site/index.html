@@ -5,8 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#11151c">
     <meta name="color-scheme" content="dark">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'none'; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
-    <meta name="description" content="Upyr is a private, native English–Ukrainian keyboard-layout fixer for macOS, built in Rust and powered by a compact local character n-gram model.">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; font-src 'none'; connect-src 'self'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+    >
+    <meta
+      name="description"
+      content="Upyr is a private, native English–Ukrainian keyboard-layout fixer for macOS, built in Rust and powered by a compact local character n-gram model."
+    >
     <meta name="robots" content="index,follow">
     <meta property="og:type" content="website">
     <meta property="og:title" content="Upyr — type what you meant">
@@ -16,6 +22,8 @@
     <link rel="icon" href="favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="styles.css">
     <script src="app.js" defer></script>
+    <script src="nav-toggle.js" defer></script>
+    <script type="module" src="demo.js"></script>
   </head>
   <body>
     <a class="skip-link" href="#main" data-i18n="skip">Skip to content</a>
@@ -26,11 +34,12 @@
           <img src="favicon.svg" width="36" height="36" alt="">
           <span>Upyr</span>
         </a>
-        <nav class="nav" aria-label="Main navigation" data-i18n-aria="navLabel">
-          <a href="index.html" data-i18n="navHome" aria-current="page" class="is-current">Home</a>
+        <nav class="nav" id="primary-nav" aria-label="Main navigation" data-i18n-aria="navLabel">
+          <a href="#why" data-i18n="navWhy">Why Upyr</a>
           <a href="how.html" data-i18n="navHow">How it works</a>
           <a href="features.html" data-i18n="navFeatures">Features</a>
           <a href="privacy.html" data-i18n="navPrivacy">Privacy</a>
+          <a href="releases.html" data-i18n="navReleases">Releases</a>
           <a href="articles/reverse-engineering-punto-switcher.html" data-i18n="navStory">The making-of</a>
         </nav>
         <div class="header-actions">
@@ -43,6 +52,14 @@
               <path d="M12 .7a11.5 11.5 0 0 0-3.6 22.4c.6.1.8-.2.8-.6v-2.2c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.6-.3-5.4-1.3-5.4-5.7 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.2 1.2a11 11 0 0 1 5.8 0c2.2-1.5 3.2-1.2 3.2-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.9 1.2 3.1 0 4.4-2.8 5.4-5.4 5.7.4.4.8 1.1.8 2.2v3.3c0 .4.2.7.8.6A11.5 11.5 0 0 0 12 .7Z"/>
             </svg>
           </a>
+          <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="primary-nav" aria-label="Toggle navigation" data-i18n-aria="navToggleLabel">
+            <svg class="icon-menu" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 6h16M4 12h16M4 18h16"/>
+            </svg>
+            <svg class="icon-close" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M6 6l12 12M18 6 6 18"/>
+            </svg>
+          </button>
         </div>
       </div>
     </header>
@@ -55,7 +72,7 @@
           <div class="hero-copy">
             <div class="eyebrow">
               <span class="status-dot" aria-hidden="true"></span>
-              <span data-i18n="heroEyebrow">Public preview · v0.3.0</span>
+              <span data-i18n="heroEyebrow">Public preview · v0.4.1</span>
             </div>
             <h1 data-i18n="heroTitle">Your keyboard can be wrong. Your words don’t have to be.</h1>
             <p class="hero-lead" data-i18n="heroLead">
@@ -113,6 +130,48 @@
           <div><span class="trust-icon" aria-hidden="true">◉</span><span data-i18n="trustAccount">No account</span></div>
           <div><span class="trust-icon" aria-hidden="true">◌</span><span data-i18n="trustTracking">No telemetry</span></div>
           <div><span class="trust-icon" aria-hidden="true">◇</span><span data-i18n="trustSource">Open source · MIT</span></div>
+        </div>
+      </section>
+
+      <section class="section section-panel" id="try-it">
+        <div class="shell">
+          <div class="section-intro section-intro-wide">
+            <p class="kicker">Try it live</p>
+            <h2>An on-screen Apple keyboard, running real WebAssembly</h2>
+            <p>This runs the same Rust decision engine as the desktop app, compiled to WebAssembly and executed entirely in this page. Nothing typed here leaves your browser.</p>
+          </div>
+
+          <div class="live-demo" id="live-demo">
+            <div class="live-demo-controls">
+              <div class="layout-toggle" role="group" aria-label="Keyboard layout">
+                <button type="button" class="layout-toggle-button" data-manual-layout="english">EN</button>
+                <button type="button" class="layout-toggle-button" data-manual-layout="ukrainian">УК</button>
+                <button type="button" class="layout-toggle-button layout-toggle-auto" data-role="auto-toggle">Auto-follow correction</button>
+              </div>
+              <button type="button" class="text-link demo-intense-button" data-role="intense-toggle">
+                <span aria-hidden="true">▶</span> Play intense switching demo
+              </button>
+            </div>
+
+            <div class="live-demo-keyboard-wrap">
+              <div class="live-demo-layout-badge" data-role="layout-badge" aria-hidden="true">EN</div>
+              <div class="keyboard" data-role="keyboard"></div>
+            </div>
+
+            <div class="live-demo-fields">
+              <div class="live-demo-field-group">
+                <label for="live-demo-field">Type here — click the keys above, or use your real keyboard</label>
+                <textarea id="live-demo-field" data-role="demo-field" rows="3" spellcheck="false" autocomplete="off"></textarea>
+                <p class="live-demo-status" data-role="status" aria-live="polite"></p>
+              </div>
+
+              <div class="live-demo-field-group live-demo-excluded">
+                <label for="live-demo-password">Password field — Upyr never attaches to this</label>
+                <input id="live-demo-password" data-role="password-field" type="password" autocomplete="current-password" placeholder="Try typing here">
+                <p class="live-demo-status" data-role="excluded-note"></p>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -182,7 +241,7 @@
         </div>
         <div class="footer-links">
           <a href="https://github.com/dmytro-yemelianov/upyr" data-i18n="footerSource">Source</a>
-          <a href="https://github.com/dmytro-yemelianov/upyr/releases" data-i18n="footerReleases">Releases</a>
+          <a href="releases.html" data-i18n="footerReleases">Releases</a>
           <a href="https://github.com/dmytro-yemelianov/upyr/issues" data-i18n="footerIssues">Issues</a>
           <a href="https://github.com/dmytro-yemelianov/upyr/security" data-i18n="footerSecurity">Security</a>
           <a href="articles/reverse-engineering-punto-switcher.html" data-i18n="footerStory">The making-of</a>

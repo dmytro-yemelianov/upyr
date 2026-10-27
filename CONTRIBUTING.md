@@ -43,10 +43,15 @@ cargo test --workspace --all-targets --locked
 cargo audit
 python3 tools/check_privacy.py
 python3 tools/check_site_content.py
-python3 -m unittest tools.test_check_site_content tools.test_check_privacy
+python3 -m unittest tools.test_check_site_content tools.test_check_privacy tools.test_check_codebase_graph
 python3 tools/check_version_sync.py
 python3 tools/check_codebase_graph.py
 ```
+
+Index this repository as `upyr` when exporting its codebase-memory graph. After
+exporting, run `python3 tools/normalize_codebase_graph.py`, then the graph check.
+The normalizer escapes raw JSON control characters emitted by the indexer;
+validation also checks project identity and the presence of Upyr's source files.
 
 For WASM changes, also run the build, Node smoke test, and size check documented in
 `crates/upyr-wasm/README.md`. Platform-specific changes should be tested on the

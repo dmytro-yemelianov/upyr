@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 VERSION=$(sh "$ROOT/packaging/version.sh")
 DIST="$ROOT/dist"
 APP="$DIST/Upyr.app"
@@ -32,8 +32,10 @@ require_command() {
 verify_universal_binary() {
     binary=$1
     test -x "$binary" || fail "missing executable: $binary"
-    lipo "$binary" -verify_arch arm64 x86_64 >/dev/null \
-        || fail "$binary is not universal for arm64 and x86_64"
+    for architecture in arm64 x86_64; do
+        lipo "$binary" -verify_arch "$architecture" >/dev/null \
+            || fail "$binary is missing $architecture"
+    done
     archs=$(lipo -archs "$binary")
     case "$archs" in
         "arm64 x86_64"|"x86_64 arm64") ;;

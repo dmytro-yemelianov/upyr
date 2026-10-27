@@ -45,8 +45,9 @@ The shipped application is designed to work entirely on the device:
   `0600` permissions; Windows inherits the per-user directory ACL.
 
 The project website contains no project-controlled analytics, cookies, tracking
-pixels, or remote runtime resources. GitHub Pages itself is hosted by GitHub and is
-subject to GitHub's own infrastructure and privacy practices.
+pixels, or remote runtime resources. Cloudflare Pages itself is hosted by
+Cloudflare and is subject to Cloudflare's own infrastructure and privacy
+practices.
 
 These statements describe the reviewed architecture, not a mathematical proof.
 CI includes a privacy guard for common network and telemetry APIs and for remote

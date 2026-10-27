@@ -29,6 +29,31 @@ pub fn switch_to(layout: SystemLayout) -> Result<SwitchOutcome> {
     platform::switch_to(layout)
 }
 
+/// Cycles all selectable macOS keyboard layouts, including families which the
+/// English/Ukrainian correction engine does not map.
+#[cfg(target_os = "macos")]
+pub fn cycle(
+    settings: &crate::globe_switch::GlobeSettings,
+    recent: &[String],
+) -> Result<Option<ActiveInputSource>> {
+    platform::cycle(settings, recent)
+}
+
+#[cfg(target_os = "macos")]
+pub fn enabled_sources() -> Result<Vec<ActiveInputSource>> {
+    platform::enabled_sources()
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn select_source(id: &str) -> Result<SwitchOutcome> {
+    platform::select_source(id)
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn indicator_sources() -> Result<Vec<(ActiveInputSource, Vec<String>)>> {
+    platform::indicator_sources()
+}
+
 /// Builds a physical-key character mapping from installed OS layouts when the
 /// platform exposes a reliable translation API.
 pub fn installed_mapping() -> Result<Option<Vec<(char, char)>>> {
@@ -112,6 +137,9 @@ mod platform {
         static kTISPropertyInputSourceID: CfStringRef;
         static kTISPropertyInputSourceIsSelectCapable: CfStringRef;
         static kTISPropertyInputSourceLanguages: CfStringRef;
+        static kTISPropertyInputSourceType: CfStringRef;
+        static kTISTypeKeyboardLayout: CfStringRef;
+        static kTISTypeKeyboardInputMode: CfStringRef;
         static kTISPropertyLocalizedName: CfStringRef;
         static kTISPropertyUnicodeKeyLayoutData: CfStringRef;
 
@@ -193,6 +221,75 @@ mod platform {
         Ok(SwitchOutcome::Switched {
             source_id: source.info.id.clone(),
         })
+    }
+
+    pub fn select_source(id: &str) -> Result<SwitchOutcome> {
+        if current()?.is_some_and(|source| source.source_id == id) {
+            return Ok(SwitchOutcome::AlreadyActive {
+                source_id: id.to_owned(),
+            });
+        }
+        let list = SourceList::load()?;
+        let Some(source) = list.sources.iter().find(|source| source.info.id == id) else {
+            return Ok(SwitchOutcome::TargetUnavailable);
+        };
+        let status = unsafe { TISSelectInputSource(source.raw.as_ptr().cast_const()) };
+        if status != 0 {
+            bail!("TISSelectInputSource failed with OSStatus {status}");
+        }
+        Ok(SwitchOutcome::Switched {
+            source_id: id.to_owned(),
+        })
+    }
+
+    pub fn indicator_sources() -> Result<Vec<(ActiveInputSource, Vec<String>)>> {
+        Ok(SourceList::load()?
+            .sources
+            .into_iter()
+            .map(|source| {
+                let languages = source.info.languages.clone();
+                (source.info.active_source(), languages)
+            })
+            .collect())
+    }
+
+    pub fn enabled_sources() -> Result<Vec<ActiveInputSource>> {
+        Ok(SourceList::load()?
+            .sources
+            .into_iter()
+            .map(|source| source.info.active_source())
+            .collect())
+    }
+
+    pub fn cycle(
+        settings: &crate::globe_switch::GlobeSettings,
+        recent: &[String],
+    ) -> Result<Option<ActiveInputSource>> {
+        let list = SourceList::load()?;
+        let ids: Vec<_> = list
+            .sources
+            .iter()
+            .map(|source| source.info.id.clone())
+            .collect();
+        let current = current()?;
+        let Some(next) = crate::globe_switch::next_layout(
+            current.as_ref().map(|source| source.source_id.as_str()),
+            &ids,
+            recent,
+            settings,
+        ) else {
+            return Ok(None);
+        };
+        let source = list
+            .sources
+            .iter()
+            .find(|source| source.info.id == next)
+            .expect("next_layout only returns enabled sources");
+        let status = unsafe { TISSelectInputSource(source.raw.as_ptr().cast_const()) };
+        if status != 0 {
+            bail!("TISSelectInputSource failed with OSStatus {status}");
+        }
+        Ok(Some(source.info.clone().active_source()))
     }
 
     pub fn installed_mapping() -> Result<Option<Vec<(char, char)>>> {
@@ -359,6 +456,7 @@ mod platform {
         info: SourceInfo,
     }
 
+    #[derive(Clone)]
     struct SourceInfo {
         id: String,
         name: String,
@@ -441,7 +539,14 @@ mod platform {
         }
         let category =
             unsafe { TISGetInputSourceProperty(source, kTISPropertyInputSourceCategory) };
-        !category.is_null() && unsafe { CFEqual(category, kTISCategoryKeyboardInputSource) != 0 }
+        let kind = unsafe { TISGetInputSourceProperty(source, kTISPropertyInputSourceType) };
+        !category.is_null()
+            && !kind.is_null()
+            && unsafe {
+                CFEqual(category, kTISCategoryKeyboardInputSource) != 0
+                    && (CFEqual(kind, kTISTypeKeyboardLayout) != 0
+                        || CFEqual(kind, kTISTypeKeyboardInputMode) != 0)
+            }
     }
 
     fn string_property(source: TisInputSourceRef, key: CfStringRef) -> Option<String> {

@@ -9,7 +9,18 @@ import shutil
 import sqlite3
 import subprocess
 import tempfile
+from contextlib import closing
 from pathlib import Path
+
+
+PROJECT = "upyr"
+REQUIRED_FILES = {
+    "src/app.rs",
+    "src/config.rs",
+    "src/main.rs",
+    "crates/upyr-core/src/layout.rs",
+    "crates/upyr-wasm/src/lib.rs",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,7 +42,7 @@ def count_rows(database: Path, table: str) -> int:
     # The persisted graph can retain WAL journal mode. The database is already a
     # disposable temp copy, so allow SQLite to create its empty -wal/-shm
     # sidecars while validating it.
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection:
         row = connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
     if row is None:
         raise RuntimeError(f"missing count result for {table}")
@@ -46,6 +57,18 @@ def validate_json_properties(connection: sqlite3.Connection, table: str) -> None
             raise SystemExit(
                 f"{table} row {row_id} contains non-portable JSON properties: {error}"
             ) from error
+
+
+def validate_project(metadata: dict, connection: sqlite3.Connection) -> None:
+    if metadata.get("project") != PROJECT:
+        raise SystemExit(f"code graph belongs to {metadata.get('project')!r}, expected {PROJECT!r}")
+    projects = {row[0] for row in connection.execute("SELECT DISTINCT project FROM nodes")}
+    if projects != {PROJECT}:
+        raise SystemExit(f"code graph contains foreign projects: {sorted(projects)!r}")
+    files = {row[0] for row in connection.execute("SELECT file_path FROM nodes WHERE label = 'File'")}
+    missing = REQUIRED_FILES - files
+    if missing:
+        raise SystemExit(f"code graph is missing Upyr source files: {sorted(missing)!r}")
 
 
 def main() -> None:
@@ -83,7 +106,8 @@ def main() -> None:
                 f"{original_size} != {metadata.get('original_size')}"
             )
 
-        with sqlite3.connect(database) as connection:
+        with closing(sqlite3.connect(database)) as connection:
+            validate_project(metadata, connection)
             validate_json_properties(connection, "nodes")
             validate_json_properties(connection, "edges")
             integrity = [row[0] for row in connection.execute("PRAGMA integrity_check")]

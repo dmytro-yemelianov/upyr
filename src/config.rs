@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::layout::Direction;
 
-pub const CURRENT_CONFIG_VERSION: u32 = 6;
+pub const CURRENT_CONFIG_VERSION: u32 = 12;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -72,7 +72,34 @@ impl SoundPack {
         match self {
             Self::Original => "Soft local clicks with Upyr's original event cues.",
             Self::Arcade => "Bright pfxr-style clicks and action sounds.",
-            Self::Anime => "Clicks for text keys and synthesized vocal reactions for control keys.",
+            Self::Anime => {
+                "Clicks for text keys, synthesized vocal reactions for control keys, and \
+                 expressive cues for Upyr's own events."
+            }
+        }
+    }
+}
+
+/// The layout-feedback presentation (the flag row on macOS, or pointer labels).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum IndicatorStyle {
+    /// Just the language letters, for example `EN`.
+    Letters,
+    /// The GlobeSwitch flag row on macOS; a single flag on other platforms.
+    Flag,
+    /// Letters and flag together, for example `EN  🇬🇧`.
+    Both,
+}
+
+impl IndicatorStyle {
+    pub const ALL: [Self; 3] = [Self::Letters, Self::Flag, Self::Both];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Letters => "Letters",
+            Self::Flag => "Flag",
+            Self::Both => "Letters and flag",
         }
     }
 }
@@ -106,6 +133,8 @@ pub struct SoundSettings {
     pub enabled: bool,
     /// Playback volume as a user-facing percentage.
     pub volume_percent: u8,
+    /// Separate quiet ceiling for headphones and unrecognized macOS outputs.
+    pub headphone_volume_percent: u8,
     /// Local procedural sound design selected for event and keyboard feedback.
     pub pack: SoundPack,
     /// Play low-latency, locally generated feedback for physical key presses.
@@ -123,6 +152,7 @@ impl Default for SoundSettings {
         Self {
             enabled: false,
             volume_percent: 65,
+            headphone_volume_percent: 12,
             pack: SoundPack::Original,
             key_clicks: false,
             auto_correct: true,
@@ -176,15 +206,20 @@ pub struct Config {
     pub hotkey: String,
     /// Converts the word immediately before the caret without a manual selection.
     pub last_word_hotkey: String,
+    /// macOS: restore the last automatic edit before further input or navigation.
+    pub undo_hotkey: String,
     pub direction: Direction,
     pub copy_delay_ms: u64,
     pub paste_delay_ms: u64,
     /// Follow a successful conversion by selecting the target OS input source.
     pub switch_layout: bool,
-    /// Briefly show the target language next to the pointer after Upyr changes
-    /// the active OS input source.
+    /// The integrated macOS GlobeSwitch observer; independent of correction.
+    pub globe_switch: crate::globe_switch::GlobeSettings,
+    /// Briefly show the active OS input source using the selected indicator style.
     pub show_layout_indicator: bool,
     pub layout_indicator_duration_ms: u64,
+    /// What the layout indicator displays: letters, a flag, or both.
+    pub indicator_style: IndicatorStyle,
     /// Event-specific local sound feedback.
     pub sounds: SoundSettings,
     /// Correct confidently recognized wrong-layout text after Space.
@@ -193,6 +228,10 @@ pub struct Config {
     pub auto_correct_sensitivity: AutoCorrectSensitivity,
     pub auto_correct_min_word_length: usize,
     pub auto_correct_delay_ms: u64,
+    /// Opt-in application IDs for tracked terminal/TUI replacement without clipboard access.
+    pub terminal_typing_apps: Vec<String>,
+    /// Apps whose input lines accept /commands. Requires terminal_typing_apps and auto_correct.
+    pub slash_command_apps: Vec<String>,
     /// Words which should never trigger automatic correction.
     pub auto_correct_exceptions: Vec<String>,
     /// Optional modifier-only gesture. Disabled means no keyboard-state polling occurs.
@@ -209,17 +248,22 @@ impl Default for Config {
             config_version: CURRENT_CONFIG_VERSION,
             hotkey: "CmdOrCtrl+Alt+Space".to_owned(),
             last_word_hotkey: "CmdOrCtrl+Alt+Backspace".to_owned(),
+            undo_hotkey: "CmdOrCtrl+Alt+Z".to_owned(),
             direction: Direction::Smart,
             copy_delay_ms: 90,
             paste_delay_ms: 40,
             switch_layout: true,
+            globe_switch: crate::globe_switch::GlobeSettings::default(),
             show_layout_indicator: false,
             layout_indicator_duration_ms: 900,
+            indicator_style: IndicatorStyle::Both,
             sounds: SoundSettings::default(),
             auto_correct: false,
             auto_correct_sensitivity: AutoCorrectSensitivity::Conservative,
             auto_correct_min_word_length: 4,
             auto_correct_delay_ms: 35,
+            terminal_typing_apps: Vec::new(),
+            slash_command_apps: Vec::new(),
             auto_correct_exceptions: Vec::new(),
             modifier_gesture: ModifierGesture::Disabled,
             modifier_gesture_action: GestureAction::PreviousWord,
@@ -292,6 +336,10 @@ impl Config {
         if hotkey == last_word_hotkey {
             bail!("hotkey and last_word_hotkey resolve to the same shortcut");
         }
+        let undo: HotKey = self.undo_hotkey.parse().context("invalid undo_hotkey")?;
+        if [hotkey, last_word_hotkey].contains(&undo) {
+            bail!("undo_hotkey must differ from the conversion shortcuts");
+        }
         if !(10..=2_000).contains(&self.copy_delay_ms) {
             bail!("copy_delay_ms must be between 10 and 2000");
         }
@@ -306,6 +354,20 @@ impl Config {
         }
         if self.sounds.volume_percent > 100 {
             bail!("sounds.volume_percent must be between 0 and 100");
+        }
+        if self.sounds.headphone_volume_percent > 30 {
+            bail!("sounds.headphone_volume_percent must be between 0 and 30");
+        }
+        if !(100..=2_000).contains(&self.globe_switch.tap_window_ms) {
+            bail!("globe_switch.tap_window_ms must be between 100 and 2000");
+        }
+        if self
+            .globe_switch
+            .skipped_layouts
+            .iter()
+            .any(|id| id.trim().is_empty())
+        {
+            bail!("globe_switch.skipped_layouts must contain non-empty input-source IDs");
         }
         if !(150..=2_000).contains(&self.modifier_gesture_timeout_ms) {
             bail!("modifier_gesture_timeout_ms must be between 150 and 2000");
@@ -596,10 +658,88 @@ fn migrate(value: &mut toml::Value) -> Result<()> {
         sounds
             .entry("key_clicks".to_owned())
             .or_insert(toml::Value::Boolean(false));
-        table.insert(
-            "config_version".to_owned(),
-            toml::Value::Integer(i64::from(CURRENT_CONFIG_VERSION)),
-        );
+        table.insert("config_version".to_owned(), toml::Value::Integer(6));
+        version = 6;
+    }
+
+    // Version 7 lets the layout indicator show letters, a flag, or both.
+    // Existing installations keep today's combined presentation.
+    if version == 6 {
+        table
+            .entry("indicator_style".to_owned())
+            .or_insert_with(|| toml::Value::String("both".to_owned()));
+        table.insert("config_version".to_owned(), toml::Value::Integer(7));
+        version = 7;
+    }
+
+    // Opt-in: an upgrade must not claim the Globe key or request input access.
+    if version == 7 {
+        table
+            .entry("globe_switch".to_owned())
+            .or_insert(toml::Value::try_from(
+                crate::globe_switch::GlobeSettings::default(),
+            )?);
+        table.insert("config_version".to_owned(), toml::Value::Integer(8));
+        version = 8;
+    }
+    if version == 8 {
+        if let Some(globe) = table
+            .get_mut("globe_switch")
+            .and_then(toml::Value::as_table_mut)
+        {
+            globe
+                .entry("layout_flags".to_owned())
+                .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+        }
+        table.insert("config_version".to_owned(), toml::Value::Integer(9));
+        version = 9;
+    }
+    if version == 9 {
+        table
+            .entry("terminal_typing_apps".to_owned())
+            .or_insert_with(|| toml::Value::Array(Vec::new()));
+        table.insert("config_version".to_owned(), toml::Value::Integer(10));
+        version = 10;
+    }
+    if version == 10 {
+        table
+            .entry("slash_command_apps".to_owned())
+            .or_insert_with(|| toml::Value::Array(Vec::new()));
+        table.insert("config_version".to_owned(), toml::Value::Integer(11));
+        version = 11;
+    }
+    if version == 11 {
+        if !table.contains_key("undo_hotkey") {
+            let occupied: Vec<HotKey> = ["hotkey", "last_word_hotkey"]
+                .iter()
+                .filter_map(|key| table.get(*key)?.as_str()?.parse().ok())
+                .collect();
+            let choice = [
+                "CmdOrCtrl+Alt+Z",
+                "CmdOrCtrl+Alt+Shift+Z",
+                "CmdOrCtrl+Alt+Shift+Backspace",
+            ]
+            .into_iter()
+            .find(|choice| {
+                choice
+                    .parse::<HotKey>()
+                    .is_ok_and(|key| !occupied.contains(&key))
+            })
+            .expect("three defaults for two occupied actions");
+            table.insert(
+                "undo_hotkey".to_owned(),
+                toml::Value::String(choice.to_owned()),
+            );
+        }
+        let sounds = table
+            .entry("sounds".to_owned())
+            .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+        sounds
+            .as_table_mut()
+            .context("sounds must be a table")?
+            .entry("headphone_volume_percent".to_owned())
+            .or_insert(toml::Value::Integer(12));
+        table.insert("config_version".to_owned(), toml::Value::Integer(12));
     }
     Ok(())
 }
@@ -619,6 +759,134 @@ mod tests {
     use super::*;
 
     #[test]
+    fn release_upgrade_preserves_old_preferences_through_save_and_reload() {
+        fn preserved(before: &toml::Value, after: &toml::Value, path: &str) {
+            if let Some(table) = before.as_table() {
+                for (name, value) in table {
+                    if path.is_empty() && name == "config_version" {
+                        continue;
+                    }
+                    let next = format!("{path}.{name}");
+                    preserved(value, after.get(name).expect(&next), &next);
+                }
+            } else {
+                assert_eq!(before, after, "preference changed: {path}");
+            }
+        }
+        let directory = env::temp_dir().join(format!("upyr-upgrade-test-{}", process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        for (name, source) in [
+            (
+                "published-v6",
+                include_str!("../tests/fixtures/config/published-v6.toml"),
+            ),
+            (
+                "integrated-v11",
+                include_str!("../tests/fixtures/config/integrated-v11.toml"),
+            ),
+            (
+                "current-v12",
+                include_str!("../tests/fixtures/config/current-v12.toml"),
+            ),
+        ] {
+            let original: toml::Value = toml::from_str(source).unwrap();
+            let config = Config::decode(source).unwrap();
+            let upgraded = toml::Value::try_from(&config).unwrap();
+            preserved(&original, &upgraded, "");
+            assert_eq!(config.config_version, CURRENT_CONFIG_VERSION);
+            if !original.as_table().unwrap().contains_key("globe_switch") {
+                assert!(!config.globe_switch.enabled);
+                assert!(config.terminal_typing_apps.is_empty());
+                assert!(config.slash_command_apps.is_empty());
+            }
+            if original["sounds"].get("headphone_volume_percent").is_none() {
+                assert_eq!(config.sounds.headphone_volume_percent, 12);
+            }
+            let path = directory.join(format!("{name}.toml"));
+            write_config_file(
+                &path,
+                toml::to_string_pretty(&config).unwrap().as_bytes(),
+                false,
+            )
+            .unwrap();
+            let reloaded = Config::decode(&fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(upgraded, toml::Value::try_from(reloaded).unwrap());
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn upgrade_adds_quiet_headphones_without_altering_existing_audio_or_hotkeys() {
+        let config = Config::decode("config_version = 11\nhotkey = 'CmdOrCtrl+Alt+Z'\nauto_correct = true\n[sounds]\nenabled = true\nvolume_percent = 65\npack = 'anime'\n").unwrap();
+        assert_eq!(config.config_version, CURRENT_CONFIG_VERSION);
+        assert_eq!(config.hotkey, "CmdOrCtrl+Alt+Z");
+        assert_eq!(config.undo_hotkey, "CmdOrCtrl+Alt+Shift+Z");
+        assert!(config.auto_correct && config.sounds.enabled);
+        assert_eq!(config.sounds.volume_percent, 65);
+        assert_eq!(config.sounds.headphone_volume_percent, 12);
+        assert_eq!(config.sounds.pack, SoundPack::Anime);
+        let mut invalid = config;
+        invalid.sounds.headphone_volume_percent = 31;
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn slash_command_upgrade_preserves_terminal_opt_in_without_enabling_commands() {
+        let config = Config::decode("config_version = 10\nauto_correct = true\nterminal_typing_apps = [\"com.superset.desktop\"]\n").unwrap();
+        assert_eq!(config.config_version, CURRENT_CONFIG_VERSION);
+        assert!(config.auto_correct);
+        assert_eq!(config.terminal_typing_apps, ["com.superset.desktop"]);
+        assert!(config.slash_command_apps.is_empty());
+    }
+
+    #[test]
+    fn terminal_typing_upgrade_stays_opt_in_and_preserves_other_features() {
+        let mut value = toml::Value::try_from(Config::default()).unwrap();
+        let table = value.as_table_mut().unwrap();
+        table.insert("config_version".to_owned(), toml::Value::Integer(9));
+        table.insert("auto_correct".to_owned(), toml::Value::Boolean(true));
+        table.remove("terminal_typing_apps");
+        let config = Config::decode(&toml::to_string(&value).unwrap()).unwrap();
+        assert_eq!(config.config_version, CURRENT_CONFIG_VERSION);
+        assert!(config.auto_correct);
+        assert!(config.terminal_typing_apps.is_empty());
+    }
+
+    #[test]
+    fn globe_upgrade_preserves_correction_and_does_not_claim_the_key() {
+        let mut value = toml::Value::try_from(Config::default()).unwrap();
+        let table = value.as_table_mut().unwrap();
+        table.insert("config_version".to_owned(), toml::Value::Integer(7));
+        table.insert("auto_correct".to_owned(), toml::Value::Boolean(true));
+        table.remove("globe_switch");
+        let config = Config::decode(&toml::to_string(&value).unwrap()).unwrap();
+        assert_eq!(config.config_version, CURRENT_CONFIG_VERSION);
+        assert!(config.auto_correct);
+        assert_eq!(
+            config.globe_switch,
+            crate::globe_switch::GlobeSettings::default()
+        );
+    }
+
+    #[test]
+    fn globe_settings_round_trip_and_reject_invalid_tap_windows() {
+        let mut config = Config::default();
+        config.globe_switch.enabled = true;
+        config.globe_switch.cycle_order = crate::globe_switch::CycleOrder::Recent;
+        config.globe_switch.skipped_layouts = vec!["com.apple.keylayout.Russian".to_owned()];
+        config
+            .globe_switch
+            .layout_flags
+            .insert("com.apple.keylayout.ABC".to_owned(), "GB".to_owned());
+        let decoded = Config::decode(&toml::to_string(&config).unwrap()).unwrap();
+        assert_eq!(decoded.globe_switch, config.globe_switch);
+        for invalid in [0, 99, 2_001, u64::MAX] {
+            config.globe_switch.tap_window_ms = invalid;
+            assert!(config.validate().is_err());
+        }
+    }
+
+    #[test]
     fn default_config_is_valid_and_serializable() {
         let config = Config::default();
 
@@ -632,6 +900,7 @@ mod tests {
         assert_eq!(decoded.direction, Direction::Smart);
         assert!(decoded.switch_layout);
         assert!(!decoded.show_layout_indicator);
+        assert_eq!(decoded.indicator_style, IndicatorStyle::Both);
         assert!(!decoded.sounds.enabled);
         assert_eq!(decoded.sounds.volume_percent, 65);
         assert_eq!(decoded.sounds.pack, SoundPack::Original);
@@ -927,5 +1196,18 @@ restore_delay_ms = 250
         assert_eq!(config.sounds.pack, SoundPack::Original);
         assert!(!config.sounds.key_clicks);
         assert!(!config.sounds.key_clicks_enabled());
+    }
+
+    #[test]
+    fn migrates_v6_configuration_with_the_combined_indicator_style() {
+        let mut value = toml::Value::try_from(Config::default()).unwrap();
+        let table = value.as_table_mut().unwrap();
+        table.insert("config_version".to_owned(), toml::Value::Integer(6));
+        table.remove("indicator_style");
+
+        let config = Config::decode(&toml::to_string(&value).unwrap()).unwrap();
+
+        assert_eq!(config.config_version, CURRENT_CONFIG_VERSION);
+        assert_eq!(config.indicator_style, IndicatorStyle::Both);
     }
 }

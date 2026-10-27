@@ -9,7 +9,7 @@
 
 Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in Rust. It turns text typed on the wrong physical layout into what you meant: `ghbdsn` → `привіт`, `руддщ` → `hello`.
 
-**Release status:** v0.3.0 public preview. **There is no Apple-verified Upyr build yet.** The current macOS preview is ad-hoc signed, not Apple Developer ID signed, and not notarized; Gatekeeper may show "Apple could not verify Upyr is free of malware." Upyr has no automatic update checker, so check GitHub Releases manually for newer or notarized builds. macOS is the primary supported desktop target. Release CI is configured to build and smoke-test Windows and Linux/X11 packages, but those platforms remain preview targets. Upyr follows [Semantic Versioning](#versioning-and-releases); compatibility may change before 1.0.
+**Release status:** v0.4.1 public preview. **There is no Apple-verified Upyr build yet.** The current macOS preview is ad-hoc signed, not Apple Developer ID signed, and not notarized; Gatekeeper may show "Apple could not verify Upyr is free of malware." Upyr has no automatic update checker, so check GitHub Releases manually for newer or notarized builds. macOS is the primary supported desktop target. Release CI is configured to build and smoke-test Windows and Linux/X11 packages, but those platforms remain preview targets. Upyr follows [Semantic Versioning](#versioning-and-releases); compatibility may change before 1.0.
 
 [Download from GitHub Releases](https://github.com/dmytro-yemelianov/upyr/releases) · [Package-manager installs](#package-manager-installs) · [Product page](https://upyr.org/) · [Report an issue](https://github.com/dmytro-yemelianov/upyr/issues/new/choose)
 
@@ -18,7 +18,10 @@ Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in
 - Fixes selected text with `CmdOrCtrl+Alt+Space`.
 - Fixes the word before the caret with `CmdOrCtrl+Alt+Backspace`.
 - Optionally corrects a confidently mistyped word after Space; automatic correction is off by default.
+- On macOS, `Cmd+Alt+Z` undoes the last automatic correction and restores its original input source, before further typing or navigation (up to 30 seconds).
 - Detects and switches between installed English and Ukrainian input sources.
+- Includes GlobeSwitch on macOS: a clean 🌐 tap cycles enabled layouts instantly,
+  without macOS's picker or a second background application.
 - Uses the physical keys, including the standard Ukrainian punctuation row: `[];'\,./` ↔ `хїжєґбю.`.
 - Protects intentional technical text such as `FAANG`, `SaaS`, `NASDAQ`, `iPhone`, URLs, paths, and configured exceptions.
 - Provides searchable, tabbed settings, press-to-record shortcuts, an optional pointer-side language flag, and three locally synthesized sound packs with event/key controls and master volume.
@@ -86,6 +89,82 @@ packaging/macos/package.sh
 
 Local packages are ad-hoc signed for development. Public release artifacts use the stricter release signing pipeline.
 
+## Globe key on macOS
+
+GlobeSwitch is built into Upyr's background process. Enable **Settings → General
+→ Tap Globe (🌐) to switch keyboard layouts instantly**, or run `upyr globe enable`.
+Upyr needs Input Monitoring or Accessibility access; restart it after granting
+access if the monitor could not start. `upyr doctor` and `upyr globe status`
+report the permission and system-key setting without requesting access.
+
+If standalone GlobeSwitch is installed, run `upyr globe migrate` instead. This
+uses its uninstaller to remove the old app and LaunchAgent and restore its
+saved system setting before enabling Upyr's integrated switcher. The command
+does not launch a second agent. Without the standalone uninstaller, uninstall
+GlobeSwitch manually first; Upyr refuses to run two Globe handlers together.
+
+A clean tap released within 600 ms selects the next enabled input source
+directly through Carbon. There is no picker, no helper process and no clipboard
+access on this path. All enabled keyboard layouts and input modes can be cycled,
+including ones outside Upyr's English/Ukrainian correction pair. Holds,
+fn+arrows, fn+E, media keys, other modifiers, clicks and scrolling cancel a tap.
+The event tap is listen-only and always returns the original keyboard event.
+
+While this option runs, Upyr saves **Press 🌐 key to**, sets it to **Do Nothing**
+and refreshes macOS's input helpers so they do not switch a second time. Pausing,
+quitting or disabling the option restores the saved setting, unless you changed
+it yourself in System Settings. After a crash, `upyr globe restore` disables the
+option and restores that durable backup. A live Upyr monitor owns the setting
+until it stops; another process cannot claim it, even with a different config.
+
+Advanced options live in the same TOML configuration as correction:
+
+```toml
+[globe_switch]
+enabled = true
+tap_window_ms = 600              # 100–2000
+cycle_order = "list"             # or "recent" for the previous used layout
+skipped_layouts = []             # input-source IDs from `upyr globe list`
+```
+
+Globe switches share Upyr's optional indicator and layout-switch sound. On macOS,
+select **GlobeSwitch flags** (`indicator_style = "flag"`) to use the original
+pixel-flag row near the bottom of the screen under the pointer: the active flag
+is larger and glowing, the row slides with spring animation, then fades out.
+The panel ignores clicks and cannot become the keyboard's key or main window.
+Layouts without a flag show their name. Switching
+also clears the correction context and invalidates corrections queued before
+the tap. Automatic correction, sounds and the indicator retain their separate
+opt-in settings. Region codes and custom text can be configured per input source:
+
+```toml
+[globe_switch.layout_flags]
+"com.apple.keylayout.ABC" = "GB"
+```
+
+Configuration schema 9 adds these overrides; upgrades preserve existing feedback
+choices. Migration uses Upyr's sound preferences.
+
+To exercise the running integrated monitor without pressing a physical key,
+compile `tools/globe-probe.swift` with `swiftc -O -o target/globe-probe
+tools/globe-probe.swift`. The terminal needs Accessibility access. Run
+`target/globe-probe press 4 400`, then `chord`, `hold`, `scroll`, or `type 5 40`.
+The typing probe opens its own field and refuses to type into another app.
+Synthetic taps exercise Upyr; physical-key testing is still needed to check
+macOS's own Globe handling after a system update.
+
+`target/globe-probe convert plain` checks selected-text conversion in its own
+field using the default shortcut. `convert busy` checks a Globe tap while
+`copy_delay_ms = 1000`; the pending conversion must cancel. `convert paste`
+checks a Globe tap after replacement while `restore_delay_ms = 1800`.
+Enable integrated Globe switching for the latter two probes and disable
+automatic correction for these controlled checks. Each probe verifies focus
+before sending input and fails if its own window cannot become active.
+`convert auto` requires automatic correction and the ABC layout; it types
+`ghbdsn ` into its own field and checks for `привіт `, preserved focus and
+clipboard restoration. It selects ABC for the test; restore your preferred
+input source afterward.
+
 ## How correction works
 
 Upyr does not translate words. It reconstructs the characters produced by the same physical keys on the other layout, then decides whether the reconstructed text is more plausible.
@@ -95,6 +174,14 @@ Upyr does not translate words. It reconstructs the characters produced by the sa
 3. Upyr creates source and opposite-layout candidates while preserving case and punctuation.
 4. Deterministic triggers, exact dictionaries, technical-token guards, exceptions, and a compact language model score the pair.
 5. Only a candidate that clears the selected confidence policy is applied. Upyr replaces the text, switches the OS input source when configured, and, by default, attempts to restore the clipboard.
+
+On macOS, Copy/Paste delays yield to the application event loop so Globe taps
+and menu actions can still run. A temporary activity guard cancels a pending
+replacement if input or focus changes; it observes activity without recording
+characters. Clipboard cleanup continues after replacement without pausing
+tracking for the next word, and preserves anything copied meanwhile.
+Automatic correction uses AppKit's main-thread global event monitor and the
+event's rendered characters, avoiding background Carbon layout queries.
 
 The trigger layer covers high-certainty words that the statistical policy deliberately skips, especially short words. Built-in rules are exact physical-key matches today; the parser also supports leading/trailing `*` patterns (`word*`, `*word`, `*word*`) after the Punto reverse-engineering pass showed that Punto for Windows treats its `A` tag as an any-position wildcard. Upyr uses the finding as a rule-shape hint only; it does not ship Punto's rule data.
 
@@ -126,7 +213,7 @@ Upyr is designed to work without an account, server, or runtime network connecti
 - **Permission restraint.** macOS Accessibility is requested only when required, an existing grant is accepted silently, and a missing grant is prompted at most once per process.
 - **Inspectable artifacts.** The implementation is MIT-licensed, release builds are produced by GitHub Actions, and the release pipeline smoke-tests packaged conversion.
 
-The corpus generator is the one intentional network-capable development tool: when explicitly run, it downloads pinned public archives and verifies SHA-256 before processing. It is not called by the desktop app or WASM runtime.
+The corpus generator and the sound-pack asset generator are the only intentional network-capable development tools: when explicitly run, the former downloads pinned public archives and verifies SHA-256 before processing, and the latter calls the ElevenLabs Sound Effects API to render bundled event cues. Neither is called by the desktop app or WASM runtime.
 
 Security CI adds RustSec dependency auditing, CodeQL analysis, pull-request dependency review, and scheduled scans. These controls reduce risk; they are not a claim that any non-trivial program is vulnerability-free. Please follow [`SECURITY.md`](SECURITY.md) to report a suspected vulnerability instead of opening a public issue.
 
@@ -138,7 +225,7 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-targets --locked
 python3 tools/check_privacy.py
 python3 tools/check_site_content.py
-python3 -m unittest tools.test_check_site_content tools.test_check_privacy
+python3 -m unittest tools.test_check_site_content tools.test_check_privacy tools.test_check_codebase_graph
 python3 tools/check_version_sync.py
 python3 tools/check_codebase_graph.py
 cargo audit
@@ -158,13 +245,122 @@ upyr autostart enable
 upyr settings
 ```
 
-The settings app exposes General, Automatic, Shortcuts, Feedback, and Advanced tabs. Automatic sensitivity can be conservative, balanced, or aggressive; deliberate strings can be added to `auto_correct_exceptions`. Feedback includes three local sound packs: Upyr Original, Pocket Arcade, and the opt-in Anime Reactions pack. Every event and key cue is synthesized locally; keyboard feedback crosses into the app as physical key categories only and never stores typed characters. Use `UPYR_CONFIG` to select a different config file.
+The settings app exposes General, Automatic, Exceptions, Shortcuts, Feedback, and Advanced tabs. Automatic sensitivity can be conservative, balanced, or aggressive; deliberate strings can be added on the Exceptions tab. Feedback includes three local sound packs: Upyr Original, Pocket Arcade, and the opt-in Anime Reactions pack. Every key cue and most event cues are synthesized locally (the Anime pack's six application-event cues are the one exception; see below); keyboard feedback crosses into the app as physical key categories only and never stores typed characters. Use `UPYR_CONFIG` to select a different config file.
 
-The versioned TOML schema currently uses `config_version = 6`. Older supported schemas migrate in memory; configurations from a newer unsupported schema are rejected rather than guessed. Keyboard sounds remain disabled during migration and by default. See the generated default file after `upyr init` for every option and its current value.
+The versioned TOML schema currently uses `config_version = 12`. Older supported schemas migrate in memory; configurations from a newer unsupported schema are rejected rather than guessed. Migration preserves existing sound choices and adds `undo_hotkey = "CmdOrCtrl+Alt+Z"` (with a fallback if a conversion shortcut already uses it) and `sounds.headphone_volume_percent = 12`. See the generated default file after `upyr init` for every option and its current value.
 
-Sound-pack synthesis is offline and dependency-free in `upyr-audio`. Its pfxr-style engine creates short deterministic variations, while Anime Reactions uses a procedural glottal/formant synthesizer for non-character keys. All cues are generated on-device; no recordings or pre-rendered sound files are bundled, and there are no downloads, microphone access, or remote audio-service calls. Playback uses the operating system's native audio API. Audible feedback can reveal typing rhythm to people nearby, so keyboard sounds are always opt-in; headphones are recommended for the vocal-reaction pack.
+On macOS, **Feedback → Headphone limit** controls a separate ceiling for Upyr's
+sounds (0–30%, initially 12%). Speakers keep the existing master volume;
+headphones use the lower of master volume and this ceiling. Unidentified outputs
+also use the quiet profile. Upyr detects the current system sound output for
+each cue, softens its attack and release, limits source peaks without amplifying
+quiet samples, and avoids overlapping cues on headphones. Output changes stop
+old cues; sounds are bound to their observed device. Settings shows the current
+output and effective app gain. This changes only Upyr's gain, not macOS volume;
+the percentage is not a measurement of sound pressure at the ear.
+
+Sound-pack synthesis is offline and dependency-free in `upyr-audio`. Its pfxr-style engine creates short deterministic variations, while Anime Reactions uses a procedural glottal/formant synthesizer for non-character keys—there are no voice recordings, downloads, microphone access, or remote audio-service calls at runtime. Anime Reactions' six application-event cues (auto-correct, manual conversion, layout switch, pause, resume, error) are the one exception: they are bundled, pre-rendered assets, generated once offline with the ElevenLabs Sound Effects API by [`tools/generate_event_sound_pack.py`](tools/generate_event_sound_pack.py) and embedded in the binary (see [`assets/sounds/anime/README.md`](assets/sounds/anime/README.md)); like the n-gram corpus generator, this tool is a manual, developer-run step and is never invoked by the desktop app. Every other cue—every key click, and every other pack's event sounds—is synthesized on-device with no bundled audio file at all. Playback uses the operating system's native audio API. Audible feedback can reveal typing rhythm to people nearby, so keyboard sounds are always opt-in; headphones are recommended for the vocal-reaction pack.
 
 ## Platform status
+
+On macOS, terminal/TUI input can opt into clipboard-free replacement:
+
+```toml
+terminal_typing_apps = ["com.superset.desktop"]
+slash_command_apps = ["com.superset.desktop"]
+```
+
+This supports normal text entry in Codex/Claude terminal prompts in Superset.
+After Space, Upyr replaces only a single word it just tracked in the same
+focused window: it selects the destination layout, sends the exact number of
+Backspaces and emits Unicode text. It never sends Enter or word-kill shortcuts.
+The clipboard is untouched. Cursor/control keys, clicks, scrolling or a changed
+focus cancel pending work. Further typing cancels a delayed correction; during
+delivery of a prepared edit, text keys retain their order after the replacement.
+Paste, history edits, multiword
+rewrites and editor modes that reinterpret letter keys are outside this
+backend; it tracks input events rather than reading the terminal's real buffer.
+Other terminal applications remain disabled unless explicitly listed.
+
+For an opt-in live regression run on macOS, select this workspace in Superset,
+leave its window visible, then run:
+
+```sh
+python3 tools/superset_input_probe.py --workspace "$SUPERSET_WORKSPACE_ID"
+```
+
+This requires the installed Upyr app running with automatic, terminal and slash
+correction enabled for Superset, the default undo shortcut, `swiftc`, and an
+already-permitted `cua-driver`. It creates its own raw-input terminal tab,
+checks an on-screen fixture code before typing physical keys, and closes only
+that tab afterward. The sink never executes typed commands. The cases cover
+mixed language, contractions, punctuation, commands, fast typing, undo and focus
+changes. Keep the window unobstructed and avoid typing or clicking during the
+run. Test text, results and an exact app-window screenshot stay in the printed
+temporary directory; the probe leaves Upyr preferences and clipboard intact.
+
+For an isolated, repeatable edge-case run (no GUI input), use:
+
+```sh
+python3 tools/run_terminal_edge_tests.py
+```
+
+The offline runner uses cached Cargo dependencies and writes a JSON report and
+full log under `target/`. It checks the curated terminal corpus against portable
+and frozen macOS keyboard maps, generated slash-command editing sequences,
+control/format characters, punctuation, replacement and undo. On macOS, a
+separate main-thread check reads the real installed layout map without switching
+input sources. The live Superset probe above is optional and opens its own tab.
+CI preserves each platform's JSON report and UTF-8 test log for 14 days, including
+failed runs and partial output when the Cargo timeout is reached.
+
+`slash_command_apps` additionally opts an interface into English `/commands`.
+At the start of a freshly tracked input line, `.сщььфтв` becomes `/command`,
+including the leading slash. Correction starts as soon as the prefix has a
+letter (`.с` → `/c`), so command menus can open before Space. Custom names,
+digits, hyphens and underscores work without dictionary entries. Upyr never
+submits a command. Navigation, clicks and shortcuts discard the old tracked
+span. A newly typed slash prefix can then start again without an extra Return;
+only that fresh prefix is replaced. Known inline prose and pasted text are not
+reinterpreted. Existing terminal history is not read.
+
+The macOS Feedback settings include an embedded flag preview and a layout
+selector. **All Country Flags…** opens a searchable picker of all 259 bundled
+country and region flags, with names and country codes. Select a keyboard layout
+and click a flag to preview it, then choose **Save Flags** to apply the choices.
+**Use Automatic Flag** restores a layout’s default; **Revert** discards unsaved
+flag changes. Saving flags preserves other settings. The indicator preview uses the live
+indicator’s flag images, overrides, skipped layouts,
+scale and glow. Style changes update the preview before saving; Preview Flag
+shows the selected layout on screen without changing the keyboard layout.
+
+The terminal policy scores the last word independently, recognizes English
+contractions, and permits common two- and three-letter words in both languages
+under the default minimum length. A custom minimum above four remains enforced.
+English punctuation keys that produce Ukrainian letters are accepted in the
+tracked source (`lj,ht` → `добре`, `[jnskjcz` → `хотілося`).
+Terminal guards use application/window identity and native input counters without
+blocking on Accessibility queries for every key. A target-process event tap delivers
+the generated keys together in the target application's stream, so the next
+letter cannot enter between Backspace and replacement. The ordinary correction
+delay remains configurable and unchanged. The tap is prepared when typing starts,
+passes input unchanged while idle and sleeps without polling.
+The target validates the edit before the main thread commits the layout change;
+a rejected edit leaves the layout unchanged. Successful automatic replacements
+use the indicator and correction sound even if the target layout is already active.
+Nonactivating overlays from other processes do not invalidate the terminal's
+keyboard focus; the active application is checked again before committing.
+
+`tools/globe-probe.swift convert terminal` checks replacement without any Paste
+or pasteboard revision; `convert terminal-cancel` checks continued typing. For
+these probes, list `"upyr-nonblocking-probe"` in `terminal_typing_apps`.
+`convert terminal-english` starts on the Ukrainian layout and types
+`it's not so good for english so far ` to check the English correction path.
+`convert terminal-mixed` starts on ABC and checks `it's not так добре як хотілося б `;
+`terminal-punctuation` and `terminal-bracket` independently check corrections
+of words typed using the comma and bracket keys.
+`terminal-interleave` injects another letter near the edit deadline and accepts
+only an intact original word or a complete replacement with that letter preserved.
 
 | Platform | Status | Notes |
 | --- | --- | --- |

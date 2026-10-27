@@ -34,7 +34,49 @@ pub(super) struct SoundAsset {
     keyboard: bool,
 }
 
+/// Anime Reactions uses ElevenLabs-rendered event cues instead of the pfxr
+/// synthesizer. They are pre-generated offline by
+/// `tools/generate_event_sound_pack.py` and bundled the same way the
+/// Original pack's cues used to be; Upyr never calls ElevenLabs at runtime.
+fn anime_event_asset(event: SoundEvent) -> SoundAsset {
+    let (slug, bytes): (&str, &'static [u8]) = match event {
+        SoundEvent::AutoCorrect => (
+            "anime-auto-correct",
+            include_bytes!("../../assets/sounds/anime/auto-correct.wav"),
+        ),
+        SoundEvent::ManualConversion => (
+            "anime-manual-conversion",
+            include_bytes!("../../assets/sounds/anime/manual-conversion.wav"),
+        ),
+        SoundEvent::LayoutSwitch => (
+            "anime-layout-switch",
+            include_bytes!("../../assets/sounds/anime/layout-switch.wav"),
+        ),
+        SoundEvent::Pause => (
+            "anime-pause",
+            include_bytes!("../../assets/sounds/anime/pause.wav"),
+        ),
+        SoundEvent::Resume => (
+            "anime-resume",
+            include_bytes!("../../assets/sounds/anime/resume.wav"),
+        ),
+        SoundEvent::Error => (
+            "anime-error",
+            include_bytes!("../../assets/sounds/anime/error.wav"),
+        ),
+    };
+    SoundAsset {
+        id: SoundId::Event(SoundPack::Anime, event),
+        slug: slug.to_owned(),
+        bytes: Arc::from(bytes),
+        keyboard: false,
+    }
+}
+
 fn event_asset(event: SoundEvent, pack: SoundPack) -> SoundAsset {
+    if pack == SoundPack::Anime {
+        return anime_event_asset(event);
+    }
     let cue = event_cue(event);
     let seed = 0x5550_5952 ^ event_index(event).wrapping_mul(0x9e37_79b9);
     SoundAsset {
@@ -56,17 +98,27 @@ fn key_asset(cue: KeyCue, pack: SoundPack) -> SoundAsset {
     }
 }
 
-pub(super) fn play_event(event: SoundEvent, pack: SoundPack, volume_percent: u8) -> Result<()> {
+pub(super) fn play_event(
+    event: SoundEvent,
+    pack: SoundPack,
+    volume_percent: u8,
+    headphone_volume_percent: u8,
+) -> Result<()> {
     if !(1..=100).contains(&volume_percent) {
         bail!("sound volume must be between 1 and 100 percent");
     }
-    platform::play(event_asset(event, pack), volume_percent)
+    platform::play(
+        event_asset(event, pack),
+        volume_percent,
+        headphone_volume_percent,
+    )
 }
 
 pub(super) fn play_key(
     cue: KeyCue,
     pack: SoundPack,
     volume_percent: u8,
+    headphone_volume_percent: u8,
     preview: bool,
 ) -> Result<()> {
     if !(1..=100).contains(&volume_percent) {
@@ -75,7 +127,11 @@ pub(super) fn play_key(
     if !preview && !KEY_RATE_LIMITER.with_borrow_mut(|limiter| limiter.allow(pack, cue)) {
         return Ok(());
     }
-    platform::play(key_asset(cue, pack), volume_percent)
+    platform::play(
+        key_asset(cue, pack),
+        volume_percent,
+        headphone_volume_percent,
+    )
 }
 
 pub(super) fn prewarm(pack: SoundPack) {
@@ -92,10 +148,12 @@ pub(super) fn prewarm(pack: SoundPack) {
                     generated_sound(id, pack, Cue::Key(cue), key_seed(cue, variant));
                 }
             }
-            for event in SoundEvent::ALL {
-                let id = SoundId::Event(pack, event);
-                let seed = 0x5550_5952 ^ event_index(event).wrapping_mul(0x9e37_79b9);
-                generated_sound(id, pack, Cue::Event(event_cue(event)), seed);
+            if pack != SoundPack::Anime {
+                for event in SoundEvent::ALL {
+                    let id = SoundId::Event(pack, event);
+                    let seed = 0x5550_5952 ^ event_index(event).wrapping_mul(0x9e37_79b9);
+                    generated_sound(id, pack, Cue::Event(event_cue(event)), seed);
+                }
             }
         })
         .is_err()
@@ -317,7 +375,6 @@ fn scale_pcm16_wav(input: &[u8], volume_percent: u8) -> Result<Vec<u8>> {
     Ok(output)
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows", test))]
 fn pcm16_data_range(input: &[u8]) -> Result<std::ops::Range<usize>> {
     if input.len() < 12 || &input[..4] != b"RIFF" || &input[8..12] != b"WAVE" {
         bail!("embedded sound is not a RIFF/WAVE file");
@@ -386,59 +443,146 @@ fn pcm16_data_range(input: &[u8]) -> Result<std::ops::Range<usize>> {
     Ok(data)
 }
 
+#[cfg(any(target_os = "macos", test))]
+fn headphone_wav(input: &[u8]) -> Result<Vec<u8>> {
+    let range = pcm16_data_range(input)?;
+    let mut output = input.to_vec();
+    let peak = input[range.clone()]
+        .chunks_exact(2)
+        .map(|sample| i32::from(i16::from_le_bytes([sample[0], sample[1]])).abs())
+        .max()
+        .unwrap_or(0);
+    let gain = if peak > 16_383 {
+        16_383.0 / peak as f64
+    } else {
+        1.0
+    };
+    let count = range.len() / 2;
+    for (index, sample) in output[range].chunks_exact_mut(2).enumerate() {
+        let attack = (index as f64 / 353.0).min(1.0); // 8 ms at 44.1 kHz.
+        let release = ((count.saturating_sub(index + 1)) as f64 / 529.0).min(1.0);
+        let value = i16::from_le_bytes([sample[0], sample[1]]);
+        let scaled = (f64::from(value) * gain * attack * release).round() as i16;
+        sample.copy_from_slice(&scaled.to_le_bytes());
+    }
+    Ok(output)
+}
+#[cfg(target_os = "macos")]
+pub(super) fn stop_before(generation: u64) {
+    platform::stop_before(generation);
+}
+
 #[cfg(target_os = "macos")]
 mod platform {
-    use std::cell::RefCell;
-
+    use super::{SoundAsset, SoundId};
+    use crate::{
+        audio_output::{self, OutputKind},
+        config::SoundSettings,
+    };
     use anyhow::{Result, bail};
     use objc2::{AnyThread, rc::Retained};
     use objc2_app_kit::NSSound;
-    use objc2_foundation::NSData;
-
-    use super::{SoundAsset, SoundId};
+    use objc2_foundation::{NSData, NSString};
+    use std::cell::RefCell;
 
     struct LoadedSound {
         id: SoundId,
+        quiet: bool,
+        generation: u64,
         sound: Retained<NSSound>,
     }
+    thread_local! { static LOADED_SOUNDS: RefCell<Vec<LoadedSound>> = const { RefCell::new(Vec::new()) }; }
 
-    thread_local! {
-        static LOADED_SOUNDS: RefCell<Vec<LoadedSound>> = const { RefCell::new(Vec::new()) };
+    pub(super) fn stop_before(generation: u64) {
+        LOADED_SOUNDS.with(|slot| {
+            if let Ok(loaded) = slot.try_borrow() {
+                for item in loaded.iter().filter(|item| item.generation < generation) {
+                    if item.sound.isPlaying() {
+                        item.sound.stop();
+                    }
+                }
+            }
+        });
     }
 
-    pub fn play(asset: SoundAsset, volume_percent: u8) -> Result<()> {
+    pub fn play(asset: SoundAsset, volume_percent: u8, headphone_volume_percent: u8) -> Result<()> {
+        let watched = audio_output::watch();
+        let generation = audio_output::generation();
+        let route = audio_output::current();
+        // Bind to the observed device, rather than following a new default at
+        // a previously computed speaker gain. Missing routes stay silent.
+        let Some(uid) = route.uid else { return Ok(()) };
+        let quiet = route.kind != OutputKind::Speakers || !watched;
+        let settings = SoundSettings {
+            volume_percent,
+            headphone_volume_percent,
+            ..SoundSettings::default()
+        };
+        let volume = if quiet {
+            OutputKind::Headphones.volume(&settings)
+        } else {
+            volume_percent
+        };
+        if volume == 0 {
+            return Ok(());
+        }
         LOADED_SOUNDS.with_borrow_mut(|loaded| {
-            if !asset.keyboard {
+            if quiet || !asset.keyboard {
                 for item in loaded.iter() {
                     if item.sound.isPlaying() {
                         item.sound.stop();
                     }
                 }
             }
-
-            let index = if let Some(index) = loaded.iter().position(|item| item.id == asset.id) {
+            let index = if let Some(index) = loaded
+                .iter()
+                .position(|item| item.id == asset.id && item.quiet == quiet)
+            {
                 index
             } else {
-                let data = NSData::with_bytes(asset.bytes.as_ref());
-                let sound = NSSound::initWithData(NSSound::alloc(), &data).ok_or_else(|| {
-                    anyhow::anyhow!("AppKit rejected the embedded {} WAV sound", asset.slug)
-                })?;
+                let softened;
+                let bytes = if quiet {
+                    softened = super::headphone_wav(&asset.bytes)?;
+                    softened.as_slice()
+                } else {
+                    asset.bytes.as_ref()
+                };
+                let sound = NSSound::initWithData(NSSound::alloc(), &NSData::with_bytes(bytes))
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("AppKit rejected the embedded {} WAV sound", asset.slug)
+                    })?;
                 loaded.push(LoadedSound {
                     id: asset.id,
+                    quiet,
+                    generation,
                     sound,
                 });
                 loaded.len() - 1
             };
-
-            let sound = &loaded[index].sound;
-            if sound.isPlaying() {
-                sound.stop();
+            let item = &mut loaded[index];
+            if item.sound.isPlaying() {
+                item.sound.stop();
             }
-            sound.setCurrentTime(0.0);
-            sound.setVolume(f32::from(volume_percent) / 100.0);
-            if !sound.play() {
+            if audio_output::generation() != generation {
+                return Ok(());
+            }
+            item.generation = generation;
+            item.sound
+                .setPlaybackDeviceIdentifier(Some(&NSString::from_str(&uid)));
+            item.sound.setCurrentTime(0.0);
+            item.sound.setVolume(f32::from(volume) / 100.0);
+            if !item.sound.play() {
                 bail!("AppKit could not start {} sound playback", asset.slug);
             }
+            if audio_output::generation() != generation {
+                item.sound.stop();
+            }
+            tracing::debug!(
+                output = route.kind.label(),
+                volume,
+                quiet,
+                "started output-aware sound playback"
+            );
             Ok(())
         })
     }
@@ -453,7 +597,11 @@ mod platform {
 
     use super::{SoundAsset, scale_pcm16_wav};
 
-    pub fn play(asset: SoundAsset, volume_percent: u8) -> Result<()> {
+    pub fn play(
+        asset: SoundAsset,
+        volume_percent: u8,
+        _headphone_volume_percent: u8,
+    ) -> Result<()> {
         let path = cached_sound(&asset, volume_percent)?;
         Command::new("canberra-gtk-play")
             .arg("--file")
@@ -495,7 +643,11 @@ mod platform {
 
     use super::{SoundAsset, scale_pcm16_wav};
 
-    pub fn play(asset: SoundAsset, volume_percent: u8) -> Result<()> {
+    pub fn play(
+        asset: SoundAsset,
+        volume_percent: u8,
+        _headphone_volume_percent: u8,
+    ) -> Result<()> {
         let scaled = scale_pcm16_wav(asset.bytes.as_ref(), volume_percent)?;
         thread::Builder::new()
             .name(format!("upyr-sound-{}-{:?}", asset.slug, asset.id))
@@ -519,7 +671,11 @@ mod platform {
 
     use super::SoundAsset;
 
-    pub fn play(_asset: SoundAsset, _volume_percent: u8) -> Result<()> {
+    pub fn play(
+        _asset: SoundAsset,
+        _volume_percent: u8,
+        _headphone_volume_percent: u8,
+    ) -> Result<()> {
         bail!("embedded sound playback is unavailable on this platform")
     }
 }
@@ -527,6 +683,46 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn headphone_pcm_has_a_peak_ceiling_and_soft_edges_without_amplifying() {
+        let mut input = upyr_audio::render_wav(
+            upyr_audio::SoundPack::Arcade,
+            Cue::Event(EventCue::AutoCorrect),
+            17,
+        );
+        let range = pcm16_data_range(&input).unwrap();
+        for sample in input[range.clone()].chunks_exact_mut(2) {
+            sample.copy_from_slice(&i16::MAX.to_le_bytes());
+        }
+        let output = headphone_wav(&input).unwrap();
+        assert_eq!(input.len(), output.len());
+        let samples: Vec<_> = output[range.clone()]
+            .chunks_exact(2)
+            .map(|s| i16::from_le_bytes([s[0], s[1]]))
+            .collect();
+        assert_eq!(samples.first(), Some(&0));
+        assert_eq!(samples.last(), Some(&0));
+        assert!(
+            samples
+                .iter()
+                .all(|sample| i32::from(*sample).abs() <= 16_383)
+        );
+        for sample in input[range.clone()].chunks_exact_mut(2) {
+            sample.copy_from_slice(&128_i16.to_le_bytes());
+        }
+        let quiet = headphone_wav(&input).unwrap();
+        assert!(
+            quiet[range]
+                .chunks_exact(2)
+                .all(|s| i16::from_le_bytes([s[0], s[1]]).abs() <= 128)
+        );
+        for pack in SoundPack::ALL {
+            for event in SoundEvent::ALL {
+                assert!(headphone_wav(&event_asset(event, pack).bytes).is_ok());
+            }
+        }
+    }
 
     #[test]
     fn all_packs_generate_distinct_pcm16_event_assets() {
@@ -561,6 +757,28 @@ mod tests {
         }
 
         assert_eq!(waveforms.len(), packs.len() * expected.len());
+    }
+
+    #[test]
+    fn anime_events_have_distinct_embedded_pcm16_assets() {
+        let expected = [
+            (SoundEvent::AutoCorrect, "anime-auto-correct"),
+            (SoundEvent::ManualConversion, "anime-manual-conversion"),
+            (SoundEvent::LayoutSwitch, "anime-layout-switch"),
+            (SoundEvent::Pause, "anime-pause"),
+            (SoundEvent::Resume, "anime-resume"),
+            (SoundEvent::Error, "anime-error"),
+        ];
+
+        for (event, slug) in expected {
+            let asset = anime_event_asset(event);
+            assert_eq!(asset.id, SoundId::Event(SoundPack::Anime, event));
+            assert_eq!(asset.slug, slug);
+            assert!(asset.bytes.as_ref().len() > 44);
+            let samples = pcm16_data_range(asset.bytes.as_ref()).unwrap();
+            assert!(!samples.is_empty());
+            assert!(samples.len() <= 44_100 * 2 * 350 / 1_000);
+        }
     }
 
     #[test]
