@@ -53,7 +53,8 @@ fn init_and_doctor_report_current_configuration() {
     assert!(initialized.status.success());
 
     let source = fs::read_to_string(&config).expect("read initialized config");
-    assert!(source.contains("config_version = 7"));
+    assert!(source.contains("config_version = 12"));
+    assert!(source.contains("[globe_switch]"));
     assert!(source.contains("[sounds]"));
     assert!(source.contains("volume_percent = 65"));
     assert!(source.contains("modifier_gesture = \"disabled\""));
@@ -65,10 +66,48 @@ fn init_and_doctor_report_current_configuration() {
         .expect("run doctor");
     assert!(doctor.status.success());
     let report = String::from_utf8(doctor.stdout).unwrap();
-    assert!(report.contains("Config schema: 7"));
+    assert!(report.contains("Config schema: 12"));
     assert!(report.contains("Modifier gesture: Disabled"));
     #[cfg(target_os = "macos")]
     assert!(report.contains("Accessibility access: "));
 
+    let _ = fs::remove_dir_all(config.parent().unwrap());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn globe_configuration_changes_do_not_start_an_agent_or_claim_the_key() {
+    let config = temporary_config("globe.toml");
+    let enabled = upyr()
+        .args(["globe", "enable"])
+        .env("UPYR_CONFIG", &config)
+        .output()
+        .expect("enable integrated switcher");
+    assert!(
+        enabled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&enabled.stderr)
+    );
+    let decoded: upyr::config::Config =
+        toml::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
+    assert!(decoded.globe_switch.enabled);
+    assert!(!decoded.auto_correct);
+    let status = upyr()
+        .args(["globe", "status"])
+        .env("UPYR_CONFIG", &config)
+        .output()
+        .expect("read switcher status");
+    assert!(status.status.success());
+    assert!(
+        String::from_utf8(status.stdout)
+            .unwrap()
+            .contains("Globe-key switching: true")
+    );
+    let listed = upyr()
+        .args(["globe", "list"])
+        .env("UPYR_CONFIG", &config)
+        .output()
+        .expect("list input sources");
+    assert!(listed.status.success());
     let _ = fs::remove_dir_all(config.parent().unwrap());
 }

@@ -6,7 +6,7 @@ if [ "$#" -ne 1 ]; then
     exit 64
 fi
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 VERSION=$(sh "$ROOT/packaging/version.sh")
 EXPECTED="v$VERSION"
 

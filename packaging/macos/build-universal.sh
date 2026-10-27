@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-export MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-11.0}
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
+export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-11.0}"
 
 fail() {
     echo "error: $*" >&2
@@ -26,7 +26,10 @@ for binary in upyr upyr-background upyr-settings; do
         "$ROOT/target/aarch64-apple-darwin/release/$binary" \
         "$ROOT/target/x86_64-apple-darwin/release/$binary" \
         -output "$output"
-    lipo "$output" -verify_arch arm64 x86_64
+    # Recent lipo builds misparse multiple -verify_arch arguments as inputs.
+    for architecture in arm64 x86_64; do
+        lipo "$output" -verify_arch "$architecture"
+    done
     archs=$(lipo -archs "$output")
     case "$archs" in
         "arm64 x86_64"|"x86_64 arm64") ;;

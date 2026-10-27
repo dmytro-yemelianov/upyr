@@ -7,12 +7,69 @@ pub fn revision() -> Option<i64> {
     platform::revision()
 }
 
+/// Identifies Upyr's temporary clipboard value. Native revision counters also
+/// distinguish a later user copy of exactly the same text.
+pub(crate) struct ClipboardOwnership {
+    revision: Option<i64>,
+    text: String,
+}
+
+impl ClipboardOwnership {
+    pub fn after_write(temporary: &str) -> Self {
+        Self {
+            revision: revision(),
+            text: temporary.to_owned(),
+        }
+    }
+
+    pub fn is_current(&self, clipboard: &mut arboard::Clipboard) -> bool {
+        // Check content as well as the revision: another writer can intervene
+        // between our write and the initial revision read.
+        let text = clipboard.get_text().ok();
+        self.matches(revision(), text.as_deref())
+    }
+
+    fn matches(&self, current_revision: Option<i64>, current_text: Option<&str>) -> bool {
+        self.revision
+            .is_none_or(|expected| current_revision == Some(expected))
+            && current_text == Some(self.text.as_str())
+    }
+}
+
 /// Writes text with the platform's clipboard-history exclusion convention.
 pub fn set_temporary_text(
     clipboard: &mut arboard::Clipboard,
     text: &str,
 ) -> Result<(), arboard::Error> {
     platform::set_temporary_text(clipboard, text)
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::ClipboardOwnership;
+
+    #[test]
+    fn later_copies_cannot_be_overwritten_by_a_saved_clipboard() {
+        let owned = ClipboardOwnership {
+            revision: Some(41),
+            text: "temporary text".to_owned(),
+        };
+        assert!(owned.matches(Some(41), Some("temporary text")));
+        assert!(!owned.matches(Some(42), Some("temporary text")));
+        assert!(!owned.matches(None, Some("temporary text")));
+        assert!(!owned.matches(Some(41), Some("a racing user copy")));
+    }
+
+    #[test]
+    fn platforms_without_revisions_require_the_temporary_value_to_remain() {
+        let owned = ClipboardOwnership {
+            revision: None,
+            text: "converted text".to_owned(),
+        };
+        assert!(owned.matches(None, Some("converted text")));
+        assert!(!owned.matches(None, Some("a newer user copy")));
+        assert!(!owned.matches(None, None));
+    }
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

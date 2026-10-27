@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 SOURCE=${1:-"$ROOT/packaging/macos/UpyrIcon.svg"}
 OUTPUT=${2:-"$ROOT/packaging/macos/Upyr.icns"}
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/upyr-icon.XXXXXX")

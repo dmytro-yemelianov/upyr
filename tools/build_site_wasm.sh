@@ -5,7 +5,7 @@
 # on every deploy, and a contributor runs it locally to preview the demo.
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 OUT_DIR="$ROOT/site/wasm"
 
 fail() {

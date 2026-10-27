@@ -70,6 +70,12 @@ jobs:
             libgtk-3-dev libayatana-appindicator3-dev
       - name: Run workspace tests
         run: cargo test --workspace --all-targets --locked
+      - name: Compile the native Globe-key probe
+        if: runner.os == 'macOS'
+        run: swiftc -O -warnings-as-errors -o target/globe-probe tools/globe-probe.swift
+      - name: Compile the opt-in Superset input probe
+        if: runner.os == 'macOS'
+        run: swiftc -O -warnings-as-errors -o target/superset-input-probe tools/superset-input-probe.swift
 
   wasm:
     name: WASM contract
@@ -129,12 +135,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev \
-            libgtk-3-dev libayatana-appindicator3-dev zstd
+            libgtk-3-dev libayatana-appindicator3-dev zstd shellcheck
       - name: Verify codebase graph artifact
         run: python3 tools/check_codebase_graph.py
+      - name: Test graph repository identity checks
+        run: python3 -m unittest tools.test_check_codebase_graph
       - name: Verify release version synchronization
         run: python3 tools/check_version_sync.py
       - name: Check formatting
         run: cargo fmt --all -- --check
+      - name: Check packaging shell scripts
+        run: shellcheck packaging/version.sh packaging/macos/*.sh packaging/linux/*.sh tools/*.sh
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings

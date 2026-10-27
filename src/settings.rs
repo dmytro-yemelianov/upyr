@@ -34,6 +34,8 @@ use crate::{
     layout::Direction,
 };
 
+#[cfg(any(target_os = "macos", test))]
+mod flag_choices;
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -461,6 +463,12 @@ struct SearchParameter {
 }
 
 const SEARCH_PARAMETERS: &[SearchParameter] = &[
+    #[cfg(target_os = "macos")]
+    SearchParameter {
+        tab: SettingsTab::General,
+        label: "Globe key switching",
+        terms: "globe fn instant keyboard layout switcher clean tap",
+    },
     SearchParameter {
         tab: SettingsTab::General,
         label: "Conversion direction",
@@ -512,9 +520,19 @@ const SEARCH_PARAMETERS: &[SearchParameter] = &[
         terms: "hotkey record key combination",
     },
     SearchParameter {
+        tab: SettingsTab::Automatic,
+        label: "Slash commands in Superset",
+        terms: "slash command prefix terminal cli tui",
+    },
+    SearchParameter {
         tab: SettingsTab::Shortcuts,
         label: "Fix previous word shortcut",
         terms: "hotkey record backspace key combination",
+    },
+    SearchParameter {
+        tab: SettingsTab::Shortcuts,
+        label: "Undo auto-correction",
+        terms: "undo restore last correction original text layout hotkey command option z скасувати",
     },
     SearchParameter {
         tab: SettingsTab::Shortcuts,
@@ -544,7 +562,12 @@ const SEARCH_PARAMETERS: &[SearchParameter] = &[
     SearchParameter {
         tab: SettingsTab::Feedback,
         label: "Indicator style",
-        terms: "letters flag both language display shows",
+        terms: "letters flag both language display shows preview globe",
+    },
+    SearchParameter {
+        tab: SettingsTab::Feedback,
+        label: "All country flags",
+        terms: "countries territories regions gallery collection catalogue picker choose assign override automatic revert",
     },
     SearchParameter {
         tab: SettingsTab::Feedback,
@@ -555,6 +578,11 @@ const SEARCH_PARAMETERS: &[SearchParameter] = &[
         tab: SettingsTab::Feedback,
         label: "Sound volume",
         terms: "audio loud quiet percent preview",
+    },
+    SearchParameter {
+        tab: SettingsTab::Feedback,
+        label: "Headphone limit",
+        terms: "headphones headset airpods quiet volume output gain навушники гучність",
     },
     SearchParameter {
         tab: SettingsTab::Feedback,

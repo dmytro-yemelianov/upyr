@@ -141,6 +141,13 @@ pub struct PhysicalKeyEvent {
     pub shifted: bool,
 }
 
+/// Returns the layout-independent ASCII character represented by a physical
+/// writing key. This is useful for platform adapters that need to preserve
+/// layout transitions while still feeding a single physical context to Upyr.
+pub fn physical_character(event: PhysicalKeyEvent) -> Option<char> {
+    physical_english_character(event.key, event.shifted)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WordSample {
     physical_word: String,
@@ -329,9 +336,21 @@ fn evaluate_with_scorer<S: CandidateScorer + ?Sized>(
     // punctuation-preserving interpretation first, then fall back to the
     // ordinary whole-token conversion. This keeps `[ks,` -> `хліб`, while
     // allowing `Jkmuf,` -> `Ольга,`.
+    let full_word_known = known(
+        candidates.target_language,
+        &normalize_word(&candidates.target_word),
+    );
     if let Some(preserved) = Candidates::preserving_terminal_delimiter(sample, &candidates, mapping)
     {
-        if terminal_delimiter_is_likely(&preserved, policy, scorer) {
+        // Do not turn a known whole word's last letter into punctuation just
+        // because its shorter stem also looks plausible to the language model.
+        let preserved_word_known = known(
+            preserved.target_language,
+            &normalize_word(&preserved.target_word),
+        );
+        if (!full_word_known || preserved_word_known)
+            && terminal_delimiter_is_likely(&preserved, policy, scorer)
+        {
             if let AutoDecision::Correct(correction) =
                 evaluate_candidates(&preserved, policy, scorer)
             {
@@ -1286,6 +1305,17 @@ mod tests {
 
         assert_eq!(correction.expected_source, ",j ]] ';b [e.v,f ,'. ,'. ");
         assert_eq!(correction.replacement, "бо її єжи хуюмба бєю бєю ");
+    }
+
+    #[test]
+    fn later_confidence_resolves_a_consistent_ambiguous_prefix() {
+        let correction = correction(evaluate(
+            &context_sample("dvsnb", "nb dvsnb ", InputLayout::English),
+            &AutoCorrectPolicy::default(),
+        ));
+
+        assert_eq!(correction.expected_source, "nb dvsnb ");
+        assert_eq!(correction.replacement, "ти вміти ");
     }
 
     #[test]

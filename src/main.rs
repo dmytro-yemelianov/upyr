@@ -22,6 +22,12 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Configure the integrated macOS Globe-key switcher.
+    #[cfg(target_os = "macos")]
+    Globe {
+        #[command(subcommand)]
+        action: GlobeAction,
+    },
     /// Run the background global-hotkey listener (the default command).
     Run {
         /// Override the configured shortcut, e.g. CmdOrCtrl+Alt+Space.
@@ -56,6 +62,23 @@ enum Command {
     },
 }
 
+#[cfg(target_os = "macos")]
+#[derive(Debug, Subcommand)]
+enum GlobeAction {
+    /// Enable clean Globe-key taps in Upyr's background process.
+    Enable,
+    /// Disable switching and restore the previous macOS Globe-key setting.
+    Disable,
+    /// Restore the macOS setting after an unclean exit; also disables switching.
+    Restore,
+    /// Uninstall standalone GlobeSwitch, then enable the integrated switcher.
+    Migrate,
+    /// Print configuration, permission and standalone-agent diagnostics.
+    Status,
+    /// Print enabled input-source IDs for globe_switch.skipped_layouts.
+    List,
+}
+
 #[derive(Debug, Clone, Copy, Subcommand)]
 enum AutostartAction {
     Enable,
@@ -85,6 +108,8 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command.unwrap_or(Command::Run { hotkey: None }) {
+        #[cfg(target_os = "macos")]
+        Command::Globe { action } => manage_globe(action),
         Command::Run { hotkey } => {
             let mut config = Config::load()?;
             if let Some(hotkey) = hotkey {
@@ -144,6 +169,19 @@ fn doctor() -> Result<()> {
     println!("Layout following: {}", config.switch_layout);
     println!("Config schema: {}", config.config_version);
     #[cfg(target_os = "macos")]
+    {
+        println!(
+            "Globe-key switching: {} ({:?}, {} ms)",
+            config.globe_switch.enabled,
+            config.globe_switch.cycle_order,
+            config.globe_switch.tap_window_ms
+        );
+        println!(
+            "Globe-key diagnostics: {}",
+            upyr::globe_switch::diagnostics()
+        );
+    }
+    #[cfg(target_os = "macos")]
     println!(
         "Accessibility access: {}",
         if upyr::accessibility::is_trusted() {
@@ -162,6 +200,34 @@ fn doctor() -> Result<()> {
         config.auto_correct_sensitivity,
         config.auto_correct_min_word_length
     );
+    println!(
+        "Terminal typing apps: {}",
+        if config.terminal_typing_apps.is_empty() {
+            "disabled".to_owned()
+        } else {
+            config.terminal_typing_apps.join(", ")
+        }
+    );
+    println!(
+        "Slash-command apps: {}",
+        if config.slash_command_apps.is_empty() {
+            "disabled".to_owned()
+        } else {
+            config.slash_command_apps.join(", ")
+        }
+    );
+    #[cfg(target_os = "macos")]
+    {
+        let output = upyr::audio_output::current();
+        println!("Undo correction shortcut: {}", config.undo_hotkey);
+        println!(
+            "Audio output: {} — {}; Upyr volume {}% (headphone limit {}%)",
+            output.name,
+            output.kind.label(),
+            output.kind.volume(&config.sounds),
+            config.sounds.headphone_volume_percent
+        );
+    }
     println!(
         "Modifier gesture: {:?} -> {:?} ({} ms)",
         config.modifier_gesture, config.modifier_gesture_action, config.modifier_gesture_timeout_ms
@@ -197,6 +263,63 @@ fn doctor() -> Result<()> {
         ),
         Ok(None) => println!("Active input source: unavailable on this platform"),
         Err(error) => println!("Active input source: unavailable ({error:#})"),
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn manage_globe(action: GlobeAction) -> Result<()> {
+    if matches!(action, GlobeAction::List) {
+        for source in system_layout::enabled_sources()? {
+            println!("{}\t{}", source.source_id, source.source_name);
+        }
+        return Ok(());
+    }
+    let mut config = Config::load()?;
+    if matches!(action, GlobeAction::Status) {
+        println!("Globe-key switching: {}", config.globe_switch.enabled);
+        println!("{}", upyr::globe_switch::diagnostics());
+        return Ok(());
+    }
+    if matches!(action, GlobeAction::Migrate) {
+        let home = directories::BaseDirs::new().context("could not find the home directory")?;
+        let executable = home
+            .home_dir()
+            .join("Applications/GlobeSwitch.app/Contents/MacOS/globe-switch");
+        let agent = home
+            .home_dir()
+            .join("Library/LaunchAgents/dev.yemelianov.globe-switch.plist");
+        if executable.is_file() {
+            let status = std::process::Command::new(&executable)
+                .arg("uninstall")
+                .status()
+                .context("could not uninstall standalone GlobeSwitch")?;
+            anyhow::ensure!(
+                status.success(),
+                "standalone GlobeSwitch uninstall failed; Upyr was not enabled"
+            );
+        } else {
+            anyhow::ensure!(
+                !agent.exists(),
+                "standalone GlobeSwitch has no uninstaller; run `globe-switch uninstall` first"
+            );
+        }
+    }
+    config.globe_switch.enabled = matches!(action, GlobeAction::Enable | GlobeAction::Migrate);
+    config.write(true)?;
+    if !config.globe_switch.enabled {
+        upyr::globe_switch::restore_system_setting()?;
+    }
+    println!(
+        "Globe-key switching {}. Running Upyr reloads this setting automatically.",
+        if config.globe_switch.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
+    );
+    if config.globe_switch.enabled {
+        println!("Start Upyr if it is not running. Grant input permission if requested.");
     }
     Ok(())
 }

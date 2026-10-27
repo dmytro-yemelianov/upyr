@@ -12,10 +12,24 @@ use enigo::{Direction as KeyDirection, Enigo, Key, Keyboard, Settings};
 use crate::{
     clipboard_guard,
     config::Config,
+    input_context::{self, InputContext},
     layout::{Direction, convert, convert_with_mapping},
     system_layout::{SwitchOutcome, SystemLayout},
 };
 use tracing::{debug, warn};
+
+#[cfg(target_os = "macos")]
+mod input_guard;
+#[cfg(any(target_os = "macos", test))]
+mod pipeline;
+#[cfg(any(target_os = "macos", test))]
+mod terminal_typing;
+#[cfg(target_os = "macos")]
+pub(crate) use input_guard::FocusTarget;
+#[cfg(target_os = "macos")]
+pub(crate) use input_guard::modifiers_released;
+#[cfg(target_os = "macos")]
+pub(crate) use pipeline::{ConversionTask, Progress, Request};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionOutcome {
@@ -29,6 +43,10 @@ pub enum SelectionOutcome {
     /// Automatic correction selected something other than the word observed
     /// by the in-memory tracker, so no text was changed.
     TextMismatch,
+    /// Another clipboard writer replaced Upyr's temporary value before Paste.
+    ClipboardChanged,
+    /// Focus, layout or user input changed before the replacement committed.
+    Cancelled,
 }
 
 enum SavedClipboard {
@@ -51,12 +69,13 @@ enum CopyProbe {
 
 /// Copies the current selection, converts it, and pastes it back into the active app.
 pub fn convert_selection(config: &Config) -> Result<SelectionOutcome> {
-    convert_selection_if_matches(config, None, None)
+    convert_selection_if_matches(config, None, None, None)
 }
 
 fn convert_selection_if_matches(
     config: &Config,
     expected_source: Option<&str>,
+    replacement: Option<&str>,
     on_text_committed: Option<&mut dyn FnMut()>,
 ) -> Result<SelectionOutcome> {
     let mut enigo = Enigo::new(&Settings::default()).context(
@@ -87,7 +106,7 @@ fn convert_selection_if_matches(
         return Ok(SelectionOutcome::TextMismatch);
     }
 
-    let conversion = convert_with_installed_mapping(&selected, config.direction);
+    let conversion = selection_conversion(&selected, config.direction, replacement);
     if !conversion.changed {
         restore(&mut clipboard, saved)?;
         return Ok(SelectionOutcome::NoConvertibleText);
@@ -97,13 +116,30 @@ fn convert_selection_if_matches(
         let _ = restore(&mut clipboard, saved);
         return Err(error).context("could not place converted text on the clipboard");
     }
+    let ownership = clipboard_guard::ClipboardOwnership::after_write(&conversion.text);
     thread::sleep(Duration::from_millis(config.paste_delay_ms));
 
+    if !ownership.is_current(&mut clipboard) {
+        // Another app or the user copied something during the delay. Neither
+        // paste their new value nor overwrite it with our earlier snapshot.
+        return Ok(SelectionOutcome::ClipboardChanged);
+    }
+
+    // TIS may replay a queued Cmd+V if the input source changes immediately
+    // afterward. Complete the macOS layout change before posting that key.
+    #[cfg(target_os = "macos")]
+    let layout_switched = config
+        .switch_layout
+        .then(|| follow_converted_layout(conversion.direction))
+        .flatten();
     if let Err(error) = send_shortcut(&mut enigo, Shortcut::Paste) {
-        let _ = restore(&mut clipboard, saved);
+        if ownership.is_current(&mut clipboard) {
+            let _ = restore(&mut clipboard, saved);
+        }
         return Err(error).context("could not send the paste shortcut");
     }
 
+    #[cfg(not(target_os = "macos"))]
     let layout_switched = config
         .switch_layout
         .then(|| follow_converted_layout(conversion.direction))
@@ -117,7 +153,9 @@ fn convert_selection_if_matches(
     finish_after_text_commit(on_text_committed, || {
         if config.restore_clipboard {
             thread::sleep(Duration::from_millis(config.restore_delay_ms));
-            restore(&mut clipboard, saved)?;
+            if ownership.is_current(&mut clipboard) {
+                restore(&mut clipboard, saved)?;
+            }
         }
         Ok(())
     })?;
@@ -144,6 +182,21 @@ fn convert_with_installed_mapping(text: &str, direction: Direction) -> crate::la
             convert(text, direction)
         }
     }
+}
+
+fn selection_conversion(
+    selected: &str,
+    direction: Direction,
+    replacement: Option<&str>,
+) -> crate::layout::Conversion {
+    if let Some(replacement) = replacement {
+        return crate::layout::Conversion {
+            text: replacement.to_owned(),
+            changed: replacement != selected,
+            direction: crate::layout::resolve_direction(selected, direction),
+        };
+    }
+    convert_with_installed_mapping(selected, direction)
 }
 
 fn arm_copy_probe(clipboard: &mut Clipboard) -> Result<CopyProbe> {
@@ -216,7 +269,7 @@ pub fn convert_previous_word_if_matches(
     )?;
     select_previous_word(&mut enigo)?;
     thread::sleep(Duration::from_millis(30));
-    let outcome = convert_selection_if_matches(config, expected_source, None);
+    let outcome = convert_selection_if_matches(config, expected_source, None, None);
     if matches!(outcome, Ok(SelectionOutcome::NoSelection)) {
         undo_previous_word_selection(&mut enigo)?;
     }
@@ -229,9 +282,21 @@ pub fn convert_previous_word_if_matches(
 pub fn convert_previous_input_if_matches(
     config: &Config,
     expected_source: &str,
+    replacement: &str,
     on_text_committed: &mut dyn FnMut(),
 ) -> Result<SelectionOutcome> {
     if expected_source.is_empty() {
+        return Ok(SelectionOutcome::NoSelection);
+    }
+    if replacement.is_empty() || replacement == expected_source {
+        return Ok(SelectionOutcome::NoConvertibleText);
+    }
+    if input_context::active() == InputContext::Terminal {
+        // Terminal programs often interpret selection arrows as cursor moves.
+        // Ctrl+W cannot verify what it is about to delete, and Ctrl+Y cannot
+        // reliably undo several kills across arbitrary shells and TUIs.
+        // Keep automatic edits fail-closed until a verified terminal adapter
+        // exists. Explicit selection conversion remains available.
         return Ok(SelectionOutcome::NoSelection);
     }
     let mut enigo = Enigo::new(&Settings::default()).context(
@@ -240,8 +305,12 @@ pub fn convert_previous_input_if_matches(
     let characters = expected_source.chars().count();
     select_previous_characters(&mut enigo, characters)?;
     thread::sleep(Duration::from_millis(30));
-    let outcome =
-        convert_selection_if_matches(config, Some(expected_source), Some(on_text_committed));
+    let outcome = convert_selection_if_matches(
+        config,
+        Some(expected_source),
+        Some(replacement),
+        Some(on_text_committed),
+    );
     if matches!(outcome, Ok(SelectionOutcome::NoSelection)) {
         undo_previous_characters_selection(&mut enigo, characters)?;
     }
@@ -407,21 +476,21 @@ fn send_shortcut(enigo: &mut Enigo, shortcut: Shortcut) -> Result<()> {
 
 #[cfg(target_os = "macos")]
 mod physical_keycode {
-    // Apple virtual key codes for the physical C and V keys.
+    // Apple virtual key codes for physical shortcut keys.
     pub const COPY: u16 = 8;
     pub const PASTE: u16 = 9;
 }
 
 #[cfg(target_os = "windows")]
 mod physical_keycode {
-    // Set 1 scan codes for the physical C and V keys.
+    // Set 1 scan codes for physical shortcut keys.
     pub const COPY: u16 = 0x2e;
     pub const PASTE: u16 = 0x2f;
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
 mod physical_keycode {
-    // X11 keycodes for the physical C and V keys (evdev code + 8).
+    // X11 keycodes for physical shortcut keys (evdev code + 8).
     pub const COPY: u16 = 54;
     pub const PASTE: u16 = 55;
 }
@@ -444,5 +513,14 @@ mod tests {
         .expect("post-commit work");
 
         assert_eq!(*order.borrow(), ["monitor", "clipboard"]);
+    }
+
+    #[test]
+    fn automatic_conversion_uses_the_evaluated_replacement_exactly() {
+        let result =
+            selection_conversion("ghbdsn ", Direction::EnglishToUkrainian, Some("Привіт "));
+        assert_eq!(result.text, "Привіт ");
+        assert_eq!(result.direction, Direction::EnglishToUkrainian);
+        assert!(result.changed);
     }
 }

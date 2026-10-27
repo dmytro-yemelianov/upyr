@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 VERSION=$(sh "$ROOT/packaging/version.sh")
 ARCH=${UPYR_DEB_ARCH:-$(dpkg --print-architecture)}
 DIST="$ROOT/dist"

@@ -1,5 +1,36 @@
 # Third-party notices
 
+## GlobeSwitch
+
+The macOS flag-row indicator and pixel flag corpus are adapted from
+[GlobeSwitch](https://github.com/dmytro-yemelianov/globe-switch), commit
+`e018daf06e38094f497dd500e87dc72a22212f63`.
+The corpus started from public-domain country flags and was finished by hand.
+The language-to-region data records Foundation's likely-region expansion.
+`tools/build_globe_flags.py` compiles the original grid into lossless PNGs.
+
+MIT License
+
+Copyright (c) 2026 Dmytro Yemelianov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 ## issw
 
 Upyr's macOS input-source binding contains code adapted from [issw](https://github.com/0xAndoroid/issw).
@@ -28,8 +59,8 @@ SOFTWARE.
 
 ## rdev
 
-Upyr uses [rdev](https://github.com/Narsil/rdev) for native global key-down
-events on macOS, Windows, and Linux/X11.
+Upyr uses [rdev](https://github.com/Narsil/rdev) for physical key types and native
+global key-down events on Windows and Linux/X11. macOS uses AppKit observation.
 
 MIT License
 

@@ -27,7 +27,8 @@ use upyr_audio::KeyCue;
 use super::{
     ACTIVATION_POLL_INTERVAL, APP_VERSION, ActivationInbox, IMPLEMENTATION_SUMMARY,
     PRIVACY_SUMMARY, PROJECT_WEBSITE_URL, REPOSITORY_URL, SEARCH_PARAMETERS, SettingsTab,
-    autostart_attention, parse_exceptions, pretty_hotkey, sensitivity_label, sync_launch_at_login,
+    autostart_attention, flag_choices::FlagChoices, parse_exceptions, pretty_hotkey,
+    sensitivity_label, sync_launch_at_login,
 };
 use crate::{
     autostart,
@@ -51,11 +52,16 @@ const EXCEPTION_ROW_TOP_PADDING: f64 = 8.0;
 const EXCEPTION_FIELD_WIDTH: f64 = 470.0;
 const EXCEPTION_REMOVE_WIDTH: f64 = 90.0;
 
+mod flags_gallery;
+
 struct ControllerIvars {
     config: RefCell<Config>,
     autostart_status: RefCell<autostart::AutostartStatus>,
     activation: ActivationInbox,
     controls: OnceCell<Controls>,
+    flags_gallery: OnceCell<flags_gallery::FlagsGallery>,
+    audio_poll: Cell<std::time::Instant>,
+    flag_choices: RefCell<FlagChoices>,
 }
 
 struct Controls {
@@ -65,11 +71,13 @@ struct Controls {
     status: Retained<NSTextField>,
     direction: Retained<NSPopUpButton>,
     switch_layout: Retained<NSButton>,
+    globe_switch: Retained<NSButton>,
     restore_clipboard: Retained<NSButton>,
     launch_at_login: Retained<NSButton>,
     repair_autostart: Retained<NSButton>,
     remove_autostart: Retained<NSButton>,
     auto_correct: Retained<NSButton>,
+    slash_commands: Retained<NSButton>,
     sensitivity: Retained<NSPopUpButton>,
     minimum_word_length: Retained<NSTextField>,
     auto_delay: Retained<NSTextField>,
@@ -78,17 +86,24 @@ struct Controls {
     exceptions_new_word: Retained<NSTextField>,
     selection_shortcut: Retained<ShortcutRecorder>,
     previous_word_shortcut: Retained<ShortcutRecorder>,
+    undo_shortcut: Retained<ShortcutRecorder>,
     modifier_gesture: Retained<NSPopUpButton>,
     gesture_action: Retained<NSPopUpButton>,
     gesture_timeout: Retained<NSTextField>,
     show_indicator: Retained<NSButton>,
     indicator_duration: Retained<NSTextField>,
     indicator_style: Retained<NSPopUpButton>,
+    flags_preview: Retained<NSView>,
+    preview_layout: Retained<NSPopUpButton>,
+    preview_sources: Vec<crate::system_layout::ActiveInputSource>,
     sounds_enabled: Retained<NSButton>,
     sound_pack: Retained<NSPopUpButton>,
     key_clicks: Retained<NSButton>,
     sound_volume: Retained<NSSlider>,
     sound_volume_label: Retained<NSTextField>,
+    headphone_volume: Retained<NSSlider>,
+    headphone_volume_label: Retained<NSTextField>,
+    audio_output_status: Retained<NSTextField>,
     sound_events: SoundEventControls,
     copy_delay: Retained<NSTextField>,
     paste_delay: Retained<NSTextField>,
@@ -133,11 +148,17 @@ struct FeedbackControls {
     show_indicator: Retained<NSButton>,
     indicator_duration: Retained<NSTextField>,
     indicator_style: Retained<NSPopUpButton>,
+    flags_preview: Retained<NSView>,
+    preview_layout: Retained<NSPopUpButton>,
+    preview_sources: Vec<crate::system_layout::ActiveInputSource>,
     sounds_enabled: Retained<NSButton>,
     sound_pack: Retained<NSPopUpButton>,
     key_clicks: Retained<NSButton>,
     sound_volume: Retained<NSSlider>,
     sound_volume_label: Retained<NSTextField>,
+    headphone_volume: Retained<NSSlider>,
+    headphone_volume_label: Retained<NSTextField>,
+    audio_output_status: Retained<NSTextField>,
     sound_events: SoundEventControls,
 }
 
@@ -170,7 +191,9 @@ define_class!(
                 self.set_status(false, &format!("Could not save settings: {error:#}"));
                 return;
             }
+            self.ivars().flag_choices.borrow_mut().accept(config.globe_switch.layout_flags.clone());
             self.ivars().config.replace(config);
+            self.refresh_flag_choices();
 
             let desired = is_checked(&self.controls().launch_at_login);
             match sync_launch_at_login(desired) {
@@ -295,26 +318,17 @@ define_class!(
         fn preview_feedback(&self, _sender: &AnyObject) {
             let controls = self.controls();
             let preview = Config {
-                show_layout_indicator: is_checked(&controls.show_indicator),
+                show_layout_indicator: true,
                 layout_indicator_duration_ms: parse_number(
-                    &controls.indicator_duration,
-                    "indicator duration",
-                    250,
-                    3_000,
-                )
-                .unwrap_or(900),
+                    &controls.indicator_duration, "indicator duration", 250, 3_000,
+                ).unwrap_or(900),
                 indicator_style: self.selected_indicator_style(),
-                ..Config::default()
+                ..self.flag_preview_config()
             };
-            if !preview.show_layout_indicator {
-                self.set_status(false, "Enable the language flag to preview it.");
-                return;
-            }
-
-            let indicator_shown = crate::feedback::layout_switched(
-                crate::system_layout::SystemLayout::Ukrainian,
-                &preview,
-            );
+            self.refresh_flag_preview();
+            let indicator_shown = self.selected_preview_source().is_some_and(|source| {
+                crate::feedback::globe_switched(None, source, &preview)
+            });
             if indicator_shown {
                 unsafe {
                     let _: () = msg_send![
@@ -326,6 +340,78 @@ define_class!(
                 }
             }
             self.set_status(true, "Previewed the language flag.");
+        }
+
+        #[unsafe(method(flagPreviewChanged:))]
+        fn flag_preview_changed(&self, _sender: &AnyObject) {
+            if let Some(gallery) = self.ivars().flags_gallery.get() {
+                gallery.select_layout(self.selected_preview_source().map(|source| source.source_id.as_str()));
+            }
+            self.refresh_flag_choices();
+        }
+
+        #[unsafe(method(openCountryFlags:))]
+        fn open_country_flags(&self, _sender: &AnyObject) {
+            let gallery = self.ivars().flags_gallery.get_or_init(|| {
+                flags_gallery::FlagsGallery::new(self, self.mtm())
+            });
+            gallery.select_layout(self.selected_preview_source().map(|source| source.source_id.as_str()));
+            self.refresh_flag_choices();
+            gallery.show();
+        }
+
+        #[unsafe(method(searchCountryFlags:))]
+        fn search_country_flags(&self, _sender: &AnyObject) {
+            if let Some(gallery) = self.ivars().flags_gallery.get() {
+                gallery.refresh();
+            }
+        }
+
+        #[unsafe(method(flagLayoutChanged:))]
+        fn flag_layout_changed(&self, _sender: &AnyObject) {
+            self.sync_flag_layout();
+            self.refresh_flag_choices();
+        }
+
+        #[unsafe(method(chooseCountryFlag:))]
+        fn choose_country_flag(&self, sender: &NSButton) {
+            let Some(gallery) = self.ivars().flags_gallery.get() else { return };
+            let Some(source) = gallery.selected_layout_id() else { return };
+            let Some(code) = usize::try_from(sender.tag()).ok().and_then(|index| gallery.code(index)) else { return };
+            self.ivars().flag_choices.borrow_mut().draft.insert(source.to_owned(), code.to_owned());
+            self.sync_flag_layout();
+            self.refresh_flag_choices();
+            self.set_status(true, "Flag preview updated. Choose Save Flags to apply your choices.");
+        }
+
+        #[unsafe(method(useAutomaticFlag:))]
+        fn use_automatic_flag(&self, _sender: &AnyObject) {
+            let Some(gallery) = self.ivars().flags_gallery.get() else { return };
+            let Some(source) = gallery.selected_layout_id() else { return };
+            self.ivars().flag_choices.borrow_mut().draft.remove(source);
+            self.sync_flag_layout();
+            self.refresh_flag_choices();
+        }
+
+        #[unsafe(method(revertCountryFlags:))]
+        fn revert_country_flags(&self, _sender: &AnyObject) {
+            self.ivars().flag_choices.borrow_mut().revert();
+            self.refresh_flag_choices();
+            self.set_status(true, "Unsaved flag changes reverted.");
+        }
+
+        #[unsafe(method(saveCountryFlags:))]
+        fn save_country_flags(&self, _sender: &AnyObject) {
+            let result = self.persist_flag_choices();
+            if let Some(gallery) = self.ivars().flags_gallery.get() {
+                match result {
+                    Ok(()) => {
+                        gallery.set_status(true, "Flags saved.");
+                        self.set_status(true, "Flags saved. The running Upyr process will reload them.");
+                    }
+                    Err(error) => gallery.set_status(false, &format!("Could not save flags: {error:#}")),
+                }
+            }
         }
 
         #[unsafe(method(previewAutoCorrectSound:))]
@@ -371,6 +457,17 @@ define_class!(
         #[unsafe(method(soundVolumeChanged:))]
         fn sound_volume_changed(&self, _sender: &AnyObject) {
             self.refresh_sound_volume_label();
+            self.refresh_audio_output_status();
+        }
+        #[unsafe(method(headphoneVolumeChanged:))]
+        fn headphone_volume_changed(&self, _sender: &AnyObject) {
+            crate::feedback::stop_rerouted_audio(u64::MAX);
+            self.refresh_headphone_volume_label();
+        }
+        #[unsafe(method(resetUndoShortcut:))]
+        fn reset_undo_shortcut(&self, _sender: &AnyObject) {
+            self.controls().undo_shortcut.set_value(&Config::default().undo_hotkey);
+            self.validate_shortcuts();
         }
 
         #[unsafe(method(hideFeedback:))]
@@ -404,6 +501,10 @@ define_class!(
 
         #[unsafe(method(checkSettingsActivation:))]
         fn check_settings_activation(&self, _sender: Option<&AnyObject>) {
+            if self.ivars().audio_poll.get().elapsed() >= std::time::Duration::from_secs(1) {
+                self.ivars().audio_poll.set(std::time::Instant::now());
+                self.refresh_audio_output_status();
+            }
             match self.ivars().activation.drain() {
                 Ok(Some(tab)) => self.activate_tab(tab),
                 Ok(None) => {}
@@ -432,6 +533,7 @@ impl NativeController {
         settings.pack = self.selected_sound_pack();
         settings.set_event_selected(event, true);
         settings.volume_percent = self.sound_volume_percent();
+        settings.headphone_volume_percent = self.headphone_volume_percent();
         match crate::feedback::preview_sound(event, &settings) {
             Ok(()) => self.set_status(true, &format!("Previewed {} sound.", event.label())),
             Err(error) => self.set_status(
@@ -447,6 +549,7 @@ impl NativeController {
         settings.key_clicks = true;
         settings.pack = self.selected_sound_pack();
         settings.volume_percent = self.sound_volume_percent();
+        settings.headphone_volume_percent = self.headphone_volume_percent();
         match crate::feedback::preview_key_sound(cue, &settings) {
             Ok(()) => self.set_status(true, &format!("Previewed {label}.")),
             Err(error) => {
@@ -580,6 +683,36 @@ impl NativeController {
         }
     }
 
+    fn headphone_volume_percent(&self) -> u8 {
+        self.controls()
+            .headphone_volume
+            .doubleValue()
+            .round()
+            .clamp(0.0, 30.0) as u8
+    }
+    fn refresh_headphone_volume_label(&self) {
+        set_text(
+            &self.controls().headphone_volume_label,
+            format!("{}%", self.headphone_volume_percent()),
+        );
+        self.refresh_audio_output_status();
+    }
+    fn refresh_audio_output_status(&self) {
+        let route = crate::audio_output::current();
+        let mut settings = self.ivars().config.borrow().sounds;
+        settings.volume_percent = self.sound_volume_percent();
+        settings.headphone_volume_percent = self.headphone_volume_percent();
+        set_text(
+            &self.controls().audio_output_status,
+            format!(
+                "{} · {} · Upyr {}%",
+                route.name,
+                route.kind.label(),
+                route.kind.volume(&settings)
+            ),
+        );
+    }
+
     fn sound_volume_percent(&self) -> u8 {
         self.controls()
             .sound_volume
@@ -602,11 +735,15 @@ impl NativeController {
         activation: ActivationInbox,
         mtm: MainThreadMarker,
     ) -> Retained<Self> {
+        let flag_choices = FlagChoices::new(config.globe_switch.layout_flags.clone());
         let this = Self::alloc(mtm).set_ivars(ControllerIvars {
             config: RefCell::new(config),
             autostart_status: RefCell::new(autostart_status),
             activation,
             controls: OnceCell::new(),
+            flags_gallery: OnceCell::new(),
+            audio_poll: Cell::new(std::time::Instant::now()),
+            flag_choices: RefCell::new(flag_choices),
         });
         unsafe { msg_send![super(this), init] }
     }
@@ -686,13 +823,14 @@ impl NativeController {
             general,
             direction,
             switch_layout,
+            globe_switch,
             restore_clipboard,
             login,
             repair_autostart,
             remove_autostart,
         ) = make_general_page(self, mtm);
         add_tab(&tabs, "General", &general, mtm);
-        let (automatic, auto_correct, sensitivity, minimum_word_length, auto_delay) =
+        let (automatic, auto_correct, sensitivity, minimum_word_length, auto_delay, slash_commands) =
             make_automatic_page(mtm);
         add_tab(&tabs, "Automatic", &automatic, mtm);
         let ExceptionsControls {
@@ -705,6 +843,7 @@ impl NativeController {
             shortcuts,
             selection_shortcut,
             previous_word_shortcut,
+            undo_shortcut,
             modifier_gesture,
             gesture_action,
             gesture_timeout,
@@ -715,11 +854,17 @@ impl NativeController {
             show_indicator,
             indicator_duration,
             indicator_style,
+            flags_preview,
+            preview_layout,
+            preview_sources,
             sounds_enabled,
             sound_pack,
             key_clicks,
             sound_volume,
             sound_volume_label,
+            headphone_volume,
+            headphone_volume_label,
+            audio_output_status,
             sound_events,
         } = make_feedback_page(self, mtm);
         add_tab(&tabs, "Feedback", &feedback, mtm);
@@ -764,11 +909,13 @@ impl NativeController {
                 status,
                 direction,
                 switch_layout,
+                globe_switch,
                 restore_clipboard,
                 launch_at_login: login,
                 repair_autostart,
                 remove_autostart,
                 auto_correct,
+                slash_commands,
                 sensitivity,
                 minimum_word_length,
                 auto_delay,
@@ -777,17 +924,24 @@ impl NativeController {
                 exceptions_new_word,
                 selection_shortcut,
                 previous_word_shortcut,
+                undo_shortcut,
                 modifier_gesture,
                 gesture_action,
                 gesture_timeout,
                 show_indicator,
                 indicator_duration,
                 indicator_style,
+                flags_preview,
+                preview_layout,
+                preview_sources,
                 sounds_enabled,
                 sound_pack,
                 key_clicks,
                 sound_volume,
                 sound_volume_label,
+                headphone_volume,
+                headphone_volume_label,
+                audio_output_status,
                 sound_events,
                 copy_delay,
                 paste_delay,
@@ -814,14 +968,41 @@ impl NativeController {
         let mut config = self.ivars().config.borrow().clone();
         config.hotkey = controls.selection_shortcut.value();
         config.last_word_hotkey = controls.previous_word_shortcut.value();
+        config.undo_hotkey = controls.undo_shortcut.value();
+        if let Some(error) = controls.undo_shortcut.error() {
+            return Err(anyhow!("undo shortcut: {error}"));
+        }
         config.direction = match controls.direction.indexOfSelectedItem() {
             1 => Direction::EnglishToUkrainian,
             2 => Direction::UkrainianToEnglish,
             _ => Direction::Smart,
         };
         config.switch_layout = is_checked(&controls.switch_layout);
+        config.globe_switch.enabled = is_checked(&controls.globe_switch);
+        config.globe_switch.layout_flags = Config::load()?.globe_switch.layout_flags;
+        self.ivars()
+            .flag_choices
+            .borrow()
+            .apply_to(&mut config.globe_switch.layout_flags);
         config.restore_clipboard = is_checked(&controls.restore_clipboard);
         config.auto_correct = is_checked(&controls.auto_correct);
+        config
+            .slash_command_apps
+            .retain(|app| app != "com.superset.desktop");
+        if is_checked(&controls.slash_commands) {
+            config
+                .slash_command_apps
+                .push("com.superset.desktop".to_owned());
+            if !config
+                .terminal_typing_apps
+                .iter()
+                .any(|app| app == "com.superset.desktop")
+            {
+                config
+                    .terminal_typing_apps
+                    .push("com.superset.desktop".to_owned());
+            }
+        }
         config.auto_correct_sensitivity = match controls.sensitivity.indexOfSelectedItem() {
             1 => AutoCorrectSensitivity::Balanced,
             2 => AutoCorrectSensitivity::Aggressive,
@@ -854,6 +1035,7 @@ impl NativeController {
         config.indicator_style = self.selected_indicator_style();
         config.sounds.enabled = is_checked(&controls.sounds_enabled);
         config.sounds.volume_percent = self.sound_volume_percent();
+        config.sounds.headphone_volume_percent = self.headphone_volume_percent();
         config.sounds.pack = self.selected_sound_pack();
         config.sounds.key_clicks = is_checked(&controls.key_clicks);
         for event in SoundEvent::ALL {
@@ -870,6 +1052,11 @@ impl NativeController {
     }
 
     fn apply_config(&self, config: &Config) {
+        self.ivars()
+            .flag_choices
+            .borrow_mut()
+            .draft
+            .clone_from(&config.globe_switch.layout_flags);
         let controls = self.controls();
         controls
             .direction
@@ -879,8 +1066,16 @@ impl NativeController {
                 Direction::UkrainianToEnglish => 2,
             });
         set_checked(&controls.switch_layout, config.switch_layout);
+        set_checked(&controls.globe_switch, config.globe_switch.enabled);
         set_checked(&controls.restore_clipboard, config.restore_clipboard);
         set_checked(&controls.auto_correct, config.auto_correct);
+        set_checked(
+            &controls.slash_commands,
+            config
+                .slash_command_apps
+                .iter()
+                .any(|app| app == "com.superset.desktop"),
+        );
         controls
             .sensitivity
             .selectItemAtIndex(match config.auto_correct_sensitivity {
@@ -898,6 +1093,7 @@ impl NativeController {
         controls
             .previous_word_shortcut
             .set_value(&config.last_word_hotkey);
+        controls.undo_shortcut.set_value(&config.undo_hotkey);
         controls
             .modifier_gesture
             .selectItemAtIndex(match config.modifier_gesture {
@@ -928,6 +1124,7 @@ impl NativeController {
                 IndicatorStyle::Flag => 1,
                 IndicatorStyle::Both => 2,
             });
+        self.refresh_flag_choices();
         set_checked(&controls.sounds_enabled, config.sounds.enabled);
         controls
             .sound_pack
@@ -940,6 +1137,10 @@ impl NativeController {
         controls
             .sound_volume
             .setDoubleValue(f64::from(config.sounds.volume_percent));
+        controls
+            .headphone_volume
+            .setDoubleValue(f64::from(config.sounds.headphone_volume_percent));
+        self.refresh_headphone_volume_label();
         self.refresh_sound_volume_label();
         for event in SoundEvent::ALL {
             set_checked(
@@ -952,23 +1153,120 @@ impl NativeController {
         set_text(&controls.restore_delay, config.restore_delay_ms);
     }
 
+    fn selected_preview_source(&self) -> Option<&crate::system_layout::ActiveInputSource> {
+        usize::try_from(self.controls().preview_layout.indexOfSelectedItem())
+            .ok()
+            .and_then(|index| self.controls().preview_sources.get(index))
+    }
+
+    fn flag_preview_config(&self) -> Config {
+        let mut config = self.ivars().config.borrow().clone();
+        config.indicator_style = self.selected_indicator_style();
+        config
+            .globe_switch
+            .layout_flags
+            .clone_from(&self.ivars().flag_choices.borrow().draft);
+        config
+    }
+
+    fn sync_flag_layout(&self) {
+        let source = self
+            .ivars()
+            .flags_gallery
+            .get()
+            .and_then(|gallery| gallery.selected_layout_id());
+        if let Some(index) = source.and_then(|id| {
+            self.controls()
+                .preview_sources
+                .iter()
+                .position(|source| source.source_id == id)
+        }) {
+            self.controls()
+                .preview_layout
+                .selectItemAtIndex(index as isize);
+        }
+    }
+
+    fn refresh_flag_choices(&self) {
+        self.refresh_flag_preview();
+        if let Some(gallery) = self.ivars().flags_gallery.get() {
+            gallery.update(
+                &self.flag_preview_config(),
+                self.ivars().flag_choices.borrow().dirty(),
+            );
+        }
+    }
+
+    fn persist_flag_choices(&self) -> Result<()> {
+        let mut config = Config::load()?;
+        self.ivars()
+            .flag_choices
+            .borrow()
+            .apply_to(&mut config.globe_switch.layout_flags);
+        config.write(true)?;
+        self.ivars()
+            .flag_choices
+            .borrow_mut()
+            .accept(config.globe_switch.layout_flags.clone());
+        self.ivars().config.replace(config);
+        self.refresh_flag_choices();
+        Ok(())
+    }
+
+    fn refresh_flag_preview(&self) {
+        let container = &self.controls().flags_preview;
+        for child in container.subviews().to_vec() {
+            child.removeFromSuperview();
+        }
+        let config = self.flag_preview_config();
+        if config.indicator_style == IndicatorStyle::Flag {
+            let view = crate::feedback::globe_indicator::preview(
+                &config,
+                self.selected_preview_source().map(|s| s.source_id.as_str()),
+                container.bounds(),
+                self.mtm(),
+            );
+            container.addSubview(&view);
+        } else {
+            let layout = self
+                .selected_preview_source()
+                .and_then(|source| source.layout);
+            let text = layout
+                .map(|layout| crate::feedback::indicator_text(layout, config.indicator_style))
+                .unwrap_or("Layout preview");
+            let label = label(text, rect(260.0, 32.0, 220.0, 36.0), self.mtm());
+            label.setFont(Some(&NSFont::boldSystemFontOfSize(24.0)));
+            container.addSubview(&label);
+        }
+    }
+
     fn validate_shortcuts(&self) {
         let controls = self.controls();
-        let selection = controls.selection_shortcut.value();
-        let previous = controls.previous_word_shortcut.value();
-        let message = if controls.selection_shortcut.error().is_some()
-            || controls.previous_word_shortcut.error().is_some()
-        {
-            Some("A shortcut is incomplete. Record a key together with at least one modifier.")
-        } else if shortcuts_equal(&selection, &previous) {
-            Some("The two actions cannot use the same shortcut.")
+        let recorders = [
+            &controls.selection_shortcut,
+            &controls.previous_word_shortcut,
+            &controls.undo_shortcut,
+        ];
+        if recorders.iter().any(|recorder| recorder.error().is_some()) {
+            self.set_status(
+                false,
+                "A shortcut is incomplete. Record a key together with a modifier.",
+            );
         } else {
-            None
-        };
-        if let Some(message) = message {
-            self.set_status(false, message);
-        } else {
-            self.set_status(true, "Shortcuts are valid.");
+            let values = recorders.map(|recorder| recorder.value());
+            let duplicates = (0..values.len()).any(|i| {
+                values[i + 1..]
+                    .iter()
+                    .any(|value| shortcuts_equal(&values[i], value))
+            });
+            self.set_status(
+                !duplicates,
+                if duplicates {
+                    "Actions must use different shortcuts."
+                } else {
+                    "Shortcuts are valid."
+                },
+            );
         }
     }
 
@@ -1169,6 +1467,7 @@ fn make_general_page(
     Retained<NSButton>,
     Retained<NSButton>,
     Retained<NSButton>,
+    Retained<NSButton>,
 ) {
     let page = page(mtm);
     page_header(
@@ -1221,6 +1520,17 @@ fn make_general_page(
     repair_autostart.setHidden(true);
     remove_autostart.setEnabled(false);
     remove_autostart.setHidden(true);
+    let globe_switch = checkbox(
+        "Tap Globe (🌐) to switch keyboard layouts instantly",
+        rect(24.0, 84.0, 590.0, 26.0),
+        mtm,
+    );
+    page.addSubview(&globe_switch);
+    page.addSubview(&label(
+        "Keeps fn shortcuts. Restores macOS handling when paused or quit.",
+        rect(28.0, 52.0, 600.0, 24.0),
+        mtm,
+    ));
     page.addSubview(&switch_layout);
     page.addSubview(&restore);
     page.addSubview(&login);
@@ -1230,6 +1540,7 @@ fn make_general_page(
         page,
         direction,
         switch_layout,
+        globe_switch,
         restore,
         login,
         repair_autostart,
@@ -1246,6 +1557,7 @@ fn make_automatic_page(
     Retained<NSPopUpButton>,
     Retained<NSTextField>,
     Retained<NSTextField>,
+    Retained<NSButton>,
 ) {
     let page = page(mtm);
     page_header(
@@ -1283,7 +1595,13 @@ fn make_automatic_page(
         rect(28.0, 96.0, 590.0, 24.0),
         mtm,
     ));
-    (page, enabled, sensitivity, minimum, delay)
+    let slash_commands = checkbox(
+        "Correct /commands at the start of Superset input lines",
+        rect(24.0, 124.0, 610.0, 26.0),
+        mtm,
+    );
+    page.addSubview(&slash_commands);
+    (page, enabled, sensitivity, minimum, delay, slash_commands)
 }
 
 fn make_exceptions_page(
@@ -1347,6 +1665,7 @@ fn make_shortcuts_page(
     Retained<NSView>,
     Retained<ShortcutRecorder>,
     Retained<ShortcutRecorder>,
+    Retained<ShortcutRecorder>,
     Retained<NSPopUpButton>,
     Retained<NSPopUpButton>,
     Retained<NSTextField>,
@@ -1397,8 +1716,30 @@ fn make_shortcuts_page(
         mtm,
     ));
     page.addSubview(&label(
+        "Undo auto-correction",
+        rect(28.0, 242.0, 180.0, 24.0),
+        mtm,
+    ));
+    let undo = ShortcutRecorder::new(
+        "CmdOrCtrl+Alt+Z",
+        rect(210.0, 236.0, 310.0, 32.0),
+        controller,
+        mtm,
+    );
+    undo.setToolTip(Some(&NSString::from_str(
+        "Restore the last correction before more typing, clicks or cursor movement.",
+    )));
+    page.addSubview(&undo);
+    page.addSubview(&action_button(
+        "Reset",
+        rect(536.0, 236.0, 82.0, 32.0),
+        controller,
+        sel!(resetUndoShortcut:),
+        mtm,
+    ));
+    page.addSubview(&label(
         "Modifier gesture",
-        rect(28.0, 218.0, 180.0, 24.0),
+        rect(28.0, 186.0, 180.0, 24.0),
         mtm,
     ));
     let gesture = popup(
@@ -1408,27 +1749,36 @@ fn make_shortcuts_page(
             "Double Shift",
             "Double Control + Shift",
         ],
-        rect(210.0, 214.0, 258.0, 28.0),
+        rect(210.0, 182.0, 258.0, 28.0),
         mtm,
     );
     page.addSubview(&gesture);
     page.addSubview(&label(
         "Gesture action",
-        rect(28.0, 174.0, 180.0, 24.0),
+        rect(28.0, 142.0, 180.0, 24.0),
         mtm,
     ));
     let action = popup(
         &["Fix previous word", "Convert selection"],
-        rect(210.0, 170.0, 258.0, 28.0),
+        rect(210.0, 138.0, 258.0, 28.0),
         mtm,
     );
     page.addSubview(&action);
-    let timeout = numeric_row(&page, "Double-tap timeout (ms)", 126.0, mtm);
-    (page, selection, previous, gesture, action, timeout)
+    let timeout = numeric_row(&page, "Double-tap timeout (ms)", 94.0, mtm);
+    page.addSubview(&label(
+        "Undo is available for 30 seconds, until further input or navigation.",
+        rect(28.0, 46.0, 610.0, 24.0),
+        mtm,
+    ));
+    (page, selection, previous, undo, gesture, action, timeout)
 }
 
 fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> FeedbackControls {
-    let page = page(mtm);
+    let container = page(mtm);
+    let page = NSView::initWithFrame(
+        NSView::alloc(mtm),
+        rect(0.0, 0.0, PAGE_WIDTH, PAGE_HEIGHT + 210.0),
+    );
     page_header(
         &page,
         "Feedback",
@@ -1436,7 +1786,7 @@ fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> F
         mtm,
     );
     let indicator = checkbox(
-        "Show a temporary language flag next to the pointer",
+        "Show the layout indicator",
         rect(24.0, 342.0, 470.0, 26.0),
         mtm,
     );
@@ -1459,13 +1809,61 @@ fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> F
     let indicator_style = popup(
         &[
             IndicatorStyle::Letters.label(),
-            IndicatorStyle::Flag.label(),
+            "GlobeSwitch flags",
             IndicatorStyle::Both.label(),
         ],
         rect(436.0, 305.0, 168.0, 28.0),
         mtm,
     );
     page.addSubview(&indicator_style);
+
+    unsafe {
+        indicator_style.setTarget(Some(controller));
+        indicator_style.setAction(Some(sel!(flagPreviewChanged:)));
+    }
+    // Make room for an embedded preview without compressing sound controls.
+    for child in page.subviews().to_vec() {
+        let mut frame = child.frame();
+        frame.origin.y += 140.0;
+        child.setFrame(frame);
+    }
+    page.addSubview(&label(
+        "Preview layout",
+        rect(48.0, 408.0, 130.0, 24.0),
+        mtm,
+    ));
+    let preview_sources: Vec<_> = crate::system_layout::indicator_sources()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(source, _)| source)
+        .collect();
+    let names: Vec<_> = preview_sources
+        .iter()
+        .map(|s| s.source_name.as_str())
+        .collect();
+    let preview_layout = popup(&names, rect(180.0, 405.0, 260.0, 28.0), mtm);
+    if let Ok(Some(current)) = crate::system_layout::current() {
+        if let Some(index) = preview_sources
+            .iter()
+            .position(|s| s.source_id == current.source_id)
+        {
+            preview_layout.selectItemAtIndex(index as isize);
+        }
+    }
+    unsafe {
+        preview_layout.setTarget(Some(controller));
+        preview_layout.setAction(Some(sel!(flagPreviewChanged:)));
+    }
+    page.addSubview(&preview_layout);
+    page.addSubview(&action_button(
+        "All Country Flags…",
+        rect(456.0, 405.0, 188.0, 30.0),
+        controller,
+        sel!(openCountryFlags:),
+        mtm,
+    ));
+    let flags_preview = NSView::initWithFrame(NSView::alloc(mtm), rect(24.0, 302.0, 620.0, 100.0));
+    page.addSubview(&flags_preview);
 
     let sounds_enabled = checkbox("Enable sounds", rect(24.0, 267.0, 145.0, 26.0), mtm);
     page.addSubview(&sounds_enabled);
@@ -1536,16 +1934,62 @@ fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> F
     let resume = sound_event_row(&page, SoundEvent::Resume, 63.0, controller, mtm);
     let error = sound_event_row(&page, SoundEvent::Error, 30.0, controller, mtm);
 
+    for child in page.subviews().to_vec() {
+        let mut frame = child.frame();
+        if frame.origin.y >= 250.0 {
+            frame.origin.y += 70.0;
+            child.setFrame(frame);
+        }
+    }
+    page.addSubview(&label(
+        "Headphone limit",
+        rect(48.0, 290.0, 190.0, 24.0),
+        mtm,
+    ));
+    let headphone_volume = unsafe {
+        NSSlider::sliderWithValue_minValue_maxValue_target_action(
+            12.0,
+            0.0,
+            30.0,
+            Some(controller),
+            Some(sel!(headphoneVolumeChanged:)),
+            mtm,
+        )
+    };
+    headphone_volume.setFrame(rect(252.0, 285.0, 328.0, 30.0));
+    headphone_volume.setContinuous(true);
+    headphone_volume.setToolTip(Some(&NSString::from_str("Quiet limit for Upyr sounds on headphones and unidentified outputs. Does not change macOS volume.")));
+    page.addSubview(&headphone_volume);
+    let headphone_volume_label = label("12%", rect(588.0, 290.0, 56.0, 24.0), mtm);
+    page.addSubview(&headphone_volume_label);
+    let audio_output_status = label("", rect(48.0, 258.0, 596.0, 22.0), mtm);
+    audio_output_status.setFont(Some(&NSFont::systemFontOfSize(11.0)));
+    audio_output_status.setTextColor(Some(&NSColor::secondaryLabelColor()));
+    page.addSubview(&audio_output_status);
+    let scroll = NSScrollView::initWithFrame(NSScrollView::alloc(mtm), container.bounds());
+    scroll.setHasVerticalScroller(true);
+    scroll.setAutohidesScrollers(true);
+    scroll.setDrawsBackground(false);
+    scroll.setDocumentView(Some(&page));
+    container.addSubview(&scroll);
+    scroll.contentView().scrollToPoint(NSPoint::new(0.0, 210.0));
+    scroll.reflectScrolledClipView(&scroll.contentView());
     FeedbackControls {
-        page,
+        page: container,
         show_indicator: indicator,
         indicator_duration: duration,
         indicator_style,
+        flags_preview,
+        preview_layout,
+        preview_sources,
         sounds_enabled,
         sound_pack,
         key_clicks,
         sound_volume,
         sound_volume_label,
+        headphone_volume,
+        headphone_volume_label,
+        audio_output_status,
         sound_events: SoundEventControls {
             auto_correct,
             manual_conversion,
@@ -1817,90 +2261,7 @@ fn mac_modifiers(flags: NSEventModifierFlags) -> Modifiers {
 }
 
 fn mac_key_code(code: u16) -> Option<Code> {
-    Some(match code {
-        0 => Code::KeyA,
-        1 => Code::KeyS,
-        2 => Code::KeyD,
-        3 => Code::KeyF,
-        4 => Code::KeyH,
-        5 => Code::KeyG,
-        6 => Code::KeyZ,
-        7 => Code::KeyX,
-        8 => Code::KeyC,
-        9 => Code::KeyV,
-        11 => Code::KeyB,
-        12 => Code::KeyQ,
-        13 => Code::KeyW,
-        14 => Code::KeyE,
-        15 => Code::KeyR,
-        16 => Code::KeyY,
-        17 => Code::KeyT,
-        18 => Code::Digit1,
-        19 => Code::Digit2,
-        20 => Code::Digit3,
-        21 => Code::Digit4,
-        22 => Code::Digit6,
-        23 => Code::Digit5,
-        24 => Code::Equal,
-        25 => Code::Digit9,
-        26 => Code::Digit7,
-        27 => Code::Minus,
-        28 => Code::Digit8,
-        29 => Code::Digit0,
-        30 => Code::BracketRight,
-        31 => Code::KeyO,
-        32 => Code::KeyU,
-        33 => Code::BracketLeft,
-        34 => Code::KeyI,
-        35 => Code::KeyP,
-        36 => Code::Enter,
-        37 => Code::KeyL,
-        38 => Code::KeyJ,
-        39 => Code::Quote,
-        40 => Code::KeyK,
-        41 => Code::Semicolon,
-        42 => Code::Backslash,
-        43 => Code::Comma,
-        44 => Code::Slash,
-        45 => Code::KeyN,
-        46 => Code::KeyM,
-        47 => Code::Period,
-        48 => Code::Tab,
-        49 => Code::Space,
-        50 => Code::Backquote,
-        51 => Code::Backspace,
-        53 => Code::Escape,
-        64 => Code::F17,
-        79 => Code::F18,
-        80 => Code::F19,
-        90 => Code::F20,
-        96 => Code::F5,
-        97 => Code::F6,
-        98 => Code::F7,
-        99 => Code::F3,
-        100 => Code::F8,
-        101 => Code::F9,
-        103 => Code::F11,
-        105 => Code::F13,
-        106 => Code::F16,
-        107 => Code::F14,
-        109 => Code::F10,
-        111 => Code::F12,
-        113 => Code::F15,
-        115 => Code::Home,
-        116 => Code::PageUp,
-        117 => Code::Delete,
-        118 => Code::F4,
-        119 => Code::End,
-        120 => Code::F2,
-        121 => Code::PageDown,
-        122 => Code::F1,
-        123 => Code::ArrowLeft,
-        124 => Code::ArrowRight,
-        125 => Code::ArrowDown,
-        126 => Code::ArrowUp,
-        _ => return None,
-    })
+    crate::hotkey_bindings::mac_key_code(code)
 }
 
 #[cfg(test)]
