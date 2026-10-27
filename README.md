@@ -311,6 +311,8 @@ and frozen macOS keyboard maps, generated slash-command editing sequences,
 control/format characters, punctuation, replacement and undo. On macOS, a
 separate main-thread check reads the real installed layout map without switching
 input sources. The live Superset probe above is optional and opens its own tab.
+CI preserves each platform's JSON report and UTF-8 test log for 14 days, including
+failed runs and partial output when the Cargo timeout is reached.
 
 `slash_command_apps` additionally opts an interface into English `/commands`.
 At the start of a freshly tracked input line, `.сщььфтв` becomes `/command`,

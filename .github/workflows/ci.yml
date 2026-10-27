@@ -42,6 +42,8 @@ jobs:
   test:
     name: Test (${{ matrix.os }})
     timeout-minutes: 45
+    env:
+      PYTHONUTF8: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -61,13 +63,31 @@ jobs:
           toolchain: stable
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - name: Install report runner Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.13"
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libx11-dev libxtst-dev libxkbcommon-dev
-      - name: Run workspace tests
-        run: cargo test --workspace --all-targets --locked
+      - name: Fetch locked dependencies for the offline test runner
+        run: cargo fetch --locked
+      - name: Test report preservation on failures and timeouts
+        run: python -m unittest tools.test_run_terminal_edge_tests
+      - name: Run workspace tests and write the regression report
+        run: python tools/run_terminal_edge_tests.py --timeout 1800
+      - name: Preserve regression report and full test log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: terminal-tests-${{ runner.os }}
+          path: |
+            target/terminal-edge-report.json
+            target/terminal-edge-report.log
+          if-no-files-found: warn
+          retention-days: 14
       - name: Compile the native Globe-key probe
         if: runner.os == 'macOS'
         run: swiftc -O -warnings-as-errors -o target/globe-probe tools/globe-probe.swift
