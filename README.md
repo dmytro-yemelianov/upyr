@@ -289,6 +289,11 @@ leave its window visible, then run:
 python3 tools/superset_input_probe.py --workspace "$SUPERSET_WORKSPACE_ID"
 ```
 
+With multiple visible Superset windows, pass `--window-id <id>` from
+`cua-driver call list_windows '{}'` to bind the probe to the intended window.
+Use `--case <name>` (repeatable) to reproduce an individual scenario. The
+fixture marker fits a standard 80-column terminal.
+
 This requires the installed Upyr app running with automatic, terminal and slash
 correction enabled for Superset, the default undo shortcut, `swiftc`, and an
 already-permitted `cua-driver`. It creates its own raw-input terminal tab,
