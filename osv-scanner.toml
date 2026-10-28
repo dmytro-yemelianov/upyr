@@ -13,9 +13,28 @@
 # tray support and a direct Freedesktop Notifications D-Bus call. Keep only
 # live, verified exceptions.
 
-# --- egui/eframe font stack — tracked for an egui update ---
+# Reviewed 2026-10-28. These four INFO Unmaintained advisories have no patched
+# versions. Dependency paths and migration work are documented in SECURITY.md.
+# The fixable event-listener soundness advisory is patched, not ignored.
+
+# --- egui/eframe font stack — requires an upstream font-stack migration ---
 
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0192"
-ignoreUntil = 2026-10-18
-reason = "ttf-parser via egui/eframe (ab_glyph) font rendering; resolved by an egui/ab_glyph update"
+ignoreUntil = 2027-01-26
+reason = "INFO Unmaintained; no patched ttf-parser release. Retained via eframe/egui -> epaint -> ab_glyph -> owned_ttf_parser; migrate the upstream font stack. Reviewed 2026-10-28."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0370"
+ignoreUntil = 2027-01-26
+reason = "INFO Unmaintained; no patched zvariant 5 release. Linux ksni/AccessKit/AT-SPI depend on zbus 5; migrate the coordinated dependency stack to zbus 6. Reviewed 2026-10-28."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0371"
+ignoreUntil = 2027-01-26
+reason = "INFO Unmaintained; zbus_names moved into zbus 6. Required by the current Linux zbus 5/AT-SPI stack; replace with its upstream stack upgrade. Reviewed 2026-10-28."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0372"
+ignoreUntil = 2027-01-26
+reason = "INFO Unmaintained; zvariant_derive moved into zbus 6. Required by current Linux zbus/AT-SPI macros; replace with its upstream stack upgrade. Reviewed 2026-10-28."
