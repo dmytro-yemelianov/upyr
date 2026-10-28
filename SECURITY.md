@@ -107,6 +107,24 @@ notarization ticket is stapled. A notarized release should pass Gatekeeper
 assessment.
 Windows: `signtool verify /pa /v <file>`.
 
+## Reviewed maintenance advisories
+
+As of 2026-10-28, `event-listener` is locked to 5.4.2, which fixes
+[RUSTSEC-2026-0221](https://rustsec.org/advisories/RUSTSEC-2026-0221.html).
+The following four notices are **INFO Unmaintained**, with no patched versions;
+the exact OSV exceptions expire on **2027-01-26** and do not cover new advisories.
+
+| Advisory | Retained dependency path | Migration |
+| --- | --- | --- |
+| [RUSTSEC-2026-0192](https://rustsec.org/advisories/RUSTSEC-2026-0192.html) | eframe/egui → epaint → ab_glyph → owned_ttf_parser → ttf-parser | Upstream font-stack migration to a maintained parser |
+| [RUSTSEC-2026-0370](https://rustsec.org/advisories/RUSTSEC-2026-0370.html) | Linux ksni/AccessKit/AT-SPI → zbus 5 → zvariant | Coordinated zbus 6 migration |
+| [RUSTSEC-2026-0371](https://rustsec.org/advisories/RUSTSEC-2026-0371.html) | Linux zbus 5/AT-SPI → zbus_names | zbus 6 names module |
+| [RUSTSEC-2026-0372](https://rustsec.org/advisories/RUSTSEC-2026-0372.html) | Linux zbus 5/AT-SPI macros → zvariant_derive | zbus 6 derive macros |
+
+Replacing only the direct zbus dependency leaves the older crates required by
+ksni and the accessibility stack. Review their upgrades together; investigate
+new vulnerabilities normally rather than extending these exceptions to them.
+
 ## High-value report areas
 
 Reports are especially useful when they involve:

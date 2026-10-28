@@ -34,6 +34,12 @@ change between minor releases while the version is below 1.0.
 - Expand the compact Ukrainian lexicon for common initial-letter and colloquial
   word forms, and cover the reported cases in the opt-in Superset input probe.
 
+### Security
+
+- Update `event-listener` to 5.4.2 for RUSTSEC-2026-0221. Document four
+  unmaintained-dependency notices with exact, time-limited OSV exceptions and
+  check pull requests with OSV before merging.
+
 ## [0.4.0] - 2026-10-27
 
 Integrated GlobeSwitch, guarded terminal correction and output-aware feedback.

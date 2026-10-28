@@ -2,10 +2,13 @@ name: OSV-Scanner
 
 # Cross-ecosystem CVE scan (Rust, GitHub Actions, and any JS in the tree)
 # against the OSV.dev database. Complements the RustSec advisory audit in
-# security.yml, which is Rust-only. Runs post-merge and on a schedule so it
-# does not gate pull requests.
+# security.yml, which is Rust-only. Scan pull requests as well as main so
+# dependency or policy changes are checked before merging.
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
@@ -41,7 +44,7 @@ jobs:
           scan-args: |-
             --recursive
             --format=table
-            --output=osv-scan-report.txt
+            --output-file=osv-scan-report.txt
             ./
 
       - name: Surface findings in job summary
