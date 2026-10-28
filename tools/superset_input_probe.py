@@ -53,7 +53,9 @@ def fixture(root: Path) -> None:
         except ValueError:
             bits = '0' * 32
         colors = {'0': '40;180;255', '1': '255;40;120', 'g': '80;255;80'}
-        barcode = ''.join('\x1b[48;2;' + colors[bit] + 'm  \x1b[0m ' for bit in 'g' + bits + 'g')
+        # 68 columns fit a normal 80-column terminal without splitting the
+        # nonce across rows. Each color still spans a whole character cell.
+        barcode = ''.join('\x1b[48;2;' + colors[bit] + 'm \x1b[0m ' for bit in 'g' + bits + 'g')
         sys.stdout.write('\x1b[H\x1b[2KUpyr isolated probe: this field never executes commands.\r\n'
                          '\x1b[2K' + barcode + '\r\n\x1b[2KPROBE> ' + visible + '\x1b[J')
         if len(text) > cursor:
@@ -127,7 +129,32 @@ def cli(*args: str) -> dict:
     return json.loads(run(['superset', *args, '--json']))
 
 
-def main(workspace: str, override_pid: int | None = None) -> None:
+def cleanup_probe(root: Path, helper: Path, source: str, session: str,
+                  workspace: str, pane: str | None, original_pane: str | None) -> None:
+    # A full disk or failed UI read must not prevent closing our own terminal,
+    # restoring the input source, or ending the driver session.
+    try:
+        write_json(root / 'control.json', dict(nonce='stop', stop=True))
+    finally:
+        try:
+            if pane is not None:
+                owned_active = False
+                try:
+                    layout = cli('panes', 'list', '--workspace', workspace)
+                    owned_active = any(t['active'] and t['activePaneId'] == pane for t in layout['tabs'])
+                finally:
+                    cli('panes', 'close', '--workspace', workspace, '--pane', pane)
+                    if owned_active and original_pane is not None:
+                        cli('panes', 'focus', '--workspace', workspace, '--pane', original_pane)
+        finally:
+            try:
+                run([str(helper), 'select', source])
+            finally:
+                subprocess.run(['cua-driver', 'call', 'end_session', json.dumps(dict(session=session))], capture_output=True, text=True)
+
+
+def main(workspace: str, override_pid: int | None = None,
+         window_id: int | None = None, cases: list[str] | None = None) -> None:
     if sys.platform != 'darwin' or not workspace:
         raise RuntimeError('macOS and --workspace (or SUPERSET_WORKSPACE_ID) are required')
     permissions = run(['cua-driver', 'permissions', 'status'])
@@ -141,35 +168,41 @@ def main(workspace: str, override_pid: int | None = None) -> None:
     before = json.loads(run([str(helper)]))
     if not before['postAccess']:
         raise RuntimeError('Physical-input permission missing')
-    initial = cli('panes', 'list', '--workspace', workspace)
-    original_pane = next(t['activePaneId'] for t in initial['tabs'] if t['active'])
-    upyr_pid = override_pid or int(run(['pgrep', '-f', '^/Applications/Upyr.app/Contents/MacOS/upyr-background run$']))
+    upyr_pid = override_pid or int(run(['pgrep', '-f', '^/Applications/Upyr.app/Contents/MacOS/upyr-background( run)?$']))
+    os.kill(upyr_pid, 0)
     config = Path.home() / 'Library/Application Support/dev.Upyr.Upyr/config.toml'
     config_before = config.read_bytes()
     write_json(root / 'control.json', dict(nonce='initial'))
     command = shlex.join([sys.executable, str(Path(__file__).resolve()), '--fixture', str(root)])
-    created = cli('panes', 'new-tab', '--workspace', workspace, '--command', command)
-    pane = created['paneId']
+    pane = None
+    original_pane = None
     results: list[dict] = []
     session = 'upyr-probe-' + root.name[-8:]
     print(f'evidence={root}', flush=True)
     try:
         run(['cua-driver', 'call', 'start_session', json.dumps(dict(session=session))])
+        windows = json.loads(run(['cua-driver', 'call', 'list_windows', '{}']))['windows']
+        candidates = [w for w in windows if w.get('is_on_screen') and w.get('app_name') in ('Superset', 'Paradev')
+                      and w.get('bounds', {}).get('height', 0) > 100
+                      and (window_id is None or w['window_id'] == window_id)]
+        if len(candidates) != 1:
+            raise RuntimeError('Expected one visible Superset window; select its workspace first')
+        window = candidates[0]
+        run(['cua-driver', 'call', 'bring_to_front', json.dumps(dict(pid=window['pid'], window_id=window['window_id']))])
+        time.sleep(.4)
+        initial = cli('panes', 'list', '--workspace', workspace)
+        original_pane = next(t['activePaneId'] for t in initial['tabs'] if t['active'])
+        created = cli('panes', 'new-tab', '--workspace', workspace, '--command', command)
+        pane = created['paneId']
+        write_json(root / 'ownership.json', dict(workspace=workspace, pane=pane,
+                   terminal=created['terminalId'], original_pane=original_pane,
+                   window=window['window_id'], session=session))
         cli('panes', 'focus', '--workspace', workspace, '--pane', pane)
         deadline = time.monotonic() + 12
         while not (root / 'state.json').exists() and time.monotonic() < deadline:
             time.sleep(.1)
         if not (root / 'state.json').exists():
             raise RuntimeError('Owned raw-input fixture did not start')
-        windows = json.loads(run(['cua-driver', 'call', 'list_windows', '{}']))['windows']
-        candidates = [w for w in windows if w.get('is_on_screen') and w.get('app_name') in ('Superset', 'Paradev')
-                      and w.get('bounds', {}).get('height', 0) > 100]
-        if len(candidates) != 1:
-            raise RuntimeError('Expected one visible Superset window; select its workspace first')
-        window = candidates[0]
-        run(['cua-driver', 'call', 'bring_to_front', json.dumps(dict(pid=window['pid'], window_id=window['window_id']))])
-        time.sleep(.4)
-
 
         def state() -> dict:
             return json.loads((root / 'state.json').read_text())
@@ -180,12 +213,17 @@ def main(workspace: str, override_pid: int | None = None) -> None:
                 raise RuntimeError('Owned pane is no longer active')
 
         def keys(actions: list[dict], source: str | None = None) -> dict:
-            check_pane()
             image = root / 'fixture.png'
-            run(['cua-driver', 'call', 'get_window_state', json.dumps(dict(pid=window['pid'], window_id=window['window_id'], session=session, screenshot_out_file=str(image), include_accessibility_tree=False))])
-            visible = json.loads(run([str(helper), 'marker', str(image), state()['nonce'][:8]]))
-            if not visible['ownedFixtureVisible']:
-                raise RuntimeError('Owned fixture marker is not visible; no physical input sent')
+            deadline = time.monotonic() + 5
+            while True:
+                check_pane()
+                run(['cua-driver', 'call', 'get_window_state', json.dumps(dict(pid=window['pid'], window_id=window['window_id'], session=session, screenshot_out_file=str(image), include_accessibility_tree=False))])
+                visible = json.loads(run([str(helper), 'marker', str(image), state()['nonce'][:8]]))
+                if visible['ownedFixtureVisible']:
+                    break
+                if time.monotonic() >= deadline:
+                    raise RuntimeError('Owned fixture marker is not visible; no physical input sent')
+                time.sleep(.1)  # A PTY state update can precede its repaint.
             plan = dict(actions=actions, upyrPID=upyr_pid)
             if source:
                 plan['source'] = source
@@ -225,6 +263,12 @@ def main(workspace: str, override_pid: int | None = None) -> None:
             ('fast-following-key', abc, [dict(text='ghbdsn ', gap=15), dict(text='a', gap=0), dict(wait=500), dict(undo=True)], ['ghbdsn a', 'привіт ф'], None),
         ]
         scenarios += [(f'english-repeated-{i}', ukr, [dict(text="it's not so good for the english "), dict(wait=500)], ["it's not so good for the english "], abc) for i in range(3)]
+        if cases:
+            available = {case[0] for case in scenarios} | {'undo-after-window-change'}
+            unknown = set(cases) - available
+            if unknown:
+                raise ValueError(f'Unknown probe cases: {sorted(unknown)}')
+            scenarios = [case for case in scenarios if case[0] in cases]
         for name, source, actions, expected, destination in scenarios:
             nonce = uuid.uuid4().hex
             write_json(root / 'control.json', dict(nonce=nonce))
@@ -253,6 +297,8 @@ def main(workspace: str, override_pid: int | None = None) -> None:
                 print(run(['superset','terminals','read','--local','--workspace',workspace,'--terminal',created['terminalId'],'--json']), flush=True)
                 print(json.dumps(current), flush=True)
                 raise RuntimeError(f'{name}: unexpected text or input source')
+        if cases and 'undo-after-window-change' not in cases:
+            return
         nonce = uuid.uuid4().hex
         write_json(root / 'control.json', dict(nonce=nonce))
         time.sleep(.3)
@@ -271,14 +317,7 @@ def main(workspace: str, override_pid: int | None = None) -> None:
         print(json.dumps(result, ensure_ascii=False), flush=True)
         assert passed, 'undo edited a field after focus changed'
     finally:
-        write_json(root / 'control.json', dict(nonce='stop', stop=True))
-        layout = cli('panes', 'list', '--workspace', workspace)
-        owned_active = any(t['active'] and t['activePaneId'] == pane for t in layout['tabs'])
-        cli('panes', 'close', '--workspace', workspace, '--pane', pane)
-        if owned_active:
-            cli('panes', 'focus', '--workspace', workspace, '--pane', original_pane)
-        run([str(helper), 'select', before['source']])
-        subprocess.run(['cua-driver', 'call', 'end_session', json.dumps(dict(session=session))], capture_output=True, text=True)
+        cleanup_probe(root, helper, before['source'], session, workspace, pane, original_pane)
         if config.read_bytes() != config_before:
             raise RuntimeError('Upyr preferences changed during the test; preserved the new user preferences')
 
@@ -287,9 +326,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--fixture', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--upyr-pid', type=int, help='PID of an explicitly launched Upyr preview')
+    parser.add_argument('--window-id', type=int, help='Exact visible Superset window for the owned fixture')
+    parser.add_argument('--case', action='append', help='Run only a named scenario (repeatable)')
     parser.add_argument('--workspace', default=os.environ.get('SUPERSET_WORKSPACE_ID', ''))
     options = parser.parse_args()
     if options.fixture:
         fixture(options.fixture)
     else:
-        main(options.workspace, options.upyr_pid)
+        main(options.workspace, options.upyr_pid, options.window_id, options.case)

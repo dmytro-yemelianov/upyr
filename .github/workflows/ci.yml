@@ -75,7 +75,7 @@ jobs:
       - name: Fetch locked dependencies for the offline test runner
         run: cargo fetch --locked
       - name: Test report preservation on failures and timeouts
-        run: python -m unittest tools.test_run_terminal_edge_tests
+        run: python -m unittest tools.test_run_terminal_edge_tests tools.test_superset_input_probe
       - name: Run workspace tests and write the regression report
         run: python tools/run_terminal_edge_tests.py --timeout 1800
       - name: Preserve regression report and full test log
