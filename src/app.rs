@@ -502,27 +502,17 @@ impl App {
         if self.processing {
             return;
         }
-        let undo_candidate = match &request {
+        let undo_text = match &request {
             ConversionRequest::Automatic {
                 expected,
                 replacement,
-            } => {
-                // Trackers retain window identity across input boundaries.
-                // The actual editor may have been replaced inside that window;
-                // undo must bind to the editor this conversion is about to use.
-                let target = FocusTarget::capture();
-                let source = system_layout::current().ok().flatten();
-                target.zip(source).map(|(target, source)| UndoRecord {
-                    original: expected.clone(),
-                    corrected: replacement.clone(),
-                    source_id: source.source_id,
-                    direction: config.direction,
-                    target,
-                    expires: std::time::Instant::now() + std::time::Duration::from_secs(30),
-                })
-            }
+            } => Some((expected.clone(), replacement.clone())),
             _ => None,
         };
+        let direction = config.direction;
+        // The guard stamps Quartz input counters and starts holding input
+        // first. A key that arrives during the slower identity queries below
+        // must count as new input, not be folded into the stamp.
         let task = match ConversionTask::desktop(config, request) {
             Ok(task) => task,
             Err(error) => {
@@ -531,6 +521,21 @@ impl App {
                 return;
             }
         };
+        let undo_candidate = undo_text.and_then(|(original, corrected)| {
+            // Trackers retain window identity across input boundaries.
+            // The actual editor may have been replaced inside that window;
+            // undo must bind to the editor this conversion is about to use.
+            let target = FocusTarget::capture();
+            let source = system_layout::current().ok().flatten();
+            target.zip(source).map(|(target, source)| UndoRecord {
+                original,
+                corrected,
+                source_id: source.source_id,
+                direction,
+                target,
+                expires: std::time::Instant::now() + std::time::Duration::from_secs(30),
+            })
+        });
         let pending = PendingConversion {
             task,
             automatic_generation: generation,

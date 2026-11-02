@@ -20,6 +20,15 @@ change between minor releases while the version is below 1.0.
   let a `keep` rule win over a broader `correct` rule regardless of order.
 - Convert the Ukrainian shifted number row (`"`, `№`, `;`, `:`, `?`) in the
   built-in layout table used by the CLI, the web demo and as a fallback.
+- Keep typing through an automatic correction on macOS: keys pressed while
+  Upyr selects, copies and pastes the corrected word now wait in the target
+  app and follow the paste in order, instead of replacing the selected word.
+  A click during the edit cancels it and the held keys follow the click.
+- Stamp the input counters before the slower focus queries, so a key typed
+  during them cancels a terminal edit instead of being backspaced.
+- Collapse a selection whose copy arrived late with one arrow instead of
+  moving the caret past the word, and release the selection when the selected
+  text has nothing to convert.
 
 ### Planned
 

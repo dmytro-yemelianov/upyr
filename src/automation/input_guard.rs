@@ -1,12 +1,16 @@
 //! A short-lived, listen-only guard for an explicitly requested conversion.
 //! It observes activity, never characters, and ignores Upyr's own input.
+//! While the target's tap holds keyboard input behind a selection edit, that
+//! input has not reached the editor and is not treated as an interruption.
 #![allow(unsafe_code)]
 
 use anyhow::{Context, Result, bail};
 use objc2::{MainThreadMarker, rc::Retained};
 use objc2_app_kit::{NSRunningApplication, NSWorkspace};
 use objc2_foundation::NSObjectProtocol;
-use std::{cell::Cell, ffi::c_void, rc::Rc};
+use std::{cell::Cell, ffi::c_void, rc::Rc, sync::Arc};
+
+use super::terminal_typing::HoldSignal;
 
 type Ref = *const c_void;
 type Event = *mut c_void;
@@ -219,6 +223,7 @@ struct Activity {
     interrupted: Cell<bool>,
     edited: Cell<bool>,
     modifiers: Cell<u64>,
+    hold: Arc<HoldSignal>,
 }
 
 unsafe extern "C" fn observe(_: Ref, kind: u32, event: Event, context: *mut c_void) -> Event {
@@ -231,6 +236,11 @@ unsafe extern "C" fn observe(_: Ref, kind: u32, event: Event, context: *mut c_vo
     }
     // kCGEventSourceUnixProcessID. No character or key-code field is read.
     if unsafe { CGEventGetIntegerValueField(event, 41) } == i64::from(std::process::id()) {
+        return event;
+    }
+    // Keys and modifier changes are waiting in the target's tap behind the
+    // edit; they will follow it rather than act on Upyr's selection.
+    if matches!(kind, 10 | 12) && activity.hold.active() {
         return event;
     }
     if kind == 12 {
@@ -279,6 +289,11 @@ impl InputGuard {
         self.input_counts
     }
 
+    /// Shared with the target's tap when it holds input behind this edit.
+    pub fn hold_signal(&self) -> Arc<HoldSignal> {
+        Arc::clone(&self.activity.hold)
+    }
+
     pub fn new(terminal: bool) -> Result<Self> {
         MainThreadMarker::new().context("conversion guards must run on the main thread")?;
         // Quartz counters catch input which reached WindowServer while the
@@ -294,6 +309,7 @@ impl InputGuard {
             interrupted: Cell::new(false),
             edited: Cell::new(false),
             modifiers: Cell::new(unsafe { CGEventSourceFlagsState(0) } & MODIFIERS),
+            hold: Arc::default(),
         });
         let mask = [1, 3, 10, 12, 14, 22, 25]
             .into_iter()
@@ -350,7 +366,7 @@ impl InputGuard {
         if self.terminal {
             self.can_type()
         } else {
-            !self.activity.interrupted.get() && self.same_target()
+            !self.activity.interrupted.get() && !self.activity.hold.broken() && self.same_target()
         }
     }
 
@@ -367,15 +383,21 @@ impl InputGuard {
             && front_window(&self.application) == self.window
     }
     pub fn can_recover_selection(&self) -> bool {
+        // A held recovery is inserted in the target's own stream with explicit
+        // flags, so physically held modifiers cannot combine with it.
         !self.activity.edited.get()
-            && unsafe { CGEventSourceFlagsState(0) } & (MODIFIERS & !(1 << 16)) == 0
+            && !self.activity.hold.broken()
+            && (self.activity.hold.active()
+                || unsafe { CGEventSourceFlagsState(0) } & (MODIFIERS & !(1 << 16)) == 0)
             && self.same_target()
     }
 
     pub fn defer_cancellation(&self) -> bool {
         // An injected recovery arrow while fn is held would become fn+arrow
         // and cancel GlobeSwitch's clean tap. Wait for release without edits.
-        !self.activity.edited.get()
+        // A held recovery bypasses session taps, so it never needs to wait.
+        !self.activity.hold.active()
+            && !self.activity.edited.get()
             && unsafe { CGEventSourceFlagsState(0) } & (1 << 23) != 0
             && self.same_target()
     }
