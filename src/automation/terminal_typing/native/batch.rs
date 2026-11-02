@@ -1,12 +1,78 @@
 //! Insert the edit from one target-process event-tap callback. Every generated
 //! key precedes subsequent user input in that process's event stream.
+//!
+//! The same per-process tap also holds a GUI selection edit: from the moment
+//! Upyr starts selecting the word until its paste (or its selection recovery)
+//! is in the stream, the user's keys wait here instead of replacing the
+//! selection, and then follow the edit in their original order.
 use super::*;
 use std::{
     cell::RefCell,
-    sync::mpsc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread::JoinHandle,
     time::{Duration, Instant},
 };
+
+/// Shared between the hold worker and the main-thread conversion guard.
+#[derive(Default)]
+pub(in crate::automation) struct HoldSignal {
+    active: AtomicBool,
+    broken: AtomicBool,
+}
+
+impl HoldSignal {
+    /// User keyboard input is waiting in the target's tap and has not reached
+    /// the editor, so it cannot have touched the selection.
+    pub fn active(&self) -> bool {
+        self.active.load(Ordering::SeqCst)
+    }
+
+    /// Held input was released without the edit's own trigger (deadline, tap
+    /// disabled, worker stopped). The selection can no longer be trusted.
+    pub fn broken(&self) -> bool {
+        self.broken.load(Ordering::SeqCst)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SelectionHold {
+    Pass,
+    Queue,
+    PassAndCancel,
+}
+
+/// What a GUI selection hold does with one event routed to the target.
+fn selection_hold_action(kind: u32, own: bool) -> SelectionHold {
+    if own {
+        return SelectionHold::Pass;
+    }
+    match kind {
+        // Key down, key up and modifier changes: any of them would act on the
+        // active selection, so all wait behind the edit in order.
+        10..=12 => SelectionHold::Queue,
+        // Clicks, drags and scrolling move the caret or view themselves.
+        1 | 3 | 6 | 7 | 22 | 25 | 27 => SelectionHold::PassAndCancel,
+        _ => SelectionHold::Pass,
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Policy {
+    /// Terminal edits hold ordinary typing; anything else cancels and releases.
+    Terminal,
+    /// GUI selection edits hold every key until the paste or the recovery.
+    Selection,
+}
+
+struct HoldStart {
+    signal: Arc<HoldSignal>,
+    duration: Duration,
+    reply: mpsc::Sender<bool>,
+}
 
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
@@ -43,7 +109,9 @@ unsafe extern "C" {
 struct Request {
     prepared: Prepared,
     target_window: i64,
-    stamp: [u32; 6],
+    /// Terminal edits compare Quartz input counters; a GUI release does not,
+    /// because Upyr's own selection and copy keys advance them.
+    stamp: Option<[u32; 6]>,
     reply: mpsc::Sender<Reply>,
 }
 
@@ -53,19 +121,60 @@ enum Reply {
 }
 
 struct Job {
-    request: Request,
+    policy: Policy,
+    /// A GUI hold starts without a request and receives one at release.
+    request: Option<Request>,
+    signal: Option<Arc<HoldSignal>>,
     deadline: Instant,
     cancelled: bool,
     finished: bool,
+    triggered: bool,
     applied: bool,
     queued: Vec<Owned>,
     queued_keydowns: u32,
 }
 
 impl Job {
+    fn new(
+        policy: Policy,
+        request: Option<Request>,
+        signal: Option<Arc<HoldSignal>>,
+        deadline: Instant,
+    ) -> Self {
+        Self {
+            policy,
+            request,
+            signal,
+            deadline,
+            cancelled: false,
+            finished: false,
+            triggered: false,
+            applied: false,
+            queued: Vec::with_capacity(16),
+            queued_keydowns: 0,
+        }
+    }
+
     fn flush(&mut self, proxy: Ref) {
         for key in self.queued.drain(..) {
             unsafe { CGEventTapPostEvent(proxy, key.0.cast_mut()) };
+        }
+    }
+
+    /// Stop holding. Input released other than by the edit's own trigger
+    /// means the main thread must abandon the edit.
+    fn end(&self) {
+        if let Some(signal) = &self.signal {
+            if !self.triggered {
+                signal.broken.store(true, Ordering::SeqCst);
+            }
+            signal.active.store(false, Ordering::SeqCst);
+        }
+    }
+
+    fn reply(&self) {
+        if let Some(request) = &self.request {
+            let _ = request.reply.send(Reply::Complete(self.applied));
         }
     }
 }
@@ -84,52 +193,95 @@ unsafe extern "C" fn deliver(proxy: Ref, kind: u32, event: Event, context: *mut 
         if let Some(job) = state.job.as_mut() {
             job.finished = true;
             job.flush(proxy);
+            job.end();
         }
         return event;
     }
     let Some(job) = state.job.as_mut() else {
         return event;
     };
+    let own = unsafe { CGEventGetIntegerValueField(event, 41) } == i64::from(std::process::id());
     let own_trigger = kind == 11
-        && unsafe { CGEventGetIntegerValueField(event, 41) } == i64::from(std::process::id())
-        && unsafe { CGEventGetIntegerValueField(event, 42) } == job.request.prepared.marker;
+        && own
+        && job.request.as_ref().is_some_and(|request| {
+            let marker = unsafe { CGEventGetIntegerValueField(event, 42) };
+            marker == request.prepared.marker
+        });
     if own_trigger {
         job.finished = true;
-        let mut expected_stamp = job.request.stamp;
-        expected_stamp[2] = expected_stamp[2].wrapping_add(job.queued_keydowns);
-        let counts_match = crate::automation::input_guard::input_counts() == expected_stamp;
-        let window_matches = crate::automation::input_guard::is_target_window(
-            state.target_pid,
-            job.request.target_window,
-        );
-        tracing::debug!(
-            pid = state.target_pid,
-            window = job.request.target_window,
-            cancelled = job.cancelled,
-            counts_match,
-            window_matches,
-            "validated terminal edit target"
-        );
-        if !job.cancelled && Instant::now() < job.deadline && counts_match && window_matches {
-            // The main thread changes TIS only after the target has accepted
-            // this edit. Until it acknowledges, this callback holds the stream.
-            let (commit, acknowledgement) = mpsc::channel();
-            let committed = job.request.reply.send(Reply::Ready(commit)).is_ok()
-                && acknowledgement
-                    .recv_timeout(Duration::from_millis(100))
-                    .unwrap_or(false);
-            // Post at this exact point in the stream, bypassing this tap. A
-            // subsequent key cannot overtake Backspace or enter inside the edit.
-            if committed {
-                for key in &job.request.prepared.events {
+        job.triggered = true;
+        if let Some(request) = job.request.as_ref() {
+            let counts_match = request.stamp.is_none_or(|mut expected_stamp| {
+                expected_stamp[2] = expected_stamp[2].wrapping_add(job.queued_keydowns);
+                crate::automation::input_guard::input_counts() == expected_stamp
+            });
+            let window_matches = crate::automation::input_guard::is_target_window(
+                state.target_pid,
+                request.target_window,
+            );
+            tracing::debug!(
+                pid = state.target_pid,
+                window = request.target_window,
+                cancelled = job.cancelled,
+                counts_match,
+                window_matches,
+                held = job.queued.len(),
+                "validated edit target"
+            );
+            // Pointer input or a focus change has already moved the caret:
+            // nothing Upyr prepared may be inserted at the new position.
+            if !job.cancelled && window_matches {
+                let mut committed = false;
+                if Instant::now() < job.deadline && counts_match {
+                    // The main thread changes TIS only after the target has
+                    // accepted this edit. Until it acknowledges, this callback
+                    // holds the stream.
+                    let (commit, acknowledgement) = mpsc::channel();
+                    committed = request.reply.send(Reply::Ready(commit)).is_ok()
+                        && acknowledgement
+                            .recv_timeout(Duration::from_millis(100))
+                            .unwrap_or(false);
+                }
+                // Post at this exact point in the stream, bypassing this tap. A
+                // subsequent key cannot overtake the edit or enter inside it. A
+                // refused edit inserts its fallback, which releases a selection
+                // before any held key can replace it.
+                let batch = if committed {
+                    &request.prepared.events
+                } else {
+                    &request.prepared.fallback
+                };
+                for key in batch {
                     unsafe { CGEventTapPostEvent(proxy, key.0.cast_mut()) };
                 }
-                job.applied = true;
+                job.applied = committed;
             }
         }
         job.flush(proxy);
+        job.end();
         // The empty key-up is only a trigger, never input to the application.
         return std::ptr::null_mut();
+    }
+    if job.finished {
+        return event;
+    }
+    if job.policy == Policy::Selection {
+        return match selection_hold_action(kind, own) {
+            SelectionHold::Queue => {
+                if kind == 10 && unsafe { CGEventGetIntegerValueField(event, 8) } == 0 {
+                    job.queued_keydowns = job.queued_keydowns.wrapping_add(1);
+                }
+                job.queued.push(Owned(unsafe { CFRetain(event.cast()) }));
+                std::ptr::null_mut()
+            }
+            SelectionHold::PassAndCancel => {
+                // The pointer reaches the editor first; held keys stay queued
+                // and follow it at release instead of landing in the selection.
+                job.cancelled = true;
+                event
+            }
+            SelectionHold::Pass => event,
+        };
     }
     // Ordinary typing that reaches the target before the trigger waits behind
     // the edit. It is forwarded with its original flags/source and never logged.
@@ -156,6 +308,8 @@ unsafe extern "C" fn deliver(proxy: Ref, kind: u32, event: Event, context: *mut 
 
 enum Command {
     Edit(Request),
+    Hold(HoldStart),
+    Release(Request),
     Stop,
 }
 
@@ -268,10 +422,67 @@ pub(super) fn post(
             .send(Command::Edit(Request {
                 prepared,
                 target_window,
-                stamp,
+                stamp: Some(stamp),
                 reply,
             }))
             .map_err(|_| anyhow::anyhow!("terminal event tap stopped"))?;
+        worker.wake();
+        await_commit(result, on_ready)
+    })
+}
+
+/// Starts holding the target's keyboard input behind a GUI selection edit.
+/// Returns `false` when the hold could not be established in time; the caller
+/// then keeps its listen-only guard semantics.
+pub(super) fn hold(target_pid: i32, signal: Arc<HoldSignal>, duration: Duration) -> Result<bool> {
+    warm(target_pid)?;
+    WORKER.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let worker = slot.as_mut().context("hold worker is unavailable")?;
+        worker.ensure_ready()?;
+        let (reply, accepted) = mpsc::channel();
+        worker
+            .commands
+            .send(Command::Hold(HoldStart {
+                signal,
+                duration,
+                reply,
+            }))
+            .map_err(|_| anyhow::anyhow!("hold event tap stopped"))?;
+        worker.wake();
+        Ok(accepted
+            .recv_timeout(Duration::from_millis(100))
+            .unwrap_or(false))
+    })
+}
+
+/// Ends a GUI hold: `prepared` is inserted at the trigger, immediately ahead
+/// of every held key. `on_ready` runs on this thread after validation.
+pub(super) fn release(
+    prepared: Prepared,
+    target_pid: i32,
+    target_window: i64,
+    on_ready: impl FnOnce() -> bool,
+) -> Result<bool> {
+    WORKER.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        // Never warm here: starting a worker for another process would drop
+        // the one holding this input.
+        let worker = slot
+            .as_mut()
+            .filter(|worker| worker.pid == target_pid)
+            .context("hold worker is unavailable")?;
+        worker.ensure_ready()?;
+        let (reply, result) = mpsc::channel();
+        worker
+            .commands
+            .send(Command::Release(Request {
+                prepared,
+                target_window,
+                stamp: None,
+                reply,
+            }))
+            .map_err(|_| anyhow::anyhow!("hold event tap stopped"))?;
         worker.wake();
         await_commit(result, on_ready)
     })
@@ -338,21 +549,43 @@ fn run(
                         let _ = request.reply.send(Reply::Complete(false));
                         continue;
                     }
-                    state.job = Some(Job {
-                        request,
-                        deadline: Instant::now() + Duration::from_millis(250),
-                        cancelled: false,
-                        finished: false,
-                        applied: false,
-                        queued: Vec::with_capacity(16),
-                        queued_keydowns: 0,
-                    });
-                    if let Some(job) = &state.job {
-                        unsafe {
-                            CGEventPostToPid(target_pid, job.request.prepared.trigger.0.cast_mut())
-                        };
-                    }
+                    let trigger = request.prepared.trigger.0.cast_mut();
+                    state.job = Some(Job::new(
+                        Policy::Terminal,
+                        Some(request),
+                        None,
+                        Instant::now() + Duration::from_millis(250),
+                    ));
+                    unsafe { CGEventPostToPid(target_pid, trigger) };
                 }
+                Ok(Command::Hold(start)) => {
+                    let accepted = state.job.is_none();
+                    if accepted {
+                        start.signal.active.store(true, Ordering::SeqCst);
+                        state.job = Some(Job::new(
+                            Policy::Selection,
+                            None,
+                            Some(start.signal),
+                            Instant::now() + start.duration,
+                        ));
+                    }
+                    let _ = start.reply.send(accepted);
+                }
+                Ok(Command::Release(request)) => match state.job.as_mut() {
+                    Some(job)
+                        if job.policy == Policy::Selection
+                            && job.request.is_none()
+                            && !job.finished =>
+                    {
+                        let trigger = request.prepared.trigger.0.cast_mut();
+                        job.request = Some(request);
+                        job.deadline = Instant::now() + Duration::from_millis(250);
+                        unsafe { CGEventPostToPid(target_pid, trigger) };
+                    }
+                    _ => {
+                        let _ = request.reply.send(Reply::Complete(false));
+                    }
+                },
             }
         }
         if state.disabled {
@@ -367,13 +600,15 @@ fn run(
                 if !job.finished {
                     tracing::debug!(
                         pid = target_pid,
-                        "terminal edit target did not receive its trigger"
+                        held = job.queued.len(),
+                        "edit target did not receive its trigger; releasing held input"
                     );
                 }
                 for key in job.queued.drain(..) {
                     unsafe { CGEventPostToPid(target_pid, key.0.cast_mut()) };
                 }
-                let _ = job.request.reply.send(Reply::Complete(job.applied));
+                job.end();
+                job.reply();
             }
         }
         // Idle workers sleep; CFRunLoopStop wakes them when a command arrives.
@@ -395,7 +630,9 @@ fn run(
         for key in job.queued.drain(..) {
             unsafe { CGEventPostToPid(target_pid, key.0.cast_mut()) };
         }
-        let _ = job.request.reply.send(Reply::Complete(false));
+        job.applied = false;
+        job.end();
+        job.reply();
     }
     Ok(())
 }
@@ -403,6 +640,30 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_selection_hold_queues_every_user_key_and_passes_upyrs_own_edit() {
+        // Upyr's own Shift+Left and Cmd+C must reach the editor during the hold.
+        for kind in [10, 11, 12] {
+            assert_eq!(selection_hold_action(kind, true), SelectionHold::Pass);
+        }
+        // Any user key, including Backspace, Return, arrows and shortcuts,
+        // would act on the active selection, so all of them wait.
+        for kind in [10, 11, 12] {
+            assert_eq!(selection_hold_action(kind, false), SelectionHold::Queue);
+        }
+        // Pointer activity moves the caret itself: it goes through first and
+        // refuses the paste; the queued keys then follow it.
+        for kind in [1, 3, 6, 7, 22, 25, 27] {
+            assert_eq!(
+                selection_hold_action(kind, false),
+                SelectionHold::PassAndCancel
+            );
+        }
+        for kind in [2, 4, 5, 26] {
+            assert_eq!(selection_hold_action(kind, false), SelectionHold::Pass);
+        }
+    }
 
     #[test]
     fn rejected_edit_never_changes_the_layout() {

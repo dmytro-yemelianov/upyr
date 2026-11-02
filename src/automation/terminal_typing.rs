@@ -121,6 +121,7 @@ mod native {
         fn CGEventSourceCreate(state: i32) -> Ref;
         fn CGEventSourceSetLocalEventsSuppressionInterval(source: Ref, seconds: f64);
         fn CGEventCreateKeyboardEvent(source: Ref, key: u16, down: bool) -> Event;
+        fn CGEventSetType(event: Event, kind: u32);
         fn CGEventSetFlags(event: Event, flags: u64);
         fn CGEventKeyboardSetUnicodeString(event: Event, length: usize, text: *const u16);
         fn CGEventSetIntegerValueField(event: Event, field: u32, value: i64);
@@ -148,6 +149,9 @@ mod native {
     /// identifies our events so the input monitor does not learn its own edit.
     pub(in crate::automation) struct Prepared {
         events: Vec<Owned>,
+        /// Inserted instead of `events` when the target refuses the edit while
+        /// its caret is still where Upyr left it (an active selection).
+        fallback: Vec<Owned>,
         _source: Owned,
         trigger: Owned,
         marker: i64,
@@ -191,6 +195,61 @@ mod native {
                     events.push(event);
                 }
             }
+            Self::with_trigger(source, events, Vec::new())
+        }
+
+        /// Cmd+V as one uninterrupted batch, shaped like hardware input:
+        /// Command down, V down and up, Command up.
+        pub fn paste() -> Result<Self> {
+            let base = ENIGO_BASE_FLAGS;
+            let command = base | COMMAND_FLAGS;
+            // A refused paste must not leave the word selected for the held
+            // keys to overwrite: collapse it to the original caret instead.
+            Self::keystrokes(
+                &[
+                    Keystroke::modifier(COMMAND_KEY, command),
+                    Keystroke::key(PASTE_KEY, true, command),
+                    Keystroke::key(PASTE_KEY, false, command),
+                    Keystroke::modifier(COMMAND_KEY, base),
+                ],
+                &right_arrow_strokes(1),
+            )
+        }
+
+        /// Right arrows that collapse an abandoned selection to its end.
+        /// Recovery is wanted even when late, so it is its own fallback.
+        pub fn right_arrows(count: usize) -> Result<Self> {
+            let strokes = right_arrow_strokes(count);
+            Self::keystrokes(&strokes, &strokes)
+        }
+
+        fn keystrokes(strokes: &[Keystroke], fallback: &[Keystroke]) -> Result<Self> {
+            let source = Owned::new(unsafe { CGEventSourceCreate(-1) })?;
+            unsafe { CGEventSourceSetLocalEventsSuppressionInterval(source.0, 0.0) };
+            let create = |strokes: &[Keystroke]| -> Result<Vec<Owned>> {
+                let mut events = Vec::with_capacity(strokes.len());
+                for stroke in strokes {
+                    let event = Owned::new(unsafe {
+                        CGEventCreateKeyboardEvent(source.0, stroke.code, stroke.down)
+                    })?;
+                    unsafe {
+                        if stroke.modifier {
+                            // Inserted after the system's own translation, so
+                            // the modifier must already be a flags-changed event.
+                            CGEventSetType(event.0.cast_mut(), FLAGS_CHANGED);
+                        }
+                        CGEventSetFlags(event.0.cast_mut(), stroke.flags);
+                    }
+                    events.push(event);
+                }
+                Ok(events)
+            };
+            let events = create(strokes)?;
+            let fallback = create(fallback)?;
+            Self::with_trigger(source, events, fallback)
+        }
+
+        fn with_trigger(source: Owned, events: Vec<Owned>, fallback: Vec<Owned>) -> Result<Self> {
             static NEXT_BATCH: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
             let marker = NEXT_BATCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let trigger = Owned::new(unsafe { CGEventCreateKeyboardEvent(source.0, 0, false) })?;
@@ -200,10 +259,21 @@ mod native {
             }
             Ok(Self {
                 events,
+                fallback,
                 _source: source,
                 trigger,
                 marker,
             })
+        }
+
+        /// Ends a GUI hold with this batch directly ahead of the held keys.
+        pub fn release(
+            self,
+            target_pid: i32,
+            target_window: i64,
+            on_ready: impl FnOnce() -> bool,
+        ) -> Result<bool> {
+            batch::release(self, target_pid, target_window, on_ready)
         }
 
         pub fn post(
@@ -220,10 +290,67 @@ mod native {
     pub(in crate::automation) fn warm_target(pid: i32) -> Result<()> {
         batch::warm(pid)
     }
+
+    /// Holds the target's keyboard input behind a GUI selection edit until
+    /// [`Prepared::release`]. `false` means the hold is not in place.
+    pub(in crate::automation) fn hold_target(
+        pid: i32,
+        signal: std::sync::Arc<HoldSignal>,
+        duration: std::time::Duration,
+    ) -> Result<bool> {
+        batch::hold(pid, signal, duration)
+    }
+
+    pub(in crate::automation) use batch::HoldSignal;
+
+    // Apple virtual key codes and the flags enigo's proven shortcuts carry.
+    const COMMAND_KEY: u16 = 55;
+    const PASTE_KEY: u16 = 9;
+    const RIGHT_ARROW_KEY: u16 = 124;
+    const FLAGS_CHANGED: u32 = 12;
+    const ENIGO_BASE_FLAGS: u64 = 0x2000_0100;
+    /// kCGEventFlagMaskCommand plus the left-Command device bit.
+    const COMMAND_FLAGS: u64 = (1 << 20) | 0x08;
+
+    fn right_arrow_strokes(count: usize) -> Vec<Keystroke> {
+        (0..count)
+            .flat_map(|_| {
+                [true, false].map(|down| Keystroke::key(RIGHT_ARROW_KEY, down, ENIGO_BASE_FLAGS))
+            })
+            .collect()
+    }
+
+    #[derive(Clone, Copy)]
+    struct Keystroke {
+        code: u16,
+        down: bool,
+        flags: u64,
+        modifier: bool,
+    }
+
+    impl Keystroke {
+        fn key(code: u16, down: bool, flags: u64) -> Self {
+            Self {
+                code,
+                down,
+                flags,
+                modifier: false,
+            }
+        }
+
+        fn modifier(code: u16, flags: u64) -> Self {
+            Self {
+                code,
+                down: flags & (1 << 20) != 0,
+                flags,
+                modifier: true,
+            }
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
-pub(super) use native::{Prepared, warm_target};
+pub(super) use native::{HoldSignal, Prepared, hold_target, warm_target};
 
 #[cfg(test)]
 mod tests {
