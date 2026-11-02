@@ -20,6 +20,12 @@ change between minor releases while the version is below 1.0.
   let a `keep` rule win over a broader `correct` rule regardless of order.
 - Convert the Ukrainian shifted number row (`"`, `№`, `;`, `:`, `?`) in the
   built-in layout table used by the CLI, the web demo and as a fallback.
+- Correct words with number-row punctuation and hyphens while typing. The live
+  tracker used to drop every digit-row key and `-`, so `ghbdsn!`, `ghbdsn?`
+  (Shift+7), `"ghbdsn"`, `(ghbdsn)` and `,elm-zrbq` were never corrected even
+  though the engine handled them. Bare digits still end tracking (`h264`,
+  `mp3`), and `@handle` and `user@host` stay technical while a quoted `@word@`
+  does not. Applies to the desktop app, terminal typing and the web demo.
 
 ### Planned
 

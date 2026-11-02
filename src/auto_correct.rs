@@ -481,6 +481,17 @@ pub(crate) fn physical_key(key: Keycode) -> Option<upyr_core::PhysicalKey> {
         Keycode::Comma => PhysicalKey::Comma,
         Keycode::Dot => PhysicalKey::Period,
         Keycode::Slash => PhysicalKey::Slash,
+        Keycode::Key1 => PhysicalKey::Digit1,
+        Keycode::Key2 => PhysicalKey::Digit2,
+        Keycode::Key3 => PhysicalKey::Digit3,
+        Keycode::Key4 => PhysicalKey::Digit4,
+        Keycode::Key5 => PhysicalKey::Digit5,
+        Keycode::Key6 => PhysicalKey::Digit6,
+        Keycode::Key7 => PhysicalKey::Digit7,
+        Keycode::Key8 => PhysicalKey::Digit8,
+        Keycode::Key9 => PhysicalKey::Digit9,
+        Keycode::Key0 => PhysicalKey::Digit0,
+        Keycode::Minus => PhysicalKey::Minus,
         Keycode::Space => PhysicalKey::Space,
         Keycode::Backspace => PhysicalKey::Backspace,
         Keycode::LShift | Keycode::RShift => PhysicalKey::Shift,
@@ -799,6 +810,93 @@ mod tests {
             };
             assert_eq!(correction.expected_source, expected_source);
             assert_eq!(correction.replacement, expected_replacement);
+        }
+    }
+
+    #[test]
+    fn typed_number_row_punctuation_and_hyphens_are_corrected_in_both_paths() {
+        fn event(key: Keycode, shifted: bool) -> AutoKeyEvent {
+            AutoKeyEvent { key, shifted }
+        }
+        let letters = |word: &str| -> Vec<AutoKeyEvent> {
+            word.chars()
+                .map(|character| {
+                    let key = match character {
+                        'b' => Keycode::B,
+                        'd' => Keycode::D,
+                        'e' => Keycode::E,
+                        'g' => Keycode::G,
+                        'h' => Keycode::H,
+                        'l' => Keycode::L,
+                        'm' => Keycode::M,
+                        'n' => Keycode::N,
+                        'o' => Keycode::O,
+                        'q' => Keycode::Q,
+                        'r' => Keycode::R,
+                        's' => Keycode::S,
+                        'z' => Keycode::Z,
+                        _ => unreachable!("test words use these keys"),
+                    };
+                    event(key, false)
+                })
+                .collect()
+        };
+        let space = event(Keycode::Space, false);
+        for (layout, events, replacement) in [
+            (
+                SystemLayout::English,
+                [letters("ghbdsn"), vec![event(Keycode::Key1, true), space]].concat(),
+                "привіт! ",
+            ),
+            (
+                SystemLayout::English,
+                [letters("ghbdsn"), vec![event(Keycode::Key7, true), space]].concat(),
+                "привіт? ",
+            ),
+            (
+                SystemLayout::English,
+                [
+                    vec![event(Keycode::Comma, false)],
+                    letters("elm"),
+                    vec![event(Keycode::Minus, false)],
+                    letters("zrbq"),
+                    vec![space],
+                ]
+                .concat(),
+                "будь-який ",
+            ),
+            (
+                SystemLayout::Ukrainian,
+                [letters("hello"), vec![event(Keycode::Key1, true), space]].concat(),
+                "hello! ",
+            ),
+        ] {
+            let mut tracker = AutoWordTracker::default();
+            let mut sample = None;
+            for event in events {
+                if tracker.needs_layout_check() && AutoWordTracker::can_begin(event.key) {
+                    tracker.set_source_layout(Some(layout));
+                }
+                if let Some(finished) = tracker.observe(event) {
+                    sample = Some(finished);
+                }
+            }
+            let sample = sample.unwrap_or_else(|| panic!("{replacement:?} was never tracked"));
+            for (path, decision) in [
+                (
+                    "desktop",
+                    evaluate_with_mapping(&sample, &Config::default(), None),
+                ),
+                (
+                    "terminal",
+                    evaluate_terminal_with_mapping(&sample, &Config::default(), None),
+                ),
+            ] {
+                let AutoDecision::Correct(correction) = decision else {
+                    panic!("{path}: {replacement:?} was not corrected: {decision:?}");
+                };
+                assert_eq!(correction.replacement, replacement, "{path}");
+            }
         }
     }
 

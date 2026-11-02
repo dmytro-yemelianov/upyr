@@ -97,6 +97,17 @@ pub enum PhysicalKey {
     Comma,
     Period,
     Slash,
+    Digit1,
+    Digit2,
+    Digit3,
+    Digit4,
+    Digit5,
+    Digit6,
+    Digit7,
+    Digit8,
+    Digit9,
+    Digit0,
+    Minus,
     Space,
     Backspace,
     Shift,
@@ -239,6 +250,17 @@ impl AutoWordTracker {
                 | PhysicalKey::Comma
                 | PhysicalKey::Period
                 | PhysicalKey::Slash
+                | PhysicalKey::Digit1
+                | PhysicalKey::Digit2
+                | PhysicalKey::Digit3
+                | PhysicalKey::Digit4
+                | PhysicalKey::Digit5
+                | PhysicalKey::Digit6
+                | PhysicalKey::Digit7
+                | PhysicalKey::Digit8
+                | PhysicalKey::Digit9
+                | PhysicalKey::Digit0
+                | PhysicalKey::Minus
         )
     }
 
@@ -1096,7 +1118,11 @@ fn looks_like_deliberate_latin_identifier(word: &str) -> bool {
 }
 
 fn looks_like_deliberate_latin_technical_token(word: &str) -> bool {
-    if word.contains("://") || word.contains("::") || word.contains('@') || word.contains('_') {
+    if word.contains("://")
+        || word.contains("::")
+        || word.contains('_')
+        || is_address_or_mention(word)
+    {
         return true;
     }
     if word
@@ -1132,6 +1158,19 @@ fn looks_like_deliberate_latin_technical_token(word: &str) -> bool {
                 | "md"
                 | "txt"
         )
+}
+
+/// `user@host` or a leading `@handle`. The Ukrainian double quote shares the
+/// physical `@` key, so `@ghbdsn@` (a quoted word) is not technical.
+fn is_address_or_mention(word: &str) -> bool {
+    let characters: Vec<char> = word.chars().collect();
+    let email = characters.windows(3).any(|window| {
+        window[1] == '@' && window[0].is_alphanumeric() && window[2].is_alphanumeric()
+    });
+    let mention = characters.first() == Some(&'@')
+        && characters.get(1).is_some_and(|c| c.is_alphanumeric())
+        && characters.last() != Some(&'@');
+    email || mention
 }
 
 fn terminal_delimiter_is_likely<S: CandidateScorer + ?Sized>(
@@ -1223,6 +1262,31 @@ fn physical_english_character(key: PhysicalKey, shifted: bool) -> Option<char> {
         } else {
             letter
         });
+    }
+
+    // Number-row symbols are punctuation in both layouts (`!`, `(`, or the
+    // Ukrainian `"№;:?` positions), so they belong to the word they end or
+    // open. A bare digit is not part of a word: `h264` and `mp3` stay
+    // technical text, and tracking ends there as before.
+    let number_row = match key {
+        PhysicalKey::Digit1 => Some('!'),
+        PhysicalKey::Digit2 => Some('@'),
+        PhysicalKey::Digit3 => Some('#'),
+        PhysicalKey::Digit4 => Some('$'),
+        PhysicalKey::Digit5 => Some('%'),
+        PhysicalKey::Digit6 => Some('^'),
+        PhysicalKey::Digit7 => Some('&'),
+        PhysicalKey::Digit8 => Some('*'),
+        PhysicalKey::Digit9 => Some('('),
+        PhysicalKey::Digit0 => Some(')'),
+        _ => None,
+    };
+    if let Some(symbol) = number_row {
+        return shifted.then_some(symbol);
+    }
+    if key == PhysicalKey::Minus {
+        // A hyphen joins `будь-який`; `_` marks the token as technical.
+        return Some(if shifted { '_' } else { '-' });
     }
 
     let character = match key {
@@ -1944,6 +2008,125 @@ mod tests {
         AutoCorrectPolicy {
             triggers: crate::triggers::builtin_triggers(),
             ..AutoCorrectPolicy::default()
+        }
+    }
+
+    /// Types `keys` through the tracker exactly as a keyboard would, then
+    /// evaluates the word completed by the final Space.
+    fn typed(layout: InputLayout, keys: &[(PhysicalKey, bool)]) -> Option<AutoDecision> {
+        let mut tracker = AutoWordTracker::default();
+        let mut decision = None;
+        for &(key, shifted) in keys {
+            if tracker.needs_layout_check() && AutoWordTracker::can_begin(key) {
+                tracker.set_source_layout(Some(layout));
+            }
+            if let Some(sample) = tracker.observe(PhysicalKeyEvent { key, shifted }) {
+                decision = Some(evaluate(&sample, &production_policy()));
+            }
+        }
+        decision
+    }
+
+    fn letters(word: &str) -> Vec<(PhysicalKey, bool)> {
+        word.chars()
+            .map(|character| {
+                PhysicalKey::from_ascii_letter(character).expect("test words use letter keys")
+            })
+            .collect()
+    }
+
+    fn keys(parts: &[&[(PhysicalKey, bool)]]) -> Vec<(PhysicalKey, bool)> {
+        parts.concat()
+    }
+
+    #[test]
+    fn typed_number_row_punctuation_reaches_the_engine() {
+        use PhysicalKey::*;
+        let space = [(Space, false)];
+        for (layout, typed_keys, replacement) in [
+            // Shift+1 is `!` on both layouts.
+            (
+                InputLayout::English,
+                keys(&[&letters("ghbdsn"), &[(Digit1, true)], &space]),
+                "привіт! ",
+            ),
+            // Ukrainian `?` is Shift+7.
+            (
+                InputLayout::English,
+                keys(&[&letters("ghbdsn"), &[(Digit7, true)], &space]),
+                "привіт? ",
+            ),
+            // Ukrainian `"` is Shift+2.
+            (
+                InputLayout::English,
+                keys(&[
+                    &[(Digit2, true)],
+                    &letters("ghbdsn"),
+                    &[(Digit2, true)],
+                    &space,
+                ]),
+                "\"привіт\" ",
+            ),
+            (
+                InputLayout::English,
+                keys(&[
+                    &[(Digit9, true)],
+                    &letters("ghbdsn"),
+                    &[(Digit0, true)],
+                    &space,
+                ]),
+                "(привіт) ",
+            ),
+            // A hyphen keeps one word: `будь-який`.
+            (
+                InputLayout::English,
+                keys(&[
+                    &[(Comma, false)],
+                    &letters("elm"),
+                    &[(Minus, false)],
+                    &letters("zrbq"),
+                    &space,
+                ]),
+                "будь-який ",
+            ),
+            (
+                InputLayout::Ukrainian,
+                keys(&[&letters("hello"), &[(Digit1, true)], &space]),
+                "hello! ",
+            ),
+        ] {
+            let decision = typed(layout, &typed_keys);
+            let Some(AutoDecision::Correct(correction)) = decision else {
+                panic!("{replacement:?} was not corrected: {decision:?}");
+            };
+            assert_eq!(correction.replacement, replacement);
+        }
+    }
+
+    #[test]
+    fn typed_digits_still_end_tracking_as_technical_text() {
+        use PhysicalKey::*;
+        // `h264`, `mp3`, `v2`: an unshifted digit is not part of a word.
+        let decision = typed(
+            InputLayout::English,
+            &keys(&[&letters("ghbdsn"), &[(Digit2, false)], &[(Space, false)]]),
+        );
+        assert_eq!(decision, None);
+    }
+
+    #[test]
+    fn mentions_and_addresses_stay_technical_while_quotes_do_not() {
+        for source in ["@dmytro", "user@example.com"] {
+            assert!(
+                !matches!(
+                    evaluate(
+                        &context_sample(source, &format!("{source} "), InputLayout::English),
+                        &production_policy()
+                    ),
+                    AutoDecision::Correct(_)
+                ),
+                "{source:?} must not be corrected"
+            );
         }
     }
 
