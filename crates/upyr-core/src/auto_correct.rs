@@ -340,11 +340,94 @@ fn evaluate_with_scorer<S: CandidateScorer + ?Sized>(
     scorer: &S,
 ) -> AutoDecision {
     let candidates = Candidates::new(sample, mapping);
+    match decide(sample, policy, mapping, scorer, &candidates) {
+        AutoDecision::Correct(correction) => AutoDecision::Correct(drop_source_language_prefix(
+            correction,
+            &candidates,
+            policy,
+            scorer,
+        )),
+        decision => decision,
+    }
+}
+
+/// Earlier undecided words are rewritten together with the confident word
+/// unless they clearly belong to the language they were typed in. The walk
+/// back stops at the first word that is a known or deliberate source-language
+/// token, or that the model reads as the source language by the full margin
+/// (`ok ghbdsn` -> `ok привіт`, while `nfr f xb ,elt` -> `так а чи буде`).
+fn drop_source_language_prefix<S: CandidateScorer + ?Sized>(
+    correction: AutoCorrection,
+    candidates: &Candidates,
+    policy: &AutoCorrectPolicy,
+    scorer: &S,
+) -> AutoCorrection {
+    let source: Vec<char> = correction.expected_source.chars().collect();
+    let target: Vec<char> = correction.replacement.chars().collect();
+    // Conversion is character-for-character, so word boundaries line up.
+    if source.len() != target.len() {
+        return correction;
+    }
+    let body_end = source.len() - source.iter().rev().take_while(|c| **c == ' ').count();
+    let current_start = source[..body_end]
+        .iter()
+        .rposition(|c| *c == ' ')
+        .map_or(0, |index| index + 1);
+
+    let (minimum_coverage, minimum_advantage, _) = model_thresholds(policy.sensitivity);
+    let text = |characters: &[char]| characters.iter().collect::<String>();
+    let mut start = current_start;
+    while start > 0 {
+        let previous_end = start - 1;
+        let previous_start = source[..previous_end]
+            .iter()
+            .rposition(|c| *c == ' ')
+            .map_or(0, |index| index + 1);
+        let word = text(&source[previous_start..previous_end]);
+        if !word.is_empty() {
+            let source_word = normalize_word(&word);
+            let target_word = normalize_word(&text(&target[previous_start..previous_end]));
+            let deliberate_source = known(candidates.source_language, &source_word)
+                || (matches!(candidates.source_language, Language::English)
+                    && (looks_like_deliberate_latin_identifier(&word)
+                        || looks_like_deliberate_latin_technical_token(&word)));
+            let evidence = scorer.compare(candidates.text_pair(&source_word, &target_word));
+            let reads_as_source = evidence.source.coverage >= minimum_coverage
+                && evidence.source.coverage - evidence.target.coverage >= minimum_advantage;
+            if deliberate_source || reads_as_source {
+                break;
+            }
+        }
+        start = previous_start;
+    }
+
+    if start == 0 {
+        return correction;
+    }
+    AutoCorrection {
+        expected_source: text(&source[start..]),
+        replacement: text(&target[start..]),
+        direction: correction.direction,
+    }
+}
+
+fn decide<S: CandidateScorer + ?Sized>(
+    sample: &WordSample,
+    policy: &AutoCorrectPolicy,
+    mapping: Option<&[(char, char)]>,
+    scorer: &S,
+    candidates: &Candidates,
+) -> AutoDecision {
+    // A user exception is the most specific rule there is; no built-in trigger
+    // may override it.
+    if is_user_exception(policy, &normalize_word(&candidates.source_word)) {
+        return AutoDecision::Reset;
+    }
 
     // Deterministic triggers win over the statistical scorer: they let short or
     // domain-specific sequences correct (or be preserved) without needing model
     // confidence.
-    if let Some(decision) = trigger_decision(policy, sample, &candidates) {
+    if let Some(decision) = trigger_decision(policy, sample, candidates) {
         return decision;
     }
 
@@ -357,7 +440,7 @@ fn evaluate_with_scorer<S: CandidateScorer + ?Sized>(
         candidates.target_language,
         &normalize_word(&candidates.target_word),
     );
-    if let Some(preserved) = Candidates::preserving_terminal_delimiter(sample, &candidates, mapping)
+    if let Some(preserved) = Candidates::preserving_terminal_delimiter(sample, candidates, mapping)
     {
         // Do not turn a known whole word's last letter into punctuation just
         // because its shorter stem also looks plausible to the language model.
@@ -367,6 +450,13 @@ fn evaluate_with_scorer<S: CandidateScorer + ?Sized>(
         );
         if (!full_word_known || preserved_word_known)
             && terminal_delimiter_is_likely(&preserved, policy, scorer)
+            && delimiter_reads_better_than_final_letter(
+                candidates,
+                &preserved,
+                full_word_known,
+                preserved_word_known,
+                scorer,
+            )
         {
             if let AutoDecision::Correct(correction) =
                 evaluate_candidates(&preserved, policy, scorer)
@@ -376,7 +466,7 @@ fn evaluate_with_scorer<S: CandidateScorer + ?Sized>(
         }
     }
 
-    evaluate_candidates(&candidates, policy, scorer)
+    evaluate_candidates(candidates, policy, scorer)
 }
 
 fn evaluate_candidates<S: CandidateScorer + ?Sized>(
@@ -390,11 +480,7 @@ fn evaluate_candidates<S: CandidateScorer + ?Sized>(
         return AutoDecision::Reset;
     }
 
-    if policy
-        .exceptions
-        .iter()
-        .any(|exception| normalize_word(exception) == source_word)
-    {
+    if is_user_exception(policy, &source_word) {
         return AutoDecision::Reset;
     }
 
@@ -417,8 +503,6 @@ fn evaluate_candidates<S: CandidateScorer + ?Sized>(
         .filter(|character| character.is_alphabetic())
         .count();
 
-    let dictionary_match =
-        current_word_length >= policy.min_word_length && target_known && !source_known;
     let context_evidence = scorer.compare(candidates.context_pair());
     let source_model = context_evidence.source;
     let target_model = context_evidence.target;
@@ -458,6 +542,18 @@ fn evaluate_candidates<S: CandidateScorer + ?Sized>(
         } else {
             0.0
         };
+    // A dictionary hit stands in for the collision's extra half-margin, not for
+    // the base margin: when the typed word already reads as natural text and the
+    // model does not clearly prefer the other layout, both are real words
+    // (`руку` versus `here`) and the typed one wins.
+    let dictionary_collision = !physical_letter_target
+        && source_model.coverage >= minimum_coverage
+        && target_model.coverage >= minimum_coverage
+        && advantage < base_required_advantage;
+    let dictionary_match = current_word_length >= policy.min_word_length
+        && target_known
+        && !source_known
+        && !dictionary_collision;
     let model_match = !source_known
         && context_characters >= minimum_characters.max(policy.min_word_length)
         && target_model.grams >= 3
@@ -687,11 +783,21 @@ fn trigger_decision(
     if physical.is_empty() {
         return None;
     }
-    let trigger = policy
+    // `Keep` is the precision-preserving outcome, so it wins over any `Correct`
+    // rule that also matches, regardless of table order.
+    let mut matching = policy
         .triggers
         .iter()
-        .find(|trigger| trigger.matches(&physical, sample.source_layout))?;
-    match trigger.action {
+        .filter(|trigger| trigger.matches(&physical, sample.source_layout));
+    let first = matching.next()?;
+    let action = if first.action == TriggerAction::Keep
+        || matching.any(|trigger| trigger.action == TriggerAction::Keep)
+    {
+        TriggerAction::Keep
+    } else {
+        TriggerAction::Correct
+    };
+    match action {
         TriggerAction::Keep => Some(AutoDecision::Reset),
         TriggerAction::Correct => {
             let source = normalize_word(&candidates.source_word);
@@ -706,6 +812,13 @@ fn trigger_decision(
             }))
         }
     }
+}
+
+fn is_user_exception(policy: &AutoCorrectPolicy, source_word: &str) -> bool {
+    policy
+        .exceptions
+        .iter()
+        .any(|exception| normalize_word(exception) == source_word)
 }
 
 fn known(language: Language, word: &str) -> bool {
@@ -1049,6 +1162,31 @@ fn terminal_delimiter_is_likely<S: CandidateScorer + ?Sized>(
     }
 }
 
+/// A final physical `,` or `.` is either punctuation or the Ukrainian `б`/`ю`.
+/// Plausibility of the shorter stem is not enough: keep the key as punctuation
+/// only when the stem reads at least as naturally as the whole word
+/// (`Ольга,` over `Ольгаб`, but `роблю` over `робл.`).
+fn delimiter_reads_better_than_final_letter<S: CandidateScorer + ?Sized>(
+    full: &Candidates,
+    preserved: &Candidates,
+    full_word_known: bool,
+    preserved_word_known: bool,
+    scorer: &S,
+) -> bool {
+    if preserved_word_known && !full_word_known {
+        return true;
+    }
+    let word_coverage = |candidates: &Candidates| {
+        let source = normalize_word(&candidates.source_word);
+        let target = normalize_word(&candidates.target_word);
+        scorer
+            .compare(candidates.text_pair(&source, &target))
+            .target
+            .coverage
+    };
+    word_coverage(preserved) >= word_coverage(full)
+}
+
 fn physical_english_character(key: PhysicalKey, shifted: bool) -> Option<char> {
     let letter = match key {
         PhysicalKey::KeyA => Some('a'),
@@ -1207,8 +1345,13 @@ mod tests {
         assert_eq!(correction.replacement, "яяяя, ");
         assert_eq!(correction.direction, Direction::EnglishToUkrainian);
         let pairs = scorer.pairs.borrow();
-        assert_eq!(pairs.len(), 3);
         assert_eq!(pairs[0], ("zzzz".to_owned(), "яяяя".to_owned()));
+        // The whole word with a final `б` is scored against the punctuation stem.
+        assert!(
+            pairs
+                .iter()
+                .any(|pair| pair == &("zzzz".to_owned(), "яяяяб".to_owned()))
+        );
         assert!(
             pairs
                 .iter()
@@ -1793,6 +1936,118 @@ mod tests {
                 ukrainian,
                 as_ukrainian.coverage,
                 as_english.coverage
+            );
+        }
+    }
+
+    fn production_policy() -> AutoCorrectPolicy {
+        AutoCorrectPolicy {
+            triggers: crate::triggers::builtin_triggers(),
+            ..AutoCorrectPolicy::default()
+        }
+    }
+
+    #[test]
+    fn user_exceptions_override_builtin_correct_triggers() {
+        let policy = AutoCorrectPolicy {
+            exceptions: vec!["ghbdsn".to_owned()],
+            ..production_policy()
+        };
+        assert_eq!(
+            evaluate(&sample("ghbdsn", InputLayout::English), &policy),
+            AutoDecision::Reset
+        );
+    }
+
+    #[test]
+    fn keep_triggers_win_over_broader_correct_triggers_listed_first() {
+        let policy = AutoCorrectPolicy {
+            triggers: vec![
+                Trigger::new("*ghb*", TriggerAction::Correct),
+                Trigger::new("ghbdsn", TriggerAction::Keep),
+            ],
+            ..AutoCorrectPolicy::default()
+        };
+        assert_eq!(
+            evaluate(&sample("ghbdsn", InputLayout::English), &policy),
+            AutoDecision::Reset
+        );
+    }
+
+    #[test]
+    fn a_final_layout_letter_stays_a_letter_when_the_whole_word_is_more_likely() {
+        for (physical, intended) in [
+            ("hj,k.", "роблю"),
+            ("ptvk.", "землю"),
+            ("cj,j.", "собою"),
+            ("nfrj.", "такою"),
+        ] {
+            let correction = correction(evaluate(
+                &context_sample(physical, &format!("{physical} "), InputLayout::English),
+                &production_policy(),
+            ));
+            assert_eq!(
+                correction.replacement,
+                format!("{intended} "),
+                "{physical:?} must keep its final letter"
+            );
+        }
+    }
+
+    #[test]
+    fn a_dictionary_hit_does_not_rewrite_a_natural_source_word() {
+        // `руку` is ordinary Ukrainian typed on the Ukrainian layout; the same
+        // keys spell the English dictionary word `here`.
+        for context in ["here ", "lfq here "] {
+            assert!(
+                !matches!(
+                    evaluate(
+                        &context_sample("here", context, InputLayout::Ukrainian),
+                        &production_policy()
+                    ),
+                    AutoDecision::Correct(_)
+                ),
+                "native Ukrainian {context:?} must not be corrected"
+            );
+        }
+    }
+
+    #[test]
+    fn a_confident_word_does_not_rewrite_earlier_source_language_words() {
+        for (word, context, layout, expected_source, replacement) in [
+            (
+                "ghbdsn",
+                "ok ghbdsn ",
+                InputLayout::English,
+                "ghbdsn ",
+                "привіт ",
+            ),
+            (
+                "hello",
+                "s hello ",
+                InputLayout::Ukrainian,
+                "руддщ ",
+                "hello ",
+            ),
+            (
+                "gjnhs,yj",
+                "api gjnhs,yj ",
+                InputLayout::English,
+                "gjnhs,yj ",
+                "потрібно ",
+            ),
+        ] {
+            let correction = correction(evaluate(
+                &context_sample(word, context, layout),
+                &production_policy(),
+            ));
+            assert_eq!(
+                (
+                    correction.expected_source.as_str(),
+                    correction.replacement.as_str()
+                ),
+                (expected_source, replacement),
+                "{context:?} must only rewrite its final word"
             );
         }
     }

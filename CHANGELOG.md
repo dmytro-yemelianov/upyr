@@ -6,6 +6,21 @@ change between minor releases while the version is below 1.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- Stop automatic correction from rewriting a correctly typed word that collides
+  with a dictionary word on the other layout (`руку` is no longer turned into
+  `here`).
+- Rewrite only the confident word, not earlier words that clearly belong to the
+  typed language: `ok ghbdsn` becomes `ok привіт`, not `щл привіт`. Ambiguous
+  earlier words are still corrected together (`nfr f xb ,elt` → `так а чи буде`).
+- Keep a final `ю` or `б` as a letter when the whole word reads better than the
+  punctuated stem (`hj,k.` → `роблю`, not `робл.`).
+- Let words on the Exceptions list override the built-in correction rules, and
+  let a `keep` rule win over a broader `correct` rule regardless of order.
+- Convert the Ukrainian shifted number row (`"`, `№`, `;`, `:`, `?`) in the
+  built-in layout table used by the CLI, the web demo and as a fallback.
+
 ### Planned
 
 - Notarized Developer ID distribution for macOS.

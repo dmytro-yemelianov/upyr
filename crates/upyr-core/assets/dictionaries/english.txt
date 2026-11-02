@@ -75,6 +75,8 @@ help
 her
 here
 here's
+hey
+hi
 him
 his
 how
@@ -125,6 +127,8 @@ not
 now
 of
 off
+oh
+ok
 old
 on
 one
@@ -181,6 +185,7 @@ try
 two
 under
 up
+us
 use
 very
 want

@@ -217,13 +217,26 @@ impl AutoWordTracker {
 }
 
 pub fn evaluate(sample: &WordSample, config: &Config) -> AutoDecision {
-    let policy = correction_policy(config);
     let mapping = system_layout::installed_mapping().ok().flatten();
-    let decision = upyr_core::evaluate(&sample.inner, &policy, mapping.as_deref());
+    evaluate_with_mapping(sample, config, mapping.as_deref())
+}
+
+fn evaluate_with_mapping(
+    sample: &WordSample,
+    config: &Config,
+    mapping: Option<&[(char, char)]>,
+) -> AutoDecision {
+    let policy = correction_policy(config);
+    let decision = upyr_core::evaluate(&sample.inner, &policy, mapping);
     match decision {
         AutoDecision::Correct(mut correction) => {
-            correction.expected_source =
-                render_visible_context(&sample.visible_runs, mapping.as_deref());
+            // The engine may rewrite only the tail of the tracked context.
+            // Physical and visible text align character for character, so the
+            // selection is exactly that many trailing visible characters.
+            let visible = render_visible_context(&sample.visible_runs, mapping);
+            let corrected = correction.expected_source.chars().count();
+            let skip = visible.chars().count().saturating_sub(corrected);
+            correction.expected_source = visible.chars().skip(skip).collect();
             AutoDecision::Correct(correction)
         }
         decision => decision,
@@ -790,6 +803,36 @@ mod tests {
     }
 
     #[test]
+    fn desktop_selects_only_the_visible_suffix_the_engine_corrects() {
+        // Real source-language words typed before a wrong-layout word stay
+        // untouched: only the final word may be selected and replaced.
+        for (word, context, layout, expected_source, replacement) in [
+            (
+                "ghbdsn",
+                "ok ghbdsn ",
+                SystemLayout::English,
+                "ghbdsn ",
+                "привіт ",
+            ),
+            (
+                "hello",
+                "s hello ",
+                SystemLayout::Ukrainian,
+                "руддщ ",
+                "hello ",
+            ),
+        ] {
+            let sample = terminal_sample(word, context, layout);
+            let decision = evaluate_with_mapping(&sample, &Config::default(), None);
+            let AutoDecision::Correct(correction) = decision else {
+                panic!("expected correction for {context:?}, got {decision:?}");
+            };
+            assert_eq!(correction.expected_source, expected_source);
+            assert_eq!(correction.replacement, replacement);
+        }
+    }
+
+    #[test]
     fn mixed_layout_word_uses_exact_visible_multiword_context() {
         fn type_keys(
             tracker: &mut AutoWordTracker,
@@ -850,12 +893,10 @@ mod tests {
         )
         .expect("mixed-layout word sample");
 
-        let core_decision =
-            upyr_core::evaluate(&mixed.inner, &correction_policy(&Config::default()), None);
-        let AutoDecision::Correct(mut correction) = core_decision else {
-            panic!("expected correction, got {core_decision:?}");
+        let decision = evaluate_with_mapping(&mixed, &Config::default(), None);
+        let AutoDecision::Correct(correction) = decision else {
+            panic!("expected correction, got {decision:?}");
         };
-        correction.expected_source = render_visible_context(&mixed.visible_runs, None);
 
         assert_eq!(correction.expected_source, "nb dvsти ");
         assert_eq!(correction.replacement, "ти вміти ");
