@@ -10,6 +10,22 @@ const ENGLISH_LOWER: &str = "qwertyuiop[]asdfghjkl;'zxcvbnm,./`\\";
 const UKRAINIAN_LOWER: &str = "йцукенгшщзхїфівапролджєячсмитьбю.'ґ";
 const ENGLISH_UPPER: &str = "QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?~|";
 const UKRAINIAN_UPPER: &str = "ЙЦУКЕНГШЩЗХЇФІВАПРОЛДЖЄЯЧСМИТЬБЮ,₴Ґ";
+/// Shifted number-row keys whose symbol differs on the standard Ukrainian
+/// layout (Shift+2, 3, 4, 6, 7). The other digit-row symbols are shared.
+const ENGLISH_SHIFTED_DIGITS: &str = "@#$^&";
+const UKRAINIAN_SHIFTED_DIGITS: &str = "\"№;:?";
+
+fn builtin_pairs() -> impl Iterator<Item = (char, char)> {
+    ENGLISH_LOWER
+        .chars()
+        .zip(UKRAINIAN_LOWER.chars())
+        .chain(ENGLISH_UPPER.chars().zip(UKRAINIAN_UPPER.chars()))
+        .chain(
+            ENGLISH_SHIFTED_DIGITS
+                .chars()
+                .zip(UKRAINIAN_SHIFTED_DIGITS.chars()),
+        )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -32,11 +48,7 @@ pub struct Conversion {
 /// installed or browser-supplied layout profile before calling
 /// [`convert_with_mapping`].
 pub fn default_physical_mapping() -> Vec<(char, char)> {
-    ENGLISH_LOWER
-        .chars()
-        .zip(UKRAINIAN_LOWER.chars())
-        .chain(ENGLISH_UPPER.chars().zip(UKRAINIAN_UPPER.chars()))
-        .collect()
+    builtin_pairs().collect()
 }
 
 /// Converts text as if the same physical keys had been typed in the other layout.
@@ -82,12 +94,8 @@ fn builtin_mapping(direction: Direction) -> &'static HashMap<char, char> {
 }
 
 fn build_builtin_mapping(direction: Direction) -> HashMap<char, char> {
-    let pairs = ENGLISH_LOWER
-        .chars()
-        .zip(UKRAINIAN_LOWER.chars())
-        .chain(ENGLISH_UPPER.chars().zip(UKRAINIAN_UPPER.chars()));
     let mut mapping = HashMap::new();
-    for (english, ukrainian) in pairs {
+    for (english, ukrainian) in builtin_pairs() {
         let (from, to) = match direction {
             Direction::EnglishToUkrainian => (english, ukrainian),
             Direction::UkrainianToEnglish => (ukrainian, english),
@@ -208,6 +216,22 @@ mod tests {
     }
 
     #[test]
+    fn converts_the_shifted_number_row_of_the_standard_ukrainian_layout() {
+        assert_eq!(
+            convert("@ghbdsn@ &", Direction::EnglishToUkrainian).text,
+            "\"привіт\" ?"
+        );
+        assert_eq!(
+            convert("#1 $ ^", Direction::EnglishToUkrainian).text,
+            "№1 ; :"
+        );
+        assert_eq!(
+            convert("\"руддщ\"?", Direction::UkrainianToEnglish).text,
+            "@hello@&"
+        );
+    }
+
+    #[test]
     fn preserves_unmapped_characters() {
         let result = convert("test 123 🚀", Direction::EnglishToUkrainian);
 
@@ -226,8 +250,12 @@ mod tests {
     fn exposes_the_complete_default_physical_mapping() {
         let mapping = default_physical_mapping();
 
-        assert_eq!(mapping.len(), ENGLISH_LOWER.chars().count() * 2);
+        assert_eq!(
+            mapping.len(),
+            ENGLISH_LOWER.chars().count() * 2 + ENGLISH_SHIFTED_DIGITS.chars().count()
+        );
         assert!(mapping.contains(&('q', 'й')));
+        assert!(mapping.contains(&('&', '?')));
         assert!(mapping.contains(&(']', 'ї')));
         assert!(mapping.contains(&('\\', 'ґ')));
         assert!(mapping.contains(&('Q', 'Й')));
@@ -235,9 +263,10 @@ mod tests {
 
     #[test]
     fn generated_inputs_round_trip_without_touching_unmapped_characters() {
-        let alphabet: Vec<char> = format!("{ENGLISH_LOWER}{ENGLISH_UPPER} 0123456789\n🚀")
-            .chars()
-            .collect();
+        let alphabet: Vec<char> =
+            format!("{ENGLISH_LOWER}{ENGLISH_UPPER}{ENGLISH_SHIFTED_DIGITS} 0123456789\n🚀")
+                .chars()
+                .collect();
         let mut state = 0x4d59_5df4_d0f3_3173_u64;
 
         for _ in 0..2_000 {

@@ -81,18 +81,75 @@ pub fn parse_triggers(text: &str) -> Vec<Trigger> {
 }
 
 fn parse_line(line: &str) -> Option<Trigger> {
-    let line = line.split('#').next().unwrap_or(line).trim();
+    parse_trigger(line).ok().flatten()
+}
+
+/// Parses one rule: `pattern action [layout]`.
+///
+/// - `pattern` names the keys either as typed on a US keyboard (`ghbdsn`) or
+///   as the text appears when typed on the Ukrainian layout (`руку`, which is
+///   the physical `here`). A leading and/or trailing `*` matches a suffix, a
+///   prefix or any position.
+/// - `action` is `correct` (always convert) or `keep` (never convert).
+/// - `layout` is the layout the keys are typed on: `english` or `ukrainian`.
+///   It defaults to `ukrainian` for a Cyrillic pattern, `english` otherwise.
+///
+/// `#` at the start or after whitespace begins a comment; elsewhere it is the
+/// Shift+3 key. Blank and comment-only lines are `Ok(None)`.
+pub fn parse_trigger(line: &str) -> Result<Option<Trigger>, String> {
+    let line = strip_comment(line).trim();
     if line.is_empty() {
-        return None;
+        return Ok(None);
     }
-    let (physical, action) = line.split_once(char::is_whitespace)?;
-    let action = match action.trim() {
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    let (pattern, action, layout) = match tokens.as_slice() {
+        [pattern, action] => (*pattern, *action, None),
+        [pattern, action, layout] => (*pattern, *action, Some(*layout)),
+        _ => {
+            return Err(format!(
+                "expected `pattern correct|keep [english|ukrainian]`, got {line:?}"
+            ));
+        }
+    };
+    let action = match action {
         "correct" => TriggerAction::Correct,
         "keep" => TriggerAction::Keep,
-        _ => return None,
+        other => return Err(format!("unknown action {other:?}; use correct or keep")),
     };
-    let trigger = Trigger::new(physical, action);
-    (!trigger.physical.is_empty()).then_some(trigger)
+    let cyrillic = pattern
+        .chars()
+        .any(|character| ('\u{0400}'..='\u{04FF}').contains(&character));
+    let source_layout = match layout {
+        None if cyrillic => InputLayout::Ukrainian,
+        None | Some("english" | "en") => InputLayout::English,
+        Some("ukrainian" | "uk") => InputLayout::Ukrainian,
+        Some(other) => {
+            return Err(format!(
+                "unknown layout {other:?}; use english or ukrainian"
+            ));
+        }
+    };
+    let physical = if cyrillic {
+        crate::layout::convert(pattern, crate::layout::Direction::UkrainianToEnglish).text
+    } else {
+        pattern.to_owned()
+    };
+    let trigger = Trigger::for_source_layout(physical, action, source_layout);
+    if trigger.physical.trim_matches('*').is_empty() {
+        return Err(format!("pattern {pattern:?} names no keys"));
+    }
+    Ok(Some(trigger))
+}
+
+fn strip_comment(line: &str) -> &str {
+    let mut after_space = true;
+    for (index, character) in line.char_indices() {
+        if character == '#' && after_space {
+            return &line[..index];
+        }
+        after_space = character.is_whitespace();
+    }
+    line
 }
 
 /// The curated, embedded trigger table shipped with the engine. The asset is
@@ -125,6 +182,52 @@ fn pattern_matches(pattern: &str, physical: &str) -> bool {
         (true, false) => physical.ends_with(needle),
         (false, true) => physical.starts_with(needle),
         (false, false) => physical == needle,
+    }
+}
+
+#[cfg(test)]
+mod user_rule_tests {
+    use super::*;
+
+    fn rule(line: &str) -> Trigger {
+        parse_trigger(line)
+            .unwrap_or_else(|error| panic!("{line:?}: {error}"))
+            .unwrap_or_else(|| panic!("{line:?} is not a rule"))
+    }
+
+    #[test]
+    fn user_rules_name_keys_as_typed_or_as_seen() {
+        let latin = rule("ghbdsn correct");
+        assert_eq!(
+            (latin.physical.as_str(), latin.action, latin.source_layout),
+            ("ghbdsn", TriggerAction::Correct, InputLayout::English)
+        );
+        let explicit = rule("hello  correct  ukrainian");
+        assert_eq!(explicit.source_layout, InputLayout::Ukrainian);
+        // Written as it appears on screen: Cyrillic means the keys were typed
+        // on the Ukrainian layout. `руку` is the physical `here`.
+        let seen = rule("руку keep");
+        assert_eq!(
+            (seen.physical.as_str(), seen.action, seen.source_layout),
+            ("here", TriggerAction::Keep, InputLayout::Ukrainian)
+        );
+        let wildcard = rule("*ghb* correct english   # any position");
+        assert_eq!(wildcard.physical, "*ghb*");
+    }
+
+    #[test]
+    fn user_rule_errors_name_the_problem() {
+        assert_eq!(parse_trigger("   ").unwrap(), None);
+        assert_eq!(parse_trigger("# only a comment").unwrap(), None);
+        for bad in [
+            "ghbdsn",
+            "ghbdsn fix",
+            "ghbdsn correct russian",
+            "a b c d",
+            "* keep",
+        ] {
+            assert!(parse_trigger(bad).is_err(), "{bad:?} must be rejected");
+        }
     }
 }
 

@@ -26,7 +26,7 @@ use crate::automation::{
     convert_previous_input_if_matches, convert_previous_word, convert_selection,
 };
 use crate::{
-    auto_correct::{AutoCorrection, AutoDecision, AutoKeyEvent, AutoWordTracker, evaluate},
+    auto_correct::{AutoCorrection, AutoDecision, AutoKeyEvent, AutoWordTracker},
     auto_correct_monitor::AutoCorrectMonitor,
     automation::SelectionOutcome,
     autostart,
@@ -61,18 +61,41 @@ enum AppEvent {
     },
     #[cfg(target_os = "macos")]
     AccessibilityGranted,
+    /// The target's tap holds an Enter behind the pending correction.
+    #[cfg(target_os = "macos")]
+    LineBreakHeld(crate::automation::HeldLineBreak),
     #[cfg(target_os = "macos")]
     GlobeSwitched(Option<String>, system_layout::ActiveInputSource),
+}
+
+/// A correction armed for the word being typed, applied if Enter ends it.
+#[cfg(target_os = "macos")]
+#[derive(Default)]
+struct LineBreak {
+    next_id: u64,
+    pending: Option<PendingLineBreak>,
+}
+
+#[cfg(target_os = "macos")]
+struct PendingLineBreak {
+    id: u64,
+    correction: AutoCorrection,
+    /// Enter was seen; the tap's report for it may still be on its way.
+    entered_at: Option<std::time::Instant>,
 }
 
 struct App {
     #[cfg(target_os = "macos")]
     conversion: Option<PendingConversion>,
     #[cfg(target_os = "macos")]
+    line_break: LineBreak,
+    #[cfg(target_os = "macos")]
     queued_conversion: Option<PendingConversion>,
     manager: GlobalHotKeyManager,
     hotkey: HotKey,
     last_word_hotkey: HotKey,
+    /// `upyr run --hotkey`, reapplied on top of every reloaded configuration.
+    hotkey_override: Option<String>,
     #[cfg(target_os = "macos")]
     undo_hotkey: HotKey,
     #[cfg(target_os = "macos")]
@@ -134,7 +157,10 @@ struct PendingUndo {
     expires: std::time::Instant,
 }
 
-pub fn run(config: Config) -> Result<()> {
+/// Runs the background app. `hotkey_override` is `upyr run --hotkey`; it is
+/// applied now and reapplied after every configuration reload.
+pub fn run(config: Config, hotkey_override: Option<String>) -> Result<()> {
+    let config = config.with_hotkey_override(hotkey_override.as_deref())?;
     config.validate()?;
     let instance = acquire_single_instance()?;
     if !instance.is_single() {
@@ -205,10 +231,13 @@ pub fn run(config: Config) -> Result<()> {
         manager,
         hotkey,
         last_word_hotkey,
+        hotkey_override,
         #[cfg(target_os = "macos")]
         undo_hotkey,
         #[cfg(target_os = "macos")]
         undo_record: None,
+        #[cfg(target_os = "macos")]
+        line_break: LineBreak::default(),
         #[cfg(target_os = "macos")]
         pending_undo: None,
         config,
@@ -489,7 +518,7 @@ impl App {
         } else {
             ConversionRequest::Selection
         };
-        self.start_conversion(request, self.config.clone(), None);
+        self.start_conversion(request, self.config.clone(), None, None);
     }
 
     #[cfg(target_os = "macos")]
@@ -498,32 +527,26 @@ impl App {
         request: ConversionRequest,
         config: Config,
         generation: Option<u64>,
+        held: Option<(i32, std::sync::Arc<crate::automation::HoldSignal>)>,
     ) {
         if self.processing {
+            if let Some((pid, _)) = held {
+                let _ = crate::automation::release_held(pid);
+            }
             return;
         }
-        let undo_candidate = match &request {
+        let undo_text = match &request {
             ConversionRequest::Automatic {
                 expected,
                 replacement,
-            } => {
-                // Trackers retain window identity across input boundaries.
-                // The actual editor may have been replaced inside that window;
-                // undo must bind to the editor this conversion is about to use.
-                let target = FocusTarget::capture();
-                let source = system_layout::current().ok().flatten();
-                target.zip(source).map(|(target, source)| UndoRecord {
-                    original: expected.clone(),
-                    corrected: replacement.clone(),
-                    source_id: source.source_id,
-                    direction: config.direction,
-                    target,
-                    expires: std::time::Instant::now() + std::time::Duration::from_secs(30),
-                })
-            }
+            } => Some((expected.clone(), replacement.clone())),
             _ => None,
         };
-        let task = match ConversionTask::desktop(config, request) {
+        let direction = config.direction;
+        // The guard stamps Quartz input counters and starts holding input
+        // first. A key that arrives during the slower identity queries below
+        // must count as new input, not be folded into the stamp.
+        let task = match ConversionTask::desktop_with_hold(config, request, held) {
             Ok(task) => task,
             Err(error) => {
                 error!(%error, "could not begin conversion");
@@ -531,6 +554,21 @@ impl App {
                 return;
             }
         };
+        let undo_candidate = undo_text.and_then(|(original, corrected)| {
+            // Trackers retain window identity across input boundaries.
+            // The actual editor may have been replaced inside that window;
+            // undo must bind to the editor this conversion is about to use.
+            let target = FocusTarget::capture();
+            let source = system_layout::current().ok().flatten();
+            target.zip(source).map(|(target, source)| UndoRecord {
+                original,
+                corrected,
+                source_id: source.source_id,
+                direction,
+                target,
+                expires: std::time::Instant::now() + std::time::Duration::from_secs(30),
+            })
+        });
         let pending = PendingConversion {
             task,
             automatic_generation: generation,
@@ -712,6 +750,16 @@ impl App {
         }
     }
 
+    fn handle_modifier_gesture(&mut self, action: GestureAction) {
+        // Same rule as handle_hotkey: Settings is recording keys, so a
+        // double-tap there must not also convert text in the background app.
+        if settings::is_open() {
+            debug!("ignoring modifier gesture while Upyr Settings is open");
+            return;
+        }
+        self.perform_conversion(action == GestureAction::PreviousWord);
+    }
+
     fn active_hotkeys(&self) -> Vec<HotKey> {
         #[allow(unused_mut)]
         let mut keys = vec![self.hotkey, self.last_word_hotkey];
@@ -801,6 +849,7 @@ impl App {
             },
             config,
             None,
+            None,
         );
     }
 
@@ -865,16 +914,21 @@ impl App {
         }
 
         let Some(sample) = self.auto_tracker.observe(event) else {
+            #[cfg(target_os = "macos")]
+            self.refresh_line_break(event.key);
             return;
         };
         #[cfg(target_os = "macos")]
-        let decision = if crate::input_context::terminal_typing_enabled(&self.config) {
-            crate::auto_correct::evaluate_terminal(&sample, &self.config)
-        } else {
-            evaluate(&sample, &self.config)
-        };
+        self.refresh_line_break(event.key);
+        #[cfg(target_os = "macos")]
+        let decision = crate::auto_correct::evaluate_with_caps_lock(
+            &sample,
+            &self.config,
+            crate::automation::caps_lock_on(),
+            crate::input_context::terminal_typing_enabled(&self.config),
+        );
         #[cfg(not(target_os = "macos"))]
-        let decision = evaluate(&sample, &self.config);
+        let decision = crate::auto_correct::evaluate(&sample, &self.config);
         match decision {
             AutoDecision::Correct(correction) => {
                 debug!(direction = ?correction.direction, "automatic word accepted for correction");
@@ -1043,8 +1097,7 @@ impl App {
             self.reset_auto_context();
             return;
         }
-        let mut config = self.config.clone();
-        config.direction = correction.direction;
+        let config = self.correction_config(&correction);
         self.start_conversion(
             ConversionRequest::Automatic {
                 expected: correction.expected_source,
@@ -1052,6 +1105,131 @@ impl App {
             },
             config,
             Some(generation),
+            None,
+        );
+    }
+
+    /// The configuration one automatic correction runs with. A case-only
+    /// accidental-Caps-Lock fix (`Direction::Smart`) keeps the layout, and
+    /// any accidental-Caps-Lock fix releases Caps Lock for the next words.
+    #[cfg(target_os = "macos")]
+    fn correction_config(&self, correction: &AutoCorrection) -> Config {
+        let mut config = self.config.clone();
+        config.direction = correction.direction;
+        if correction.direction == upyr_core::Direction::Smart {
+            config.switch_layout = false;
+        }
+        let typed_word = correction
+            .expected_source
+            .trim_end()
+            .rsplit(' ')
+            .next()
+            .unwrap_or("");
+        if crate::automation::caps_lock_on()
+            && crate::auto_correct::accidental_caps_fix(typed_word).is_some()
+        {
+            if let Err(error) = crate::automation::turn_off_caps_lock() {
+                debug!(%error, "could not turn Caps Lock off after fixing its word");
+            }
+        }
+        config
+    }
+
+    /// Arms the target's tap to hold Enter while the word being typed would be
+    /// corrected if it ended now, so a chat message is sent corrected rather
+    /// than corrected after it has gone. Any other state disarms it.
+    #[cfg(target_os = "macos")]
+    fn refresh_line_break(&mut self, key: device_query::Keycode) {
+        if matches!(
+            key,
+            device_query::Keycode::Enter | device_query::Keycode::NumpadEnter
+        ) {
+            // The tap may already hold this Enter and report it shortly: keep
+            // the candidate for that report, but never arm the next Enter.
+            crate::automation::disarm_line_break();
+            if let Some(pending) = &mut self.line_break.pending {
+                pending
+                    .entered_at
+                    .get_or_insert_with(std::time::Instant::now);
+            }
+            return;
+        }
+        if self.line_break.pending.as_ref().is_some_and(|pending| {
+            pending
+                .entered_at
+                .is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(300))
+        }) {
+            return;
+        }
+        let correction = (!crate::input_context::terminal_typing_enabled(&self.config))
+            .then(|| self.auto_tracker.line_break_sample())
+            .flatten()
+            .and_then(|sample| {
+                match crate::auto_correct::evaluate_line_break(
+                    &sample,
+                    &self.config,
+                    crate::automation::caps_lock_on(),
+                ) {
+                    AutoDecision::Correct(correction) => Some(correction),
+                    _ => None,
+                }
+            });
+        let armed = correction.and_then(|correction| {
+            let pid = crate::automation::frontmost_pid()?;
+            self.line_break.next_id = self.line_break.next_id.wrapping_add(1);
+            let id = self.line_break.next_id;
+            let proxy = self.event_proxy.clone();
+            // Selection, copy and paste with the same margin as a held edit.
+            let budget = 30_u64
+                .saturating_add(self.config.copy_delay_ms)
+                .saturating_add(self.config.paste_delay_ms)
+                .saturating_add(750);
+            match crate::automation::arm_line_break(
+                pid,
+                id,
+                std::time::Duration::from_millis(budget),
+                move |held| {
+                    let _ = proxy.send_event(AppEvent::LineBreakHeld(held));
+                },
+            ) {
+                Ok(()) => Some(PendingLineBreak {
+                    id,
+                    correction,
+                    entered_at: None,
+                }),
+                Err(error) => {
+                    debug!(%error, "could not arm Enter for automatic correction");
+                    None
+                }
+            }
+        });
+        if armed.is_none() {
+            crate::automation::disarm_line_break();
+        }
+        self.line_break.pending = armed;
+    }
+
+    #[cfg(target_os = "macos")]
+    fn handle_line_break_held(&mut self, held: crate::automation::HeldLineBreak) {
+        let pending = self.line_break.pending.take();
+        let correction = pending
+            .filter(|pending| pending.id == held.id)
+            .map(|pending| pending.correction)
+            .filter(|_| !self.paused && self.config.auto_correct);
+        let Some(correction) = correction else {
+            let _ = crate::automation::release_held(held.pid);
+            return;
+        };
+        debug!(direction = ?correction.direction, "correcting the word before Enter");
+        let config = self.correction_config(&correction);
+        self.start_conversion(
+            ConversionRequest::Automatic {
+                expected: correction.expected_source,
+                replacement: correction.replacement,
+            },
+            config,
+            None,
+            Some((held.pid, held.signal)),
         );
     }
 
@@ -1164,12 +1342,12 @@ impl App {
             },
             &self.config,
         );
-        info!(paused = self.paused, "updated shortcut state");
+        info!(paused = self.paused, "updated pause state");
         Ok(())
     }
 
     fn reload_configuration(&mut self) -> Result<()> {
-        let new_config = Config::load()?;
+        let new_config = Config::load()?.with_hotkey_override(self.hotkey_override.as_deref())?;
         let (new_hotkey, new_last_word_hotkey) = parse_hotkeys(&new_config)?;
         #[cfg(target_os = "macos")]
         let new_undo: HotKey = new_config
@@ -1429,9 +1607,11 @@ impl ApplicationHandler<AppEvent> for App {
             #[cfg(target_os = "linux")]
             AppEvent::Tray(action) => self.handle_tray_action(event_loop, Some(action)),
             AppEvent::ModifierGesture(action) if !self.paused => {
-                self.perform_conversion(action == GestureAction::PreviousWord);
+                self.handle_modifier_gesture(action)
             }
             AppEvent::AutoKey(event) => self.handle_auto_key(event),
+            #[cfg(target_os = "macos")]
+            AppEvent::LineBreakHeld(held) => self.handle_line_break_held(held),
             AppEvent::KeySound(cue) => self.handle_key_sound(cue),
             AppEvent::ApplyAutoCorrection {
                 generation,

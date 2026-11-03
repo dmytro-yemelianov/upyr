@@ -1,12 +1,16 @@
 //! A short-lived, listen-only guard for an explicitly requested conversion.
 //! It observes activity, never characters, and ignores Upyr's own input.
+//! While the target's tap holds keyboard input behind a selection edit, that
+//! input has not reached the editor and is not treated as an interruption.
 #![allow(unsafe_code)]
 
 use anyhow::{Context, Result, bail};
 use objc2::{MainThreadMarker, rc::Retained};
 use objc2_app_kit::{NSRunningApplication, NSWorkspace};
 use objc2_foundation::NSObjectProtocol;
-use std::{cell::Cell, ffi::c_void, rc::Rc};
+use std::{cell::Cell, ffi::c_void, rc::Rc, sync::Arc};
+
+use super::terminal_typing::HoldSignal;
 
 type Ref = *const c_void;
 type Event = *mut c_void;
@@ -54,6 +58,17 @@ unsafe extern "C" {
     fn CFDictionaryGetValue(dictionary: Ref, key: Ref) -> Ref;
     fn CFNumberGetValue(number: Ref, kind: isize, value: *mut c_void) -> u8;
     fn CFStringCreateWithCString(allocator: Ref, string: *const i8, encoding: u32) -> Ref;
+}
+
+#[link(name = "IOKit", kind = "framework")]
+unsafe extern "C" {
+    fn IOServiceMatching(name: *const std::ffi::c_char) -> Ref;
+    fn IOServiceGetMatchingService(main_port: u32, matching: Ref) -> u32;
+    fn IOServiceOpen(service: u32, owning_task: u32, kind: u32, connect: *mut u32) -> i32;
+    fn IOServiceClose(connect: u32) -> i32;
+    fn IOObjectRelease(object: u32) -> i32;
+    fn IOHIDSetModifierLockState(handle: u32, selector: i32, state: bool) -> i32;
+    static mach_task_self_: u32;
 }
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -109,6 +124,54 @@ pub(super) fn is_target_window(pid: i32, window: i64) -> bool {
 
 pub(super) fn input_counts() -> [u32; 6] {
     INPUT_KINDS.map(|kind| unsafe { CGEventSourceCounterForEventType(0, kind) })
+}
+
+/// Process ID of the frontmost application, the one receiving keystrokes.
+pub(crate) fn frontmost_pid() -> Option<i32> {
+    MainThreadMarker::new()?;
+    let application = front_application()?;
+    Some(unsafe { objc2::msg_send![&*application, processIdentifier] })
+}
+
+/// Whether Caps Lock is currently on (the logical lock, not the key).
+pub(crate) fn caps_lock_on() -> bool {
+    (unsafe { CGEventSourceFlagsState(0) }) & (1 << 16) != 0
+}
+
+/// Turns Caps Lock off after an accidental-Caps-Lock word was fixed, so the
+/// next words are typed in the case the user meant.
+pub(crate) fn turn_off_caps_lock() -> Result<()> {
+    const MAIN_PORT_DEFAULT: u32 = 0;
+    const HID_PARAM_CONNECT_TYPE: u32 = 1;
+    const CAPS_LOCK_STATE: i32 = 1;
+    unsafe {
+        let matching = IOServiceMatching(c"IOHIDSystem".as_ptr());
+        if matching.is_null() {
+            bail!("could not describe the HID system service");
+        }
+        // Consumes `matching`.
+        let service = IOServiceGetMatchingService(MAIN_PORT_DEFAULT, matching);
+        if service == 0 {
+            bail!("the HID system service is unavailable");
+        }
+        let mut connect = 0;
+        let opened = IOServiceOpen(
+            service,
+            mach_task_self_,
+            HID_PARAM_CONNECT_TYPE,
+            &mut connect,
+        );
+        IOObjectRelease(service);
+        if opened != 0 {
+            bail!("could not open the HID system service ({opened:#x})");
+        }
+        let result = IOHIDSetModifierLockState(connect, CAPS_LOCK_STATE, false);
+        IOServiceClose(connect);
+        if result != 0 {
+            bail!("could not release Caps Lock ({result:#x})");
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn modifiers_released() -> bool {
@@ -219,6 +282,7 @@ struct Activity {
     interrupted: Cell<bool>,
     edited: Cell<bool>,
     modifiers: Cell<u64>,
+    hold: Arc<HoldSignal>,
 }
 
 unsafe extern "C" fn observe(_: Ref, kind: u32, event: Event, context: *mut c_void) -> Event {
@@ -231,6 +295,11 @@ unsafe extern "C" fn observe(_: Ref, kind: u32, event: Event, context: *mut c_vo
     }
     // kCGEventSourceUnixProcessID. No character or key-code field is read.
     if unsafe { CGEventGetIntegerValueField(event, 41) } == i64::from(std::process::id()) {
+        return event;
+    }
+    // Keys and modifier changes are waiting in the target's tap behind the
+    // edit; they will follow it rather than act on Upyr's selection.
+    if matches!(kind, 10 | 12) && activity.hold.active() {
         return event;
     }
     if kind == 12 {
@@ -279,7 +348,18 @@ impl InputGuard {
         self.input_counts
     }
 
+    /// Shared with the target's tap when it holds input behind this edit.
+    pub fn hold_signal(&self) -> Arc<HoldSignal> {
+        Arc::clone(&self.activity.hold)
+    }
+
     pub fn new(terminal: bool) -> Result<Self> {
+        Self::with_hold(terminal, Arc::default())
+    }
+
+    /// A guard for an edit whose input the target's tap already holds (a held
+    /// Enter): that input has not reached the editor and is not activity.
+    pub fn with_hold(terminal: bool, hold: Arc<HoldSignal>) -> Result<Self> {
         MainThreadMarker::new().context("conversion guards must run on the main thread")?;
         // Quartz counters catch input which reached WindowServer while the
         // main-thread observer was busy, before any destructive key is posted.
@@ -294,6 +374,7 @@ impl InputGuard {
             interrupted: Cell::new(false),
             edited: Cell::new(false),
             modifiers: Cell::new(unsafe { CGEventSourceFlagsState(0) } & MODIFIERS),
+            hold,
         });
         let mask = [1, 3, 10, 12, 14, 22, 25]
             .into_iter()
@@ -350,7 +431,7 @@ impl InputGuard {
         if self.terminal {
             self.can_type()
         } else {
-            !self.activity.interrupted.get() && self.same_target()
+            !self.activity.interrupted.get() && !self.activity.hold.broken() && self.same_target()
         }
     }
 
@@ -367,15 +448,21 @@ impl InputGuard {
             && front_window(&self.application) == self.window
     }
     pub fn can_recover_selection(&self) -> bool {
+        // A held recovery is inserted in the target's own stream with explicit
+        // flags, so physically held modifiers cannot combine with it.
         !self.activity.edited.get()
-            && unsafe { CGEventSourceFlagsState(0) } & (MODIFIERS & !(1 << 16)) == 0
+            && !self.activity.hold.broken()
+            && (self.activity.hold.active()
+                || unsafe { CGEventSourceFlagsState(0) } & (MODIFIERS & !(1 << 16)) == 0)
             && self.same_target()
     }
 
     pub fn defer_cancellation(&self) -> bool {
         // An injected recovery arrow while fn is held would become fn+arrow
         // and cancel GlobeSwitch's clean tap. Wait for release without edits.
-        !self.activity.edited.get()
+        // A held recovery bypasses session taps, so it never needs to wait.
+        !self.activity.hold.active()
+            && !self.activity.edited.get()
             && unsafe { CGEventSourceFlagsState(0) } & (1 << 23) != 0
             && self.same_target()
     }

@@ -32,9 +32,20 @@ fn words(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Outcome of replaying one word list typed on the *wrong* layout.
+struct RecallRun {
+    /// Corrected to exactly the intended word.
+    hit: usize,
+    /// Corrected, but to something other than the intended word. Unlike an
+    /// abstention this damages text, so it is tracked separately from misses.
+    wrong: Vec<String>,
+    total: usize,
+}
+
 /// Recall over `words` of the intended language typed on the *wrong* layout.
-fn recall(words: &[String], layout: InputLayout, policy: &AutoCorrectPolicy) -> (usize, usize) {
+fn recall(words: &[String], layout: InputLayout, policy: &AutoCorrectPolicy) -> RecallRun {
     let mut hit = 0;
+    let mut wrong = Vec::new();
     for word in words {
         let physical = match layout {
             // Ukrainian intended, English layout active.
@@ -43,14 +54,19 @@ fn recall(words: &[String], layout: InputLayout, policy: &AutoCorrectPolicy) -> 
             InputLayout::Ukrainian => word.clone(),
         };
         let sample = WordSample::new(physical.clone(), physical, layout);
-        if matches!(
-            evaluate(&sample, policy, None),
-            AutoDecision::Correct(ref correction) if norm(&correction.replacement) == norm(word)
-        ) {
-            hit += 1;
+        if let AutoDecision::Correct(correction) = evaluate(&sample, policy, None) {
+            if norm(&correction.replacement) == norm(word) {
+                hit += 1;
+            } else {
+                wrong.push(format!("{word} -> {}", correction.replacement.trim_end()));
+            }
         }
     }
-    (hit, words.len())
+    RecallRun {
+        hit,
+        wrong,
+        total: words.len(),
+    }
 }
 
 fn pct(hit: usize, total: usize) -> f64 {
@@ -76,48 +92,63 @@ fn recall_v1_baseline_floor() {
         ..AutoCorrectPolicy::default()
     };
 
-    let (uk_default, uk_total) = recall(&uk, InputLayout::English, &default);
-    let (uk_triggers, _) = recall(&uk, InputLayout::English, &with_triggers);
-    let (uk_aggressive, _) = recall(&uk, InputLayout::English, &aggressive);
-    let (en_default, en_total) = recall(&en, InputLayout::Ukrainian, &default);
-    let (en_aggressive, _) = recall(&en, InputLayout::Ukrainian, &aggressive);
+    let uk_default = recall(&uk, InputLayout::English, &default);
+    let uk_triggers = recall(&uk, InputLayout::English, &with_triggers);
+    let uk_aggressive = recall(&uk, InputLayout::English, &aggressive);
+    let en_default = recall(&en, InputLayout::Ukrainian, &default);
+    let en_triggers = recall(&en, InputLayout::Ukrainian, &with_triggers);
+    let en_aggressive = recall(&en, InputLayout::Ukrainian, &aggressive);
 
-    println!(
-        "recall UK->EN default     {:.1}% ({uk_default}/{uk_total})",
-        pct(uk_default, uk_total)
-    );
-    println!(
-        "recall UK->EN +triggers   {:.1}% ({uk_triggers}/{uk_total})",
-        pct(uk_triggers, uk_total)
-    );
-    println!(
-        "recall UK->EN aggressive  {:.1}% ({uk_aggressive}/{uk_total})",
-        pct(uk_aggressive, uk_total)
-    );
-    println!(
-        "recall EN->UK default     {:.1}% ({en_default}/{en_total})",
-        pct(en_default, en_total)
-    );
-    println!(
-        "recall EN->UK aggressive  {:.1}% ({en_aggressive}/{en_total})",
-        pct(en_aggressive, en_total)
-    );
+    for (label, run) in [
+        ("UK->EN default  ", &uk_default),
+        ("UK->EN +triggers", &uk_triggers),
+        ("UK->EN aggressive", &uk_aggressive),
+        ("EN->UK default  ", &en_default),
+        ("EN->UK +triggers", &en_triggers),
+        ("EN->UK aggressive", &en_aggressive),
+    ] {
+        println!(
+            "recall {label} {:.1}% ({}/{}) wrong={}",
+            pct(run.hit, run.total),
+            run.hit,
+            run.total,
+            run.wrong.len()
+        );
+        for wrong in &run.wrong {
+            println!("  wrong: {wrong}");
+        }
+    }
 
     // Regression floors (baseline measured 2026-07-18; see docs/benchmarks/recall-v1.md).
     assert!(
-        pct(uk_default, uk_total) >= 70.0,
+        pct(uk_default.hit, uk_default.total) >= 70.0,
         "UK->EN default recall regressed"
     );
     assert!(
-        pct(en_default, en_total) >= 90.0,
+        pct(en_default.hit, en_default.total) >= 90.0,
         "EN->UK default recall regressed"
     );
+    // A wrong correction damages text, unlike an abstention. The remaining
+    // default-profile case (`головою` -> `голово.`) is a genuine collision:
+    // `голово` is the vocative of `голова`.
+    assert!(
+        uk_default.wrong.len() <= 1 && uk_triggers.wrong.len() <= 1,
+        "UK->EN wrong corrections regressed"
+    );
+    assert!(
+        en_default.wrong.is_empty() && en_triggers.wrong.is_empty(),
+        "EN->UK wrong corrections regressed"
+    );
+    assert!(
+        uk_aggressive.wrong.len() <= 6 && en_aggressive.wrong.is_empty(),
+        "aggressive wrong corrections regressed"
+    );
     // Triggers may only add recall, never remove it.
-    assert!(uk_triggers >= uk_default, "triggers reduced recall");
+    assert!(uk_triggers.hit >= uk_default.hit, "triggers reduced recall");
     // The aggressive profile must recover the short-word segment the default
     // deliberately abstains on.
     assert!(
-        uk_aggressive > uk_default && en_aggressive > en_default,
+        uk_aggressive.hit > uk_default.hit && en_aggressive.hit > en_default.hit,
         "aggressive mode should raise recall over the conservative default"
     );
 }

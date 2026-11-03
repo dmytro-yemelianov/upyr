@@ -18,7 +18,11 @@ the wrong layout active, then scored through production `evaluate`.
 A case is a hit only when the decision is `Correct` and the replacement matches
 the intended word.
 
-## Result
+## Baseline 2026-07-18
+
+These are the original measurements; the
+[2026-11-03 update](#update-2026-11-03-wrong-corrections) below supersedes the
+default and aggressive counts.
 
 | Profile | UK → EN | EN → UK |
 |---|---:|---:|
@@ -44,13 +48,35 @@ the intended word.
    Ukrainian words missed by default is a *policy* choice (precision over recall),
    not a model limitation.
 3. **Built-in triggers do not move broad recall.** The 12-entry seed is targeted,
-   not coverage. Broad recall needs a real dictionary (the current exact-match set
-   is 296 stop-words) and/or a less conservative default; triggers exist for
-   high-precision special cases and user/domain vocabulary.
+   not coverage. Broad recall needs a real dictionary (the current exact-match
+   set has 361 entries: 223 English and 138 Ukrainian) and/or a less
+   conservative default. Triggers are a built-in list for high-precision special
+   cases; there is no user- or domain-configurable trigger list.
+
+## Update 2026-11-03: wrong corrections
+
+The runner now separates **wrong corrections** (a `Correct` decision whose
+replacement is not the intended word) from abstentions, because a wrong
+replacement damages text while an abstention leaves it as typed. The same
+corpus, before and after the precision fixes in this update (dictionary-hit
+collisions, final `ю`/`б` versus punctuation, exceptions before triggers, and
+15 added short function words such as `і`, `я`, `та`, `ok`):
+
+| Profile | UK → EN hits | UK → EN wrong | EN → UK hits | EN → UK wrong |
+|---|---:|---:|---:|---:|
+| Conservative (default), before | 902/1200 | 8 | 943/1000 | 0 |
+| Conservative (default), after | **909/1200** | **1** | 943/1000 | 0 |
+| Aggressive, before | 1110/1200 | 18 | 994/1000 | 0 |
+| Aggressive, after | **1126/1200** | **6** | 994/1000 | 0 |
+
+The remaining default-profile wrong correction, `головою` → `голово.`, is a
+genuine collision: `голово` is the vocative of `голова`, so the final physical
+`.` is plausibly punctuation.
 
 ## Floors
 
 `recall_v1_baseline_floor` enforces: UK → EN default ≥ 70%, EN → UK default ≥ 90%,
-triggers never reduce recall, and aggressive strictly beats the default in both
-directions. These guard against regressions while the recall-raising work
+triggers never reduce recall, aggressive strictly beats the default in both
+directions, and wrong corrections stay at or below the 2026-11-03 counts above
+(UK → EN default ≤ 1, aggressive ≤ 6; EN → UK 0). These guard against regressions while the recall-raising work
 (dictionary, default tuning) proceeds.

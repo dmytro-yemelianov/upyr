@@ -39,6 +39,19 @@ pub(crate) enum Selection {
     Characters(usize),
 }
 
+/// Right arrows that collapse an abandoned character selection back to the
+/// caret. `missing` means the copy produced no text in time.
+/// `late_copy` means the copied text arrived after that deadline, which proves
+/// the selection exists: one arrow collapses it, while `count` arrows would
+/// carry the caret past the word.
+fn recovery_arrows(selection: Selection, missing: bool, late_copy: bool) -> usize {
+    match (selection, missing && !late_copy) {
+        (Selection::Existing, _) => 0,
+        (Selection::Characters(count), true) => count,
+        _ => 1,
+    }
+}
+
 pub(crate) trait Effects {
     fn valid(&self) -> bool;
     fn defer_cancellation(&self) -> bool {
@@ -214,6 +227,8 @@ impl<E: Effects> Pipeline<E> {
                 }
                 let conversion = self.effects.convert(&selected, &self.request);
                 if !conversion.changed {
+                    // A selection left behind would be replaced by the next key.
+                    self.effects.recover_selection(self.selection, false)?;
                     return self.finish(SelectionOutcome::NoConvertibleText);
                 }
                 let characters = selected.chars().count();
@@ -277,27 +292,124 @@ pub(crate) struct Desktop {
     enigo: enigo::Enigo,
     clipboard: arboard::Clipboard,
     guard: Option<super::input_guard::InputGuard>,
+    /// The target's keyboard input waits behind this edit while held.
+    hold: Option<GuiHold>,
+    /// Set once a release (paste, refusal fallback or recovery) has handled
+    /// the selection, so no second recovery can move the caret again.
+    selection_released: bool,
     saved: Option<super::SavedClipboard>,
     probe: Option<super::CopyProbe>,
     ownership: Option<crate::clipboard_guard::ClipboardOwnership>,
 }
 
 #[cfg(target_os = "macos")]
+struct GuiHold {
+    pid: i32,
+    window: i64,
+}
+
+/// Holds the target's keys from before the selection until the paste, so
+/// typing that continues through an automatic correction follows it instead of
+/// replacing the selected word.
+#[cfg(target_os = "macos")]
+fn start_hold(guard: &super::input_guard::InputGuard, config: &Config) -> Option<GuiHold> {
+    let window = guard.target_window()?;
+    let pid = guard.target_pid();
+    // Selection, copy and paste with a wide margin. Only a stalled event loop
+    // outlives it, and the hold then breaks instead of pasting.
+    let budget = 30_u64
+        .saturating_add(config.copy_delay_ms)
+        .saturating_add(config.paste_delay_ms)
+        .saturating_add(750);
+    match super::terminal_typing::hold_target(
+        pid,
+        guard.hold_signal(),
+        Duration::from_millis(budget),
+    ) {
+        Ok(true) => Some(GuiHold { pid, window }),
+        Ok(false) => {
+            tracing::debug!("input hold was not established; typing will cancel the edit");
+            None
+        }
+        Err(error) => {
+            tracing::debug!(%error, "could not hold input during the edit");
+            None
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
 impl Pipeline<Desktop> {
-    pub fn desktop(config: Config, request: Request) -> Result<Self> {
+    /// `held` is input the target process's tap already holds behind this
+    /// edit (a held Enter): the edit adopts that hold instead of starting one,
+    /// so Enter follows the paste. A hold that cannot be adopted is released.
+    pub fn desktop_with_hold(
+        config: Config,
+        request: Request,
+        held: Option<(i32, std::sync::Arc<super::terminal_typing::HoldSignal>)>,
+    ) -> Result<Self> {
         use anyhow::Context;
         let terminal = request.tracked() && crate::input_context::terminal_typing_enabled(&config);
         let restore_source = match &request {
             Request::Undo { source_id, .. } => Some(source_id.clone()),
             _ => None,
         };
+        let guard = match &held {
+            Some((_, signal)) => {
+                super::input_guard::InputGuard::with_hold(terminal, std::sync::Arc::clone(signal))
+            }
+            None => super::input_guard::InputGuard::new(terminal),
+        };
+        let guard = match guard {
+            Ok(guard) => guard,
+            Err(error) => {
+                if let Some((pid, _)) = held {
+                    let _ = super::terminal_typing::release_held(pid);
+                }
+                return Err(error);
+            }
+        };
+        let hold = match held {
+            Some((pid, _)) => {
+                let adopted = (!terminal && guard.target_pid() == pid)
+                    .then(|| guard.target_window())
+                    .flatten()
+                    .map(|window| GuiHold { pid, window });
+                if adopted.is_none() {
+                    // Focus moved or the target is a terminal: let Enter go.
+                    let _ = super::terminal_typing::release_held(pid);
+                }
+                adopted
+            }
+            None => (!terminal && request.tracked())
+                .then(|| start_hold(&guard, &config))
+                .flatten(),
+        };
+        let devices = enigo::Enigo::new(&enigo::Settings::default())
+            .context("could not connect to desktop input")
+            .and_then(|enigo| {
+                arboard::Clipboard::new()
+                    .context("could not access the system clipboard")
+                    .map(|clipboard| (enigo, clipboard))
+            });
+        let (enigo, clipboard) = match devices {
+            Ok(devices) => devices,
+            Err(error) => {
+                // Held keys must not wait for the deadline behind an edit
+                // that will never start.
+                if let Some(hold) = &hold {
+                    let _ = super::terminal_typing::release_held(hold.pid);
+                }
+                return Err(error);
+            }
+        };
         let effects = Desktop {
             restore_source,
-            guard: Some(super::input_guard::InputGuard::new(terminal)?),
-            enigo: enigo::Enigo::new(&enigo::Settings::default())
-                .context("could not connect to desktop input")?,
-            clipboard: arboard::Clipboard::new()
-                .context("could not access the system clipboard")?,
+            guard: Some(guard),
+            enigo,
+            clipboard,
+            hold,
+            selection_released: false,
             config: config.clone(),
             saved: None,
             probe: None,
@@ -455,6 +567,41 @@ impl Effects for Desktop {
             .is_some_and(|owner| owner.is_current(&mut self.clipboard))
     }
     fn paste(&mut self, conversion: &Conversion, characters: usize) -> Result<SelectionOutcome> {
+        if self.hold.is_some() {
+            let prepared = super::terminal_typing::Prepared::paste()?;
+            if let Some(hold) = self.hold.take() {
+                let mut layout_switched = None;
+                let mut layout_error = None;
+                // The target's stream waits at the trigger while TIS changes,
+                // so no pending key can replay into the new layout early.
+                let released = prepared.release(hold.pid, hold.window, || {
+                    match self.switch_layout(conversion.direction) {
+                        Ok(layout) => {
+                            layout_switched = layout;
+                            true
+                        }
+                        Err(error) => {
+                            layout_error = Some(error);
+                            false
+                        }
+                    }
+                });
+                self.selection_released = released.is_ok();
+                if !released? {
+                    // Refused: the fallback released the selection unless a
+                    // pointer or focus change had already moved the caret.
+                    return match layout_error {
+                        Some(error) => Err(error),
+                        None => Ok(SelectionOutcome::Cancelled),
+                    };
+                }
+                return Ok(SelectionOutcome::Converted {
+                    direction: conversion.direction,
+                    characters,
+                    layout_switched,
+                });
+            }
+        }
         // TIS selection can replay a pending key event on macOS. Select the
         // destination before posting Cmd+V, never while that event is queued.
         let layout_switched = self.switch_layout(conversion.direction)?;
@@ -467,28 +614,60 @@ impl Effects for Desktop {
     }
     fn recover_selection(&mut self, selection: Selection, missing: bool) -> Result<()> {
         use enigo::Keyboard;
-        if !self
-            .guard
-            .as_ref()
-            .is_some_and(|guard| guard.can_recover_selection())
-        {
+        if self.selection_released {
             return Ok(());
         }
-        if self.ownership.is_none() && self.probe.is_some() {
-            let _ = self.read_copy();
-        }
-        match (selection, missing) {
-            (Selection::Existing, _) => Ok(()),
-            (Selection::Word, true) => super::undo_previous_word_selection(&mut self.enigo),
-            (Selection::Characters(count), true) => {
-                super::undo_previous_characters_selection(&mut self.enigo, count)
+        let recoverable = self
+            .guard
+            .as_ref()
+            .is_some_and(|guard| guard.can_recover_selection());
+        // A copy that lands after its deadline still proves the selection.
+        let late_copy = recoverable
+            && self.ownership.is_none()
+            && self.probe.is_some()
+            && self.read_copy().is_some();
+        let arrows = if recoverable {
+            recovery_arrows(selection, missing, late_copy)
+        } else {
+            0
+        };
+        if self.hold.is_some() {
+            let prepared = super::terminal_typing::Prepared::right_arrows(arrows)?;
+            if let Some(hold) = self.hold.take() {
+                // The arrows go in ahead of every held key, which then follows
+                // at the restored caret.
+                let released = prepared.release(hold.pid, hold.window, || true);
+                self.selection_released = released.is_ok();
+                released?;
+                return Ok(());
             }
-            (_, false) => Ok(self
-                .enigo
-                .key(enigo::Key::RightArrow, enigo::Direction::Click)?),
+        }
+        if !recoverable {
+            return Ok(());
+        }
+        match selection {
+            Selection::Word if missing && !late_copy => {
+                super::undo_previous_word_selection(&mut self.enigo)
+            }
+            _ => {
+                for _ in 0..arrows {
+                    self.enigo
+                        .key(enigo::Key::RightArrow, enigo::Direction::Click)?;
+                }
+                Ok(())
+            }
         }
     }
     fn stop_guard(&mut self) {
+        // Every path ends the hold, so held keys are never stranded.
+        if let Some(hold) = self.hold.take() {
+            self.selection_released = true;
+            let released = super::terminal_typing::Prepared::right_arrows(0)
+                .and_then(|prepared| prepared.release(hold.pid, hold.window, || true));
+            if let Err(error) = released {
+                tracing::debug!(%error, "could not release held input");
+            }
+        }
         self.guard = None;
     }
     fn keep_clipboard(&mut self) {
@@ -909,6 +1088,32 @@ mod tests {
         drop(task);
         assert_eq!(state.borrow().pasted.as_deref(), Some("привіт"));
         assert_eq!(state.borrow().recoveries, 0);
+    }
+
+    #[test]
+    fn an_unconvertible_selection_is_released_before_finishing() {
+        // Leaving the word selected would let the next key delete it.
+        let (mut task, state, now) = task(Request::PreviousWord, true);
+        state.borrow_mut().copied = Some("123".to_owned());
+        task.poll(now).unwrap();
+        next(&mut task).unwrap();
+        assert!(matches!(
+            next(&mut task).unwrap(),
+            Progress::Finished(Some(SelectionOutcome::NoConvertibleText))
+        ));
+        assert_eq!(state.borrow().recoveries, 1);
+        assert!(state.borrow().pasted.is_none());
+    }
+
+    #[test]
+    fn recovery_collapses_a_late_copied_selection_with_one_arrow() {
+        assert_eq!(recovery_arrows(Selection::Existing, true, false), 0);
+        assert_eq!(recovery_arrows(Selection::Characters(7), false, false), 1);
+        // Nothing was copied: the shift-selection never took effect.
+        assert_eq!(recovery_arrows(Selection::Characters(7), true, false), 7);
+        // The copy only arrived late: the selection exists, and N arrows
+        // would move the caret past the word.
+        assert_eq!(recovery_arrows(Selection::Characters(7), true, true), 1);
     }
 
     #[test]

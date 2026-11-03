@@ -60,28 +60,52 @@ pub fn installed_mapping() -> Result<Option<Vec<(char, char)>>> {
     platform::installed_mapping()
 }
 
+/// XKB groups from `setxkbmap -query`, each as `layout` or `layout(variant)`.
+/// Variants are positional; a missing `variant:` line means defaults.
 #[cfg(any(target_os = "linux", test))]
 fn parse_xkb_layouts(query: &str) -> Vec<String> {
-    query
-        .lines()
-        .find_map(|line| {
-            line.split_once(':')
-                .filter(|(key, _)| key.trim() == "layout")
-        })
-        .map_or_else(Vec::new, |(_, layouts)| {
-            layouts
-                .split(',')
-                .map(str::trim)
-                .filter(|layout| !layout.is_empty())
-                .map(str::to_owned)
-                .collect()
-        })
+    let field = |name: &str| -> Vec<String> {
+        query
+            .lines()
+            .find_map(|line| line.split_once(':').filter(|(key, _)| key.trim() == name))
+            .map_or_else(Vec::new, |(_, values)| {
+                values
+                    .split(',')
+                    .map(|value| value.trim().to_owned())
+                    .collect()
+            })
+    };
+    let variants = field("variant");
+    field("layout")
+        .into_iter()
+        .enumerate()
+        .filter(|(_, layout)| !layout.is_empty())
+        .map(
+            |(index, layout)| match variants.get(index).map(String::as_str) {
+                Some(variant) if !variant.is_empty() => format!("{layout}({variant})"),
+                _ => layout,
+            },
+        )
+        .collect()
 }
 
 #[cfg(any(target_os = "linux", test))]
 fn classify_xkb_layout(layout: &str) -> Option<SystemLayout> {
-    match layout.trim().to_ascii_lowercase().as_str() {
-        "us" => Some(SystemLayout::English),
+    let layout = layout.trim().to_ascii_lowercase();
+    let (name, variant) = layout
+        .strip_suffix(')')
+        .and_then(|rest| rest.split_once('('))
+        .unwrap_or((layout.as_str(), ""));
+    match name {
+        // QWERTY English layouts. Physical keys are read as US QWERTY, so a
+        // variant that moves the letters is unsupported rather than misread.
+        "us" | "gb" | "ie" | "au"
+            if !["dvorak", "colemak", "workman"]
+                .iter()
+                .any(|moved| variant.contains(moved)) =>
+        {
+            Some(SystemLayout::English)
+        }
         "ua" => Some(SystemLayout::Ukrainian),
         _ => None,
     }
@@ -117,7 +141,6 @@ mod platform {
     const KEY_ACTION_DOWN: u16 = 0;
     const NO_DEAD_KEYS: u32 = 1;
     const SHIFT_MODIFIER: u32 = 2;
-    const OPTION_MODIFIER: u32 = 8;
     const MAX_TRANSLATED_UNITS: usize = 8;
 
     const KEY_CODES: &[u16] = &[
@@ -318,12 +341,9 @@ mod platform {
         let mut english_seen = HashSet::new();
         let mut ukrainian_seen = HashSet::new();
 
-        for modifier in [
-            0,
-            SHIFT_MODIFIER,
-            OPTION_MODIFIER,
-            SHIFT_MODIFIER | OPTION_MODIFIER,
-        ] {
+        // Plain and Shift only: those are the keys the tracker reads. The
+        // Option layer turned typography into junk on conversion (`«` -> `±`).
+        for modifier in [0, SHIFT_MODIFIER] {
             for key_code in KEY_CODES {
                 let Some(english_character) =
                     translate_key(english_layout, *key_code, modifier, keyboard_type)
@@ -487,8 +507,10 @@ mod platform {
         match target {
             SystemLayout::English if id == "com.apple.keylayout.abc" => 0,
             SystemLayout::English if id == "com.apple.keylayout.us" => 1,
-            SystemLayout::Ukrainian if id.ends_with(".ukrainian") => 0,
-            SystemLayout::Ukrainian if id.ends_with(".ukrainian-pc") => 1,
+            // Ukrainian-PC is the current macOS default ("Ukrainian"); the bare
+            // ID is shown as "Ukrainian – Legacy".
+            SystemLayout::Ukrainian if id.ends_with(".ukrainian-pc") => 0,
+            SystemLayout::Ukrainian if id.ends_with(".ukrainian") => 1,
             _ => 2,
         }
     }
@@ -496,7 +518,9 @@ mod platform {
     fn classify(id: &str, name: &str, languages: &[String]) -> Option<SystemLayout> {
         let id = id.to_lowercase();
         let name = name.to_lowercase();
-        let language_family = languages.iter().find_map(|language| {
+        // The first language is the one the source is designed for; many
+        // layouts (German, Hebrew, Polish, ...) also list English after it.
+        let language_family = languages.first().and_then(|language| {
             let language = language.to_ascii_lowercase();
             let primary = language
                 .split(['-', '_'])
@@ -517,6 +541,14 @@ mod platform {
             || matches!(name.as_str(), "abc" | "u.s." | "us" | "english")
         {
             return Some(SystemLayout::English);
+        }
+        // Physical keys are read as US QWERTY, so English layouts that move
+        // the letters are unsupported rather than silently misread.
+        let moves_letters = ["dvorak", "colemak", "qwertz", "azerty", "workman"]
+            .iter()
+            .any(|variant| id.contains(variant) || name.contains(variant));
+        if moves_letters {
+            return None;
         }
         language_family
     }
@@ -679,10 +711,59 @@ mod platform {
         }
 
         #[test]
-        fn prefers_standard_ukrainian_and_abc_english() {
+        fn english_means_a_qwerty_layout_whose_primary_language_is_english() {
+            let languages = |list: &[&str]| -> Vec<String> {
+                list.iter().map(|language| (*language).to_owned()).collect()
+            };
+            // The tracker reads physical keys as US QWERTY. A layout that only
+            // lists English among other languages, or moves the letters, would
+            // make it rewrite the wrong text.
+            for (id, name, list) in [
+                ("com.apple.keylayout.German", "German", &["de", "en"][..]),
+                ("com.apple.keylayout.Hebrew", "Hebrew", &["he", "en"][..]),
+                ("com.apple.keylayout.Polish", "Polish", &["pl", "en"][..]),
+                ("com.apple.keylayout.Dvorak", "Dvorak", &["en"][..]),
+                ("com.apple.keylayout.Colemak", "Colemak", &["en"][..]),
+                (
+                    "com.apple.keylayout.ABC-QWERTZ",
+                    "ABC – QWERTZ",
+                    &["en"][..],
+                ),
+                (
+                    "com.apple.keylayout.ABC-AZERTY",
+                    "ABC – AZERTY",
+                    &["en"][..],
+                ),
+            ] {
+                assert_eq!(classify(id, name, &languages(list)), None, "{id}");
+            }
+            for (id, name, list) in [
+                (
+                    "com.apple.keylayout.British-PC",
+                    "British – PC",
+                    &["en-GB"][..],
+                ),
+                (
+                    "com.apple.keylayout.USInternational-PC",
+                    "U.S. International – PC",
+                    &["en", "fr"][..],
+                ),
+            ] {
+                assert_eq!(
+                    classify(id, name, &languages(list)),
+                    Some(SystemLayout::English),
+                    "{id}"
+                );
+            }
+        }
+
+        #[test]
+        fn prefers_current_macos_ukrainian_and_abc_english() {
+            // Current macOS names Ukrainian-PC "Ukrainian" (the default) and
+            // com.apple.keylayout.Ukrainian "Ukrainian – Legacy".
             assert!(
-                preference("com.apple.keylayout.Ukrainian", SystemLayout::Ukrainian)
-                    < preference("com.apple.keylayout.Ukrainian-PC", SystemLayout::Ukrainian)
+                preference("com.apple.keylayout.Ukrainian-PC", SystemLayout::Ukrainian)
+                    < preference("com.apple.keylayout.Ukrainian", SystemLayout::Ukrainian)
             );
             assert!(
                 preference("com.apple.keylayout.ABC", SystemLayout::English)
@@ -1149,9 +1230,33 @@ mod cross_platform_tests {
     fn parses_xkb_layout_groups() {
         let query = "rules: evdev\nmodel: pc105\nlayout: us,ua\nvariant: ,winkeys\n";
 
-        assert_eq!(parse_xkb_layouts(query), ["us", "ua"]);
+        assert_eq!(parse_xkb_layouts(query), ["us", "ua(winkeys)"]);
+        assert_eq!(
+            parse_xkb_layouts("layout: gb,ua\n"),
+            ["gb", "ua"],
+            "a missing variant line means default variants"
+        );
         assert_eq!(classify_xkb_layout("us"), Some(SystemLayout::English));
         assert_eq!(classify_xkb_layout("ua"), Some(SystemLayout::Ukrainian));
+        assert_eq!(
+            classify_xkb_layout("ua(winkeys)"),
+            Some(SystemLayout::Ukrainian)
+        );
         assert_eq!(classify_xkb_layout("de"), None);
+    }
+
+    #[test]
+    fn xkb_english_means_a_qwerty_english_layout() {
+        for layout in ["us", "gb", "ie", "au", "us(intl)", "gb(extd)"] {
+            assert_eq!(
+                classify_xkb_layout(layout),
+                Some(SystemLayout::English),
+                "{layout}"
+            );
+        }
+        // Physical keys are read as US QWERTY; these move the letters.
+        for layout in ["us(dvorak)", "us(colemak)", "gb(dvorak)", "us(workman)"] {
+            assert_eq!(classify_xkb_layout(layout), None, "{layout}");
+        }
     }
 }

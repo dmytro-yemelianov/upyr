@@ -24,7 +24,7 @@ Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in
   without macOS's picker or a second background application.
 - Uses the physical keys, including the standard Ukrainian punctuation row: `[];'\,./` ↔ `хїжєґбю.`.
 - Protects intentional technical text such as `FAANG`, `SaaS`, `NASDAQ`, `iPhone`, URLs, paths, and configured exceptions.
-- Provides searchable, tabbed settings, press-to-record shortcuts, an optional pointer-side language flag, and three locally synthesized sound packs with event/key controls and master volume.
+- Provides searchable, tabbed settings, press-to-record shortcuts, an optional pointer-side language flag, and three local sound packs with event/key controls and master volume (every cue is synthesized on-device except the Anime Reactions pack's six bundled, pre-rendered event cues).
 - By default, snapshots supported clipboard formats and attempts to restore them after conversion; temporary conversion content is concealed from supported clipboard-history systems.
 
 The menu-bar or system-tray app can convert text, pause or resume correction, open Settings, reload configuration, manage launch at login, and quit.
@@ -213,7 +213,7 @@ Upyr is designed to work without an account, server, or runtime network connecti
 - **Permission restraint.** macOS Accessibility is requested only when required, an existing grant is accepted silently, and a missing grant is prompted at most once per process.
 - **Inspectable artifacts.** The implementation is MIT-licensed, release builds are produced by GitHub Actions, and the release pipeline smoke-tests packaged conversion.
 
-The corpus generator and the sound-pack asset generator are the only intentional network-capable development tools: when explicitly run, the former downloads pinned public archives and verifies SHA-256 before processing, and the latter calls the ElevenLabs Sound Effects API to render bundled event cues. Neither is called by the desktop app or WASM runtime.
+The corpus generator ([`tools/generate_ngram_model.py`](tools/generate_ngram_model.py)), the clean-holdout generator ([`tools/generate_clean_holdout.py`](tools/generate_clean_holdout.py)), and the sound-pack asset generator ([`tools/generate_event_sound_pack.py`](tools/generate_event_sound_pack.py)) are the only intentional network-capable development tools. When explicitly run, the first two download pinned public archives and verify SHA-256 before processing, and the third calls the ElevenLabs Sound Effects API to render bundled event cues. None is called by the desktop app or WASM runtime, which have no network client.
 
 Security CI adds RustSec dependency auditing, CodeQL analysis, pull-request dependency review, and scheduled scans. These controls reduce risk; they are not a claim that any non-trivial program is vulnerability-free. Please follow [`SECURITY.md`](SECURITY.md) to report a suspected vulnerability instead of opening a public issue.
 
@@ -246,6 +246,24 @@ upyr settings
 ```
 
 The settings app exposes General, Automatic, Exceptions, Shortcuts, Feedback, and Advanced tabs. Automatic sensitivity can be conservative, balanced, or aggressive; deliberate strings can be added on the Exceptions tab. Feedback includes three local sound packs: Upyr Original, Pocket Arcade, and the opt-in Anime Reactions pack. Every key cue and most event cues are synthesized locally (the Anime pack's six application-event cues are the one exception; see below); keyboard feedback crosses into the app as physical key categories only and never stores typed characters. Use `UPYR_CONFIG` to select a different config file.
+
+Exceptions only stop a correction. For anything more specific, add rules to the
+configuration file; they apply before the built-in ones, and a matching `keep`
+always wins:
+
+```toml
+auto_correct_rules = [
+  "ghbdsn correct",       # always fix this key sequence typed on English
+  "руку keep",            # never touch this word typed on Ukrainian
+  "*cfqn* correct",       # any word containing these keys (prefix: `word*`, suffix: `*word`)
+  "hello correct ukrainian",
+]
+```
+
+A pattern is either the keys as typed on a US keyboard or the text as it
+appears when typed on the Ukrainian layout (Cyrillic patterns default to the
+Ukrainian layout). `upyr doctor` reports how many rules are active, and an
+invalid rule is reported by name when the file is loaded.
 
 The versioned TOML schema currently uses `config_version = 12`. Older supported schemas migrate in memory; configurations from a newer unsupported schema are rejected rather than guessed. Migration preserves existing sound choices and adds `undo_hotkey = "CmdOrCtrl+Alt+Z"` (with a fallback if a conversion shortcut already uses it) and `sounds.headphone_volume_percent = 12`. See the generated default file after `upyr init` for every option and its current value.
 
@@ -280,7 +298,11 @@ delivery of a prepared edit, text keys retain their order after the replacement.
 Paste, history edits, multiword
 rewrites and editor modes that reinterpret letter keys are outside this
 backend; it tracks input events rather than reading the terminal's real buffer.
-Other terminal applications remain disabled unless explicitly listed.
+Other terminal applications remain disabled until you opt in: Settings →
+Automatic → "Correct words in terminals" adds Terminal, iTerm2, Ghostty,
+kitty, Warp, Alacritty, WezTerm, Termius and cmux to `terminal_typing_apps`
+(and unchecking it removes them again); any other app can be listed by bundle
+identifier in the configuration file.
 
 For an opt-in live regression run on macOS, select this workspace in Superset,
 leave its window visible, then run:
@@ -372,7 +394,7 @@ only an intact original word or a complete replacement with that letter preserve
 | macOS 11+ | Primary public-preview target | Native AppKit settings and feedback, universal Apple Silicon/Intel package, native input-source and rich pasteboard integration |
 | Windows | Preview | Tray app, installer and portable ZIP, foreground-layout mapping, broad clipboard snapshot/restore support, and AccessKit-backed settings accessibility |
 | Linux/X11 | Preview | DEB and tar package, XKB layout mapping, StatusNotifierItem tray, desktop-notification feedback, and AccessKit-backed settings accessibility; native Wayland global input awaits a portal-backed design |
-| WebAssembly | Engine preview | DOM-independent `upyr-core` binding with generated TypeScript contracts; browser adapter and npm delivery are planned |
+| WebAssembly | Engine preview | DOM-independent `upyr-core` binding with generated TypeScript contracts, plus a site-local browser adapter (`site/upyr-web.js`) that powers the live playground on [upyr.org](https://upyr.org/#try-it); a published npm package is planned |
 
 ## Architecture
 

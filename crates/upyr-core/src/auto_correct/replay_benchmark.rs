@@ -371,7 +371,7 @@ impl ReplayReport {
     }
 }
 
-fn run_replay<S: CandidateScorer + ?Sized>(scorer: &S) -> ReplayReport {
+fn run_replay<S: CandidateScorer + ?Sized>(scorer: &S, policy: &AutoCorrectPolicy) -> ReplayReport {
     let cases = parse_cases();
     let mut overall = Metrics::default();
     let mut by_category = BTreeMap::<String, Metrics>::new();
@@ -379,7 +379,6 @@ fn run_replay<S: CandidateScorer + ?Sized>(scorer: &S) -> ReplayReport {
     let mut by_tag = BTreeMap::<String, Metrics>::new();
     let mut by_direction = BTreeMap::<String, Metrics>::new();
     let mut misses = Vec::new();
-    let policy = AutoCorrectPolicy::default();
 
     for case in &cases {
         let mapping = mapping_for(&case.mapping_profile);
@@ -388,7 +387,7 @@ fn run_replay<S: CandidateScorer + ?Sized>(scorer: &S) -> ReplayReport {
             &case.physical_context,
             case.source_layout,
         );
-        let decision = evaluate_with_scorer(&sample, &policy, mapping.as_deref(), scorer);
+        let decision = evaluate_with_scorer(&sample, policy, mapping.as_deref(), scorer);
         let correction_matches = matches!(
             &decision,
             AutoDecision::Correct(correction)
@@ -444,8 +443,21 @@ fn run_replay<S: CandidateScorer + ?Sized>(scorer: &S) -> ReplayReport {
 
 #[test]
 fn signed_ngram_v1_boundary_replay() {
-    let report = run_replay(&SIGNED_NGRAM_V1);
+    let report = run_replay(&SIGNED_NGRAM_V1, &AutoCorrectPolicy::default());
     report.print("signed-ngram-v1 / boundary-replay-v1");
+    report.assert_v1_guardrails();
+}
+
+/// The desktop app and the web demo always load the built-in triggers, so the
+/// replay guardrails must also hold for the policy that actually ships.
+#[test]
+fn signed_ngram_v1_boundary_replay_with_builtin_triggers() {
+    let policy = AutoCorrectPolicy {
+        triggers: crate::triggers::builtin_triggers(),
+        ..AutoCorrectPolicy::default()
+    };
+    let report = run_replay(&SIGNED_NGRAM_V1, &policy);
+    report.print("signed-ngram-v1 + built-in triggers / boundary-replay-v1");
     report.assert_v1_guardrails();
 }
 
@@ -461,7 +473,7 @@ fn candidate_ngram_boundary_replay() {
         path.display()
     );
 
-    let report = run_replay(&scorer);
+    let report = run_replay(&scorer, &AutoCorrectPolicy::default());
     report.print(&format!(
         "candidate {} / boundary-replay-v1",
         path.display()

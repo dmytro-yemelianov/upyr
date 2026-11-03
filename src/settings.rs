@@ -519,6 +519,13 @@ const SEARCH_PARAMETERS: &[SearchParameter] = &[
         label: "Convert selection shortcut",
         terms: "hotkey record key combination",
     },
+    #[cfg(target_os = "macos")]
+    SearchParameter {
+        tab: SettingsTab::Automatic,
+        label: "Correct words in terminals",
+        terms: "terminal iterm ghostty kitty warp alacritty wezterm termius shell typing backspace",
+    },
+    #[cfg(target_os = "macos")]
     SearchParameter {
         tab: SettingsTab::Automatic,
         label: "Slash commands in Superset",
@@ -529,6 +536,7 @@ const SEARCH_PARAMETERS: &[SearchParameter] = &[
         label: "Fix previous word shortcut",
         terms: "hotkey record backspace key combination",
     },
+    #[cfg(target_os = "macos")]
     SearchParameter {
         tab: SettingsTab::Shortcuts,
         label: "Undo auto-correction",
@@ -564,6 +572,7 @@ const SEARCH_PARAMETERS: &[SearchParameter] = &[
         label: "Indicator style",
         terms: "letters flag both language display shows preview globe",
     },
+    #[cfg(target_os = "macos")]
     SearchParameter {
         tab: SettingsTab::Feedback,
         label: "All country flags",
@@ -579,6 +588,7 @@ const SEARCH_PARAMETERS: &[SearchParameter] = &[
         label: "Sound volume",
         terms: "audio loud quiet percent preview",
     },
+    #[cfg(target_os = "macos")]
     SearchParameter {
         tab: SettingsTab::Feedback,
         label: "Headphone limit",
@@ -629,6 +639,8 @@ const SEARCH_PARAMETERS: &[SearchParameter] = &[
 #[cfg(not(target_os = "macos"))]
 struct SettingsApp {
     config: Config,
+    /// The configuration as loaded or last saved, the base of a save's merge.
+    loaded: Config,
     new_exception: String,
     launch_at_login: bool,
     autostart_status: autostart::AutostartStatus,
@@ -652,6 +664,7 @@ impl SettingsApp {
     ) -> Self {
         let launch_at_login = autostart_status.enabled;
         Self {
+            loaded: config.clone(),
             config,
             new_exception: String::new(),
             launch_at_login,
@@ -693,10 +706,18 @@ impl SettingsApp {
     }
 
     fn save(&mut self) {
-        if let Err(error) = self.config.write(true) {
+        // Rows are editable in place; re-split them so an edit such as
+        // "two words" saves as two exceptions instead of failing validation.
+        self.config.auto_correct_exceptions =
+            normalize_exceptions(&self.config.auto_correct_exceptions);
+        // Keep changes made elsewhere while this window was open.
+        let config = Config::for_settings_save(&self.loaded, self.config.clone());
+        if let Err(error) = config.write(true) {
             self.status = Some((false, format!("Could not save settings: {error:#}")));
             return;
         }
+        self.loaded = config.clone();
+        self.config = config;
 
         match sync_launch_at_login(self.launch_at_login) {
             Ok(status) => {
@@ -965,14 +986,14 @@ impl SettingsApp {
             ui.add(
                 egui::TextEdit::singleline(&mut self.new_exception)
                     .desired_width(260.0)
-                    .hint_text("word, or a comma-separated list"),
+                    .hint_text("words separated by spaces or commas"),
             );
             if ui.button("Add").clicked() {
                 self.add_exceptions();
             }
         });
         ui.small(
-            "Case-insensitive duplicates and blank entries are ignored. Each word must be a single token with no spaces.",
+            "Spaces and commas separate words, so \"two words\" adds two exceptions. Case-insensitive duplicates and blank entries are ignored.",
         );
     }
 
@@ -1581,15 +1602,31 @@ fn pretty_key(code: Code) -> String {
     }
 }
 
+/// Splits typed exceptions on commas and any whitespace, so "two words"
+/// becomes two single-word entries, the only kind validation accepts.
 fn parse_exceptions(source: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     source
-        .split([',', '\n', '\r'])
-        .map(str::trim)
+        .split(|character: char| character == ',' || character.is_whitespace())
         .filter(|word| !word.is_empty())
         .filter(|word| seen.insert(word.to_lowercase()))
         .map(str::to_owned)
         .collect()
+}
+
+/// Re-parses exception rows after inline edits, so Save never meets a blank,
+/// duplicate or multi-word entry that configuration validation would reject.
+fn normalize_exceptions<I>(words: I) -> Vec<String>
+where
+    I: IntoIterator,
+    I::Item: AsRef<str>,
+{
+    let joined = words
+        .into_iter()
+        .map(|word| word.as_ref().to_owned())
+        .collect::<Vec<_>>()
+        .join("\n");
+    parse_exceptions(&joined)
 }
 
 fn sensitivity_label(value: AutoCorrectSensitivity) -> &'static str {
@@ -1637,6 +1674,32 @@ mod tests {
             parse_exceptions("GitHub, codex\ngithub\n  Upyr "),
             vec!["GitHub", "codex", "Upyr"]
         );
+    }
+
+    #[test]
+    fn exception_parser_splits_on_whitespace_so_every_entry_validates() {
+        let words = parse_exceptions("two words,\tthree\u{a0}more  TWO\r\n");
+
+        assert_eq!(words, vec!["two", "words", "three", "more"]);
+        Config {
+            auto_correct_exceptions: words,
+            ..Config::default()
+        }
+        .validate()
+        .unwrap();
+    }
+
+    #[test]
+    fn edited_exception_rows_are_split_and_cleaned_before_saving() {
+        let words = normalize_exceptions(["GitHub", "  ", " two words ", "github", "Two"]);
+
+        assert_eq!(words, vec!["GitHub", "two", "words"]);
+        Config {
+            auto_correct_exceptions: words,
+            ..Config::default()
+        }
+        .validate()
+        .unwrap();
     }
 
     #[test]
@@ -1688,6 +1751,29 @@ mod tests {
             assert_eq!(SettingsTab::from_command(tab.command()), Some(tab));
         }
         assert_eq!(SettingsTab::from_command("not-a-tab"), None);
+    }
+
+    #[test]
+    fn search_lists_only_controls_drawn_on_this_platform() {
+        let labels: Vec<_> = SEARCH_PARAMETERS
+            .iter()
+            .map(|parameter| parameter.label)
+            .collect();
+
+        for label in [
+            "Globe key switching",
+            "Correct words in terminals",
+            "Slash commands in Superset",
+            "Undo auto-correction",
+            "All country flags",
+            "Headphone limit",
+        ] {
+            assert_eq!(
+                labels.contains(&label),
+                cfg!(target_os = "macos"),
+                "search entry {label:?} must exist only where its control is drawn"
+            );
+        }
     }
 
     #[test]

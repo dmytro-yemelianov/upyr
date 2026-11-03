@@ -514,6 +514,17 @@ fn physical_key_from_code(code: &str) -> PhysicalKey {
         "Comma" => PhysicalKey::Comma,
         "Period" => PhysicalKey::Period,
         "Slash" => PhysicalKey::Slash,
+        "Digit1" => PhysicalKey::Digit1,
+        "Digit2" => PhysicalKey::Digit2,
+        "Digit3" => PhysicalKey::Digit3,
+        "Digit4" => PhysicalKey::Digit4,
+        "Digit5" => PhysicalKey::Digit5,
+        "Digit6" => PhysicalKey::Digit6,
+        "Digit7" => PhysicalKey::Digit7,
+        "Digit8" => PhysicalKey::Digit8,
+        "Digit9" => PhysicalKey::Digit9,
+        "Digit0" => PhysicalKey::Digit0,
+        "Minus" => PhysicalKey::Minus,
         "Space" => PhysicalKey::Space,
         "Backspace" => PhysicalKey::Backspace,
         "ShiftLeft" | "ShiftRight" => PhysicalKey::Shift,
@@ -879,6 +890,35 @@ mod tests {
         assert_eq!(decision.direction, Some(Direction::EnglishToUkrainian));
         assert_eq!(decision.target_layout, Some(InputLayout::Ukrainian));
         assert!(decision.apply_after_input);
+    }
+
+    #[test]
+    fn number_row_punctuation_and_hyphens_reach_the_engine() {
+        let shifted = |code: &str| KeyDownInput {
+            shift_key: true,
+            ..key(code)
+        };
+        let mut engine =
+            SessionEngine::new(options(Some(InputLayout::English), SessionMode::Suggest)).unwrap();
+        let mut decision = WebDecision::passive(DecisionKind::Wait, "test", None);
+        for input in ["KeyG", "KeyH", "KeyB", "KeyD", "KeyS", "KeyN"]
+            .into_iter()
+            .map(key)
+            .chain([shifted("Digit1"), key("Space")])
+        {
+            decision = engine.key_down(input);
+        }
+        assert_eq!(decision.replacement.as_deref(), Some("привіт! "));
+
+        let mut engine =
+            SessionEngine::new(options(Some(InputLayout::English), SessionMode::Suggest)).unwrap();
+        let decision = type_codes(
+            &mut engine,
+            &[
+                "Comma", "KeyE", "KeyL", "KeyM", "Minus", "KeyZ", "KeyR", "KeyB", "KeyQ", "Space",
+            ],
+        );
+        assert_eq!(decision.replacement.as_deref(), Some("будь-який "));
     }
 
     #[test]

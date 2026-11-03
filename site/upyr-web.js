@@ -47,10 +47,12 @@ export function isExcludedField(element) {
 
 /** One field's live correction state: the session, pending decision, and DOM listeners. */
 class UpyrFieldSession {
-  constructor(element, session, onDecision) {
+  constructor(element, session, options) {
     this.element = element;
     this.session = session;
-    this.onDecision = onDecision || (() => {});
+    this.onDecision = (options && options.onDecision) || (() => {});
+    this.onApply = (options && options.onApply) || (() => {});
+    this.beforeKeyDown = (options && options.beforeKeyDown) || (() => {});
     this.pending = null;
     this.destroyed = false;
 
@@ -85,8 +87,15 @@ class UpyrFieldSession {
   }
 
   handleResetEvent() {
-    this.pending = null;
+    this.dropPending();
     this.session.reset();
+  }
+
+  /** Reports a queued correction that will never reach the field. */
+  dropPending() {
+    const pending = this.pending;
+    this.pending = null;
+    if (pending) this.onApply(pending, false);
   }
 
   handleNavigationKeyUp(event) {
@@ -96,6 +105,9 @@ class UpyrFieldSession {
   }
 
   handleKeyDown(event) {
+    // Lets the host refresh the session's source layout from this real
+    // keystroke before Upyr interprets its physical code.
+    this.beforeKeyDown(event);
     const decision = this.processKeyDown({
       code: event.code,
       key: event.key,
@@ -118,6 +130,7 @@ class UpyrFieldSession {
    */
   processKeyDown(input) {
     const decision = this.session.keyDown(input);
+    this.dropPending();
     this.pending = decision.applyAfterInput ? decision : null;
     this.onDecision(decision);
     return decision;
@@ -134,16 +147,24 @@ class UpyrFieldSession {
     this.applyPending(pending);
   }
 
+  /**
+   * Replaces the queued source text only when the field still ends with it,
+   * then reports through `onApply(decision, applied)` whether it did.
+   */
   applyPending(decision) {
     const element = this.element;
     const caret = element.selectionStart;
-    if (caret === null || caret !== element.selectionEnd) return;
-    const before = element.value.slice(0, caret);
-    if (!before.endsWith(decision.expectedSource)) return;
-
-    const start = caret - decision.expectedSource.length;
-    element.setRangeText(decision.replacement, start, caret, "end");
-    element.dispatchEvent(new Event("input", { bubbles: true }));
+    const applied =
+      caret !== null &&
+      caret === element.selectionEnd &&
+      element.value.slice(0, caret).endsWith(decision.expectedSource);
+    if (applied) {
+      const start = caret - decision.expectedSource.length;
+      element.setRangeText(decision.replacement, start, caret, "end");
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    this.onApply(decision, applied);
+    return applied;
   }
 }
 
@@ -152,11 +173,15 @@ class UpyrFieldSession {
  * for excluded fields (password/OTP/disabled/opted-out); otherwise returns a
  * controller with `reset()`, `destroy()`, and `simulateKeyDown()` for a
  * virtual keyboard to feed physical-key events directly.
+ *
+ * Options: `onDecision(decision)` for every keydown decision;
+ * `onApply(decision, applied)` once a queued correction was written to the
+ * field (`applied`) or abandoned because the text no longer matched; and
+ * `beforeKeyDown(event)` before a real keydown is interpreted.
  */
 export function attach(element, session, options) {
   if (isExcludedField(element)) return null;
-  const onDecision = options && options.onDecision;
-  const fieldSession = new UpyrFieldSession(element, session, onDecision);
+  const fieldSession = new UpyrFieldSession(element, session, options);
   return {
     reset: () => fieldSession.handleResetEvent(),
     destroy: () => fieldSession.destroy(),

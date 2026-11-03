@@ -28,6 +28,17 @@ fn main() {
             en.to_string()
         );
     }
+    // Only the plain and Shift layers describe the physical keys the tracker
+    // reads. Option-layer pairs turned typography into junk during manual
+    // conversion (`«` -> `±`, `…` -> `Ú`, `’` -> `∏`).
+    for typography in ['«', '»', '…', '’', '—', '±', 'Ú', '∏'] {
+        assert!(
+            !pairs
+                .iter()
+                .any(|&(en, uk)| en == typography || uk == typography),
+            "{typography:?} must not be remapped by layout conversion"
+        );
+    }
     assert_eq!(
         before,
         system_layout::current().unwrap(),

@@ -26,7 +26,7 @@ use rdev::{EventType, Key};
 use tracing::error;
 use upyr_audio::KeyCue;
 
-use crate::auto_correct::{AutoKeyEvent, AutoWordTracker};
+use crate::auto_correct::AutoKeyEvent;
 
 #[cfg(not(target_os = "macos"))]
 const START_TIMEOUT: Duration = Duration::from_millis(250);
@@ -210,12 +210,14 @@ impl CaptureState {
                 None
             }
             EventType::KeyPress(Key::ControlLeft) => {
+                // A modifier alone edits nothing; its shortcut key decides.
                 self.left_control = true;
-                Some(reset_event(Keycode::LControl))
+                None
             }
             EventType::KeyPress(Key::ControlRight) => {
+                // A modifier alone edits nothing; its shortcut key decides.
                 self.right_control = true;
-                Some(reset_event(Keycode::RControl))
+                None
             }
             EventType::KeyRelease(Key::ControlLeft) => {
                 self.left_control = false;
@@ -226,12 +228,14 @@ impl CaptureState {
                 None
             }
             EventType::KeyPress(Key::Alt) => {
+                // A modifier alone edits nothing; its shortcut key decides.
                 self.left_option = true;
-                Some(reset_event(Keycode::LAlt))
+                None
             }
             EventType::KeyPress(Key::AltGr) => {
+                // A modifier alone edits nothing; its shortcut key decides.
                 self.right_option = true;
-                Some(reset_event(Keycode::RAlt))
+                None
             }
             EventType::KeyRelease(Key::Alt) => {
                 self.left_option = false;
@@ -242,12 +246,14 @@ impl CaptureState {
                 None
             }
             EventType::KeyPress(Key::MetaLeft) => {
+                // A modifier alone edits nothing; its shortcut key decides.
                 self.left_meta = true;
-                Some(reset_event(Keycode::LMeta))
+                None
             }
             EventType::KeyPress(Key::MetaRight) => {
+                // A modifier alone edits nothing; its shortcut key decides.
                 self.right_meta = true;
-                Some(reset_event(Keycode::RMeta))
+                None
             }
             EventType::KeyRelease(Key::MetaLeft) => {
                 self.left_meta = false;
@@ -292,7 +298,13 @@ impl CaptureState {
         if self.chord_modifier_active() {
             self.shift_release_pending = false;
             self.clear_snapshot_missing_chords();
-            return None;
+            // Modifier+Space switches input sources (Ctrl+Space, Cmd+Space,
+            // Win+Space): the word goes on in the new layout. Any other
+            // shortcut may edit text or move the caret, so the word ends.
+            if key == Key::Space {
+                return None;
+            }
+            return Some(reset_event(Keycode::Escape));
         }
 
         let shifted = self.left_shift
@@ -308,11 +320,29 @@ impl CaptureState {
                 return Some(reset_event(Keycode::CapsLock));
             }
         }
+        let key = map_key(key)?;
         if self.caps_lock {
-            return None;
+            if is_layout_dependent_letter(key) {
+                // A Ukrainian letter on a punctuation key: Caps Lock changes its
+                // case on one layout only, so the intended case is unknowable.
+                return Some(reset_event(Keycode::CapsLock));
+            }
+            // Caps Lock inverts the case of letters only, as Shift does.
+            let letter = crate::auto_correct::physical_key(key)
+                .and_then(|physical| {
+                    upyr_core::physical_character(upyr_core::PhysicalKeyEvent {
+                        key: physical,
+                        shifted: false,
+                    })
+                })
+                .is_some_and(|character| character.is_ascii_alphabetic());
+            return Some(AutoKeyEvent {
+                key,
+                shifted: shifted ^ letter,
+            });
         }
 
-        map_key(key).map(|key| AutoKeyEvent { key, shifted })
+        Some(AutoKeyEvent { key, shifted })
     }
 
     fn chord_modifier_active(&self) -> bool {
@@ -360,6 +390,22 @@ fn reset_event(key: Keycode) -> AutoKeyEvent {
         key,
         shifted: false,
     }
+}
+
+/// Punctuation keys of a US keyboard that type letters on the Ukrainian layout
+/// (`[];',.` and backquote/backslash for `хїжєбюʼґ`).
+fn is_layout_dependent_letter(key: Keycode) -> bool {
+    matches!(
+        key,
+        Keycode::LeftBracket
+            | Keycode::RightBracket
+            | Keycode::Semicolon
+            | Keycode::Apostrophe
+            | Keycode::Comma
+            | Keycode::Dot
+            | Keycode::Grave
+            | Keycode::BackSlash
+    )
 }
 
 fn infer_caps_lock(name: Option<&str>, shifted: bool) -> Option<bool> {
@@ -659,9 +705,12 @@ fn dispatch_key(state: &ListenerState, event: AutoKeyEvent) {
         return;
     }
     if subscription.suspended {
-        if AutoWordTracker::can_begin(event.key)
-            || matches!(event.key, Keycode::Space | Keycode::Backspace)
-        {
+        // Text and the user's resets are replayed in order: a click, Enter or
+        // arrow between two words must still separate them afterwards.
+        // Modifier resets are dropped: during a correction they come from
+        // Upyr's own Shift/Cmd/Ctrl chords where the platform cannot filter
+        // them out, and would erase text the user typed meanwhile.
+        if !is_modifier(event.key) {
             if subscription.deferred_text_events.len() < MAX_DEFERRED_TEXT_EVENTS {
                 subscription.deferred_text_events.push_back(event);
             } else {
@@ -672,6 +721,25 @@ fn dispatch_key(state: &ListenerState, event: AutoKeyEvent) {
         return;
     }
     (subscription.on_key_down)(event);
+}
+
+fn is_modifier(key: Keycode) -> bool {
+    matches!(
+        key,
+        Keycode::LShift
+            | Keycode::RShift
+            | Keycode::LControl
+            | Keycode::RControl
+            | Keycode::LAlt
+            | Keycode::RAlt
+            | Keycode::LOption
+            | Keycode::ROption
+            | Keycode::LMeta
+            | Keycode::RMeta
+            | Keycode::Command
+            | Keycode::RCommand
+            | Keycode::CapsLock
+    )
 }
 
 fn dispatch_key_sound(state: &ListenerState, cue: KeyCue) {
@@ -963,6 +1031,7 @@ fn dispatch_activity(state: &ListenerState, event: ActivityEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auto_correct::AutoWordTracker;
 
     fn test_monitor() -> (AutoCorrectMonitor, Arc<Mutex<Vec<AutoKeyEvent>>>) {
         let state = Arc::new(ListenerState::default());
@@ -1205,6 +1274,39 @@ mod tests {
     }
 
     #[test]
+    fn resets_during_a_correction_are_replayed_in_order() {
+        // `ok`, a click (or Enter, an arrow), then `c` while the previous
+        // correction runs: replaying only the letters would join `okc`.
+        let (monitor, received) = test_monitor();
+        let key = |key| AutoKeyEvent {
+            key,
+            shifted: false,
+        };
+        monitor.set_suspended(true);
+        for event in [
+            key(Keycode::O),
+            key(Keycode::K),
+            reset_event(Keycode::Escape),
+            key(Keycode::Enter),
+            key(Keycode::C),
+        ] {
+            dispatch_key(&monitor.state, event);
+        }
+        monitor.set_suspended(false);
+
+        assert_eq!(
+            *received.lock().expect("received lock"),
+            [
+                key(Keycode::O),
+                key(Keycode::K),
+                reset_event(Keycode::Escape),
+                key(Keycode::Enter),
+                key(Keycode::C),
+            ]
+        );
+    }
+
+    #[test]
     fn deferred_overflow_replays_only_a_tracker_reset() {
         let (monitor, received) = test_monitor();
         monitor.set_suspended(true);
@@ -1226,6 +1328,44 @@ mod tests {
     }
 
     #[test]
+    fn a_layout_switch_chord_keeps_the_word_being_typed() {
+        // Ctrl+Space, Ctrl+Option+Space, Cmd+Space or Win+Space switch input
+        // sources: the word continues in the new layout and can be repaired.
+        for modifiers in [
+            &[Key::ControlLeft][..],
+            &[Key::ControlLeft, Key::Alt][..],
+            &[Key::MetaLeft][..],
+        ] {
+            let mut state = CaptureState::default();
+            assert_eq!(
+                state.observe(EventType::KeyPress(Key::KeyG), Some("g")),
+                Some(AutoKeyEvent {
+                    key: Keycode::G,
+                    shifted: false,
+                })
+            );
+            for modifier in modifiers {
+                assert_eq!(state.observe(EventType::KeyPress(*modifier), None), None);
+            }
+            assert_eq!(
+                state.observe(EventType::KeyPress(Key::Space), None),
+                None,
+                "{modifiers:?}+Space must not end the word"
+            );
+            for modifier in modifiers {
+                state.observe(EventType::KeyRelease(*modifier), None);
+            }
+            assert_eq!(
+                state.observe(EventType::KeyPress(Key::KeyH), Some("р")),
+                Some(AutoKeyEvent {
+                    key: Keycode::H,
+                    shifted: false,
+                })
+            );
+        }
+    }
+
+    #[test]
     fn command_chord_resets_suppresses_and_then_recovers() {
         let mut state = CaptureState::default();
 
@@ -1236,13 +1376,14 @@ mod tests {
                 shifted: false,
             })
         );
+        // The modifier alone changes nothing; the shortcut key ends the word.
         assert_eq!(
             state.observe(EventType::KeyPress(Key::MetaLeft), None),
-            Some(reset_event(Keycode::LMeta))
+            None
         );
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyC), Some("c")),
-            None
+            Some(reset_event(Keycode::Escape))
         );
         assert_eq!(
             state.observe(EventType::KeyRelease(Key::MetaLeft), None),
@@ -1263,16 +1404,13 @@ mod tests {
 
         assert_eq!(
             state.observe(EventType::KeyPress(Key::ControlLeft), None),
-            Some(reset_event(Keycode::LControl))
+            None
         );
-        assert_eq!(
-            state.observe(EventType::KeyPress(Key::Alt), None),
-            Some(reset_event(Keycode::LAlt))
-        );
+        assert_eq!(state.observe(EventType::KeyPress(Key::Alt), None), None);
         state.observe(EventType::KeyRelease(Key::ControlLeft), None);
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
-            None
+            Some(reset_event(Keycode::Escape))
         );
         state.observe(EventType::KeyRelease(Key::Alt), None);
         assert_eq!(
@@ -1394,12 +1532,12 @@ mod tests {
 
         assert_eq!(
             state.observe(EventType::KeyPress(Key::MetaLeft), None),
-            Some(reset_event(Keycode::LMeta))
+            None
         );
         state.synchronize_momentary_modifiers(&[], Some("c"));
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyC), Some("c")),
-            None
+            Some(reset_event(Keycode::Escape))
         );
         assert!(!state.chord_modifier_active());
         assert_eq!(
@@ -1412,13 +1550,28 @@ mod tests {
     }
 
     #[test]
-    fn already_active_caps_lock_is_suppressed_and_recovers_when_off() {
+    fn caps_lock_folds_into_letter_case_instead_of_disabling_correction() {
         let mut state = CaptureState::from_pressed_keys(&[Keycode::CapsLock]);
 
+        // Caps Lock on, no Shift: the letter is an upper-case key press.
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("A")),
-            None
+            Some(AutoKeyEvent {
+                key: Keycode::A,
+                shifted: true,
+            })
         );
+        // Shift with Caps Lock types a lower-case letter.
+        state.observe(EventType::KeyPress(Key::ShiftLeft), None);
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
+            Some(AutoKeyEvent {
+                key: Keycode::A,
+                shifted: false,
+            })
+        );
+        state.observe(EventType::KeyRelease(Key::ShiftLeft), None);
+        // Caps Lock off again: ordinary lower case.
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
             Some(AutoKeyEvent {
@@ -1438,12 +1591,41 @@ mod tests {
         );
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("Ф")),
-            None
+            Some(AutoKeyEvent {
+                key: Keycode::A,
+                shifted: true,
+            })
         );
         assert_eq!(
             state.observe(EventType::KeyPress(Key::LeftBracket), Some("х")),
             Some(AutoKeyEvent {
                 key: Keycode::LeftBracket,
+                shifted: false,
+            })
+        );
+    }
+
+    #[test]
+    fn caps_lock_on_a_ukrainian_letter_punctuation_key_ends_the_word() {
+        // `[` is `х` on Ukrainian: Caps Lock changes its case on one layout
+        // but not the other, so the word's intended case is unknowable.
+        let mut state = CaptureState::from_pressed_keys(&[Keycode::CapsLock]);
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyA), Some("A")),
+            Some(AutoKeyEvent {
+                key: Keycode::A,
+                shifted: true,
+            })
+        );
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::Comma), Some(",")),
+            Some(reset_event(Keycode::CapsLock))
+        );
+        // `/` is punctuation on both layouts and keeps the word.
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::Slash), Some("/")),
+            Some(AutoKeyEvent {
+                key: Keycode::Slash,
                 shifted: false,
             })
         );

@@ -12,10 +12,12 @@ const INTENSE_SCRIPT = [
   { layout: "ukrainian", codes: ["KeyC", "KeyO", "KeyD", "KeyE", "KeyX", "Space"] }, // send as-is example
 ];
 
+// A "correct" decision only queues an edit; `appliedText` reports the outcome
+// once the field was (or was not) actually changed.
 function statusText(decision) {
   switch (decision.kind) {
     case "correct":
-      return `Corrected ${decision.expectedSource.trim()} → ${decision.replacement.trim()} (${decision.direction})`;
+      return `Checking ${decision.expectedSource.trim()} → ${decision.replacement.trim()}…`;
     case "suggest":
       return `Would suggest ${decision.expectedSource.trim()} → ${decision.replacement.trim()}`;
     case "wait":
@@ -25,6 +27,27 @@ function statusText(decision) {
     default:
       return "";
   }
+}
+
+function appliedText(decision, applied) {
+  const source = decision.expectedSource.trim();
+  const replacement = decision.replacement.trim();
+  return applied
+    ? `Corrected ${source} → ${replacement} (${decision.direction})`
+    : `Left ${source} unchanged: the text before the caret changed first`;
+}
+
+// A real keyboard reports the produced character in `event.key`, which shows
+// the OS input source the page cannot change: Cyrillic means Ukrainian and a
+// Latin letter means English. Digits, punctuation, Space, and shortcuts keep
+// the current layout.
+function layoutFromKeyEvent(event) {
+  if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return null;
+  const key = event.key;
+  if (typeof key !== "string" || key.length !== 1) return null;
+  if (/\p{Script=Cyrillic}/u.test(key)) return "ukrainian";
+  if (/[A-Za-z]/.test(key)) return "english";
+  return null;
 }
 
 async function main() {
@@ -68,43 +91,52 @@ async function main() {
     }
   }
 
-  const keyboard = buildKeyboard(keyboardHost, ({ code, char }) => {
-    const decision = fieldSession
-      ? fieldSession.simulateKeyDown({
-          code,
-          key: char ?? code,
-          shiftKey: false,
-          capsLock: false,
-          ctrlKey: false,
-          altKey: false,
-          metaKey: false,
-          altGraphKey: false,
-          isComposing: false,
-        })
-      : null;
+  // True while an on-screen key is being processed. Only that keyboard's
+  // layout belongs to the demo, so only it follows a correction.
+  let onScreenKey = false;
 
-    if (code === "Backspace") {
-      const caret = textField.selectionStart;
-      if (caret !== null && caret > 0 && caret === textField.selectionEnd) {
-        textField.setRangeText("", caret - 1, caret, "end");
+  const keyboard = buildKeyboard(keyboardHost, ({ code, char, shiftKey, capsLock }) => {
+    onScreenKey = true;
+    try {
+      fieldSession?.simulateKeyDown({
+        code,
+        key: char ?? code,
+        shiftKey,
+        capsLock,
+        ctrlKey: false,
+        altKey: false,
+        metaKey: false,
+        altGraphKey: false,
+        isComposing: false,
+      });
+
+      if (code === "Backspace") {
+        const caret = textField.selectionStart;
+        if (caret !== null && caret > 0 && caret === textField.selectionEnd) {
+          textField.setRangeText("", caret - 1, caret, "end");
+          textField.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      } else if (char) {
+        const caret = textField.selectionStart ?? textField.value.length;
+        textField.setRangeText(char, caret, textField.selectionEnd ?? caret, "end");
         textField.dispatchEvent(new Event("input", { bubbles: true }));
       }
-    } else if (char) {
-      const caret = textField.selectionStart ?? textField.value.length;
-      textField.setRangeText(char, caret, textField.selectionEnd ?? caret, "end");
-      textField.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-
-    if (decision) setStatus(statusText(decision));
-    if (decision && autoFollow && decision.targetLayout) {
-      setLayout(decision.targetLayout);
+    } finally {
+      onScreenKey = false;
     }
   });
 
   const fieldSession = attach(textField, session, {
-    onDecision: (decision) => {
-      setStatus(statusText(decision));
-      if (autoFollow && decision.targetLayout) {
+    beforeKeyDown: (event) => {
+      const layout = layoutFromKeyEvent(event);
+      if (layout && layout !== keyboard.getLayout()) setLayout(layout);
+    },
+    onDecision: (decision) => setStatus(statusText(decision)),
+    onApply: (decision, applied) => {
+      setStatus(appliedText(decision, applied));
+      // A real keyboard's OS input source stays put after a correction, so
+      // its next keystrokes keep reporting their own layout instead.
+      if (applied && onScreenKey && autoFollow && decision.targetLayout) {
         setLayout(decision.targetLayout);
       }
     },

@@ -27,8 +27,8 @@ use upyr_audio::KeyCue;
 use super::{
     ACTIVATION_POLL_INTERVAL, APP_VERSION, ActivationInbox, IMPLEMENTATION_SUMMARY,
     PRIVACY_SUMMARY, PROJECT_WEBSITE_URL, REPOSITORY_URL, SEARCH_PARAMETERS, SettingsTab,
-    autostart_attention, flag_choices::FlagChoices, parse_exceptions, pretty_hotkey,
-    sensitivity_label, sync_launch_at_login,
+    autostart_attention, flag_choices::FlagChoices, normalize_exceptions, parse_exceptions,
+    pretty_hotkey, sensitivity_label, sync_launch_at_login,
 };
 use crate::{
     autostart,
@@ -77,6 +77,7 @@ struct Controls {
     repair_autostart: Retained<NSButton>,
     remove_autostart: Retained<NSButton>,
     auto_correct: Retained<NSButton>,
+    terminal_correction: Retained<NSButton>,
     slash_commands: Retained<NSButton>,
     sensitivity: Retained<NSPopUpButton>,
     minimum_word_length: Retained<NSTextField>,
@@ -180,18 +181,22 @@ define_class!(
     impl NativeController {
         #[unsafe(method(saveSettings:))]
         fn save_settings(&self, _sender: &AnyObject) {
-            let config = match self.collect_config() {
+            let edited = match self.collect_config() {
                 Ok(config) => config,
                 Err(error) => {
                     self.set_status(false, &format!("Could not save settings: {error:#}"));
                     return;
                 }
             };
+            // Keep changes made elsewhere while this window was open.
+            let config = Config::for_settings_save(&self.ivars().config.borrow(), edited);
             if let Err(error) = config.write(true) {
                 self.set_status(false, &format!("Could not save settings: {error:#}"));
                 return;
             }
             self.ivars().flag_choices.borrow_mut().accept(config.globe_switch.layout_flags.clone());
+            // Show the saved list: an edited "two words" row became two rows.
+            self.rebuild_exception_rows(&config.auto_correct_exceptions);
             self.ivars().config.replace(config);
             self.refresh_flag_choices();
 
@@ -574,19 +579,17 @@ impl NativeController {
         }
     }
 
-    /// Reads every exception row's current text, trimming, dropping blanks,
-    /// and dropping case-insensitive duplicates a live edit may have created.
+    /// Reads every exception row's current text, splitting a row edited into
+    /// several words, and dropping blanks and case-insensitive duplicates a
+    /// live edit may have created.
     fn exception_words(&self) -> Vec<String> {
-        let mut seen = std::collections::HashSet::new();
-        self.controls()
-            .exceptions_rows
-            .borrow()
-            .iter()
-            .map(|row| row.field.stringValue().to_string())
-            .map(|word| word.trim().to_owned())
-            .filter(|word| !word.is_empty())
-            .filter(|word| seen.insert(word.to_lowercase()))
-            .collect()
+        normalize_exceptions(
+            self.controls()
+                .exceptions_rows
+                .borrow()
+                .iter()
+                .map(|row| row.field.stringValue().to_string()),
+        )
     }
 
     /// Replaces every exception row with fresh ones built from `words`, used
@@ -830,8 +833,15 @@ impl NativeController {
             remove_autostart,
         ) = make_general_page(self, mtm);
         add_tab(&tabs, "General", &general, mtm);
-        let (automatic, auto_correct, sensitivity, minimum_word_length, auto_delay, slash_commands) =
-            make_automatic_page(mtm);
+        let AutomaticControls {
+            page: automatic,
+            enabled: auto_correct,
+            sensitivity,
+            minimum: minimum_word_length,
+            delay: auto_delay,
+            terminal_correction,
+            slash_commands,
+        } = make_automatic_page(mtm);
         add_tab(&tabs, "Automatic", &automatic, mtm);
         let ExceptionsControls {
             page: exceptions_page,
@@ -915,6 +925,7 @@ impl NativeController {
                 repair_autostart,
                 remove_autostart,
                 auto_correct,
+                terminal_correction,
                 slash_commands,
                 sensitivity,
                 minimum_word_length,
@@ -986,23 +997,8 @@ impl NativeController {
             .apply_to(&mut config.globe_switch.layout_flags);
         config.restore_clipboard = is_checked(&controls.restore_clipboard);
         config.auto_correct = is_checked(&controls.auto_correct);
-        config
-            .slash_command_apps
-            .retain(|app| app != "com.superset.desktop");
-        if is_checked(&controls.slash_commands) {
-            config
-                .slash_command_apps
-                .push("com.superset.desktop".to_owned());
-            if !config
-                .terminal_typing_apps
-                .iter()
-                .any(|app| app == "com.superset.desktop")
-            {
-                config
-                    .terminal_typing_apps
-                    .push("com.superset.desktop".to_owned());
-            }
-        }
+        set_terminal_correction(&mut config, is_checked(&controls.terminal_correction));
+        set_superset_slash_commands(&mut config, is_checked(&controls.slash_commands));
         config.auto_correct_sensitivity = match controls.sensitivity.indexOfSelectedItem() {
             1 => AutoCorrectSensitivity::Balanced,
             2 => AutoCorrectSensitivity::Aggressive,
@@ -1070,11 +1066,12 @@ impl NativeController {
         set_checked(&controls.restore_clipboard, config.restore_clipboard);
         set_checked(&controls.auto_correct, config.auto_correct);
         set_checked(
+            &controls.terminal_correction,
+            terminal_correction_enabled(config),
+        );
+        set_checked(
             &controls.slash_commands,
-            config
-                .slash_command_apps
-                .iter()
-                .any(|app| app == "com.superset.desktop"),
+            superset_slash_commands_enabled(config),
         );
         controls
             .sensitivity
@@ -1549,16 +1546,7 @@ fn make_general_page(
 }
 
 #[allow(clippy::type_complexity)]
-fn make_automatic_page(
-    mtm: MainThreadMarker,
-) -> (
-    Retained<NSView>,
-    Retained<NSButton>,
-    Retained<NSPopUpButton>,
-    Retained<NSTextField>,
-    Retained<NSTextField>,
-    Retained<NSButton>,
-) {
+fn make_automatic_page(mtm: MainThreadMarker) -> AutomaticControls {
     let page = page(mtm);
     page_header(
         &page,
@@ -1592,16 +1580,43 @@ fn make_automatic_page(
     ));
     page.addSubview(&label(
         "macOS Accessibility access is checked before input monitoring starts.",
-        rect(28.0, 96.0, 590.0, 24.0),
+        rect(28.0, 60.0, 590.0, 24.0),
         mtm,
     ));
-    let slash_commands = checkbox(
-        "Correct freshly typed /commands in Superset",
+    let terminal_correction = checkbox(
+        "Correct words in terminals (Terminal, iTerm2, Ghostty, kitty, Warp…)",
         rect(24.0, 124.0, 610.0, 26.0),
         mtm,
     );
+    terminal_correction.setToolTip(Some(&NSString::from_str(
+        "Terminals do not paste reliably, so Upyr deletes the word with Backspace and types the replacement, holding your next keys until it is done.",
+    )));
+    page.addSubview(&terminal_correction);
+    let slash_commands = checkbox(
+        "Correct freshly typed /commands in Superset",
+        rect(24.0, 92.0, 610.0, 26.0),
+        mtm,
+    );
     page.addSubview(&slash_commands);
-    (page, enabled, sensitivity, minimum, delay, slash_commands)
+    AutomaticControls {
+        page,
+        enabled,
+        sensitivity,
+        minimum,
+        delay,
+        terminal_correction,
+        slash_commands,
+    }
+}
+
+struct AutomaticControls {
+    page: Retained<NSView>,
+    enabled: Retained<NSButton>,
+    sensitivity: Retained<NSPopUpButton>,
+    minimum: Retained<NSTextField>,
+    delay: Retained<NSTextField>,
+    terminal_correction: Retained<NSButton>,
+    slash_commands: Retained<NSButton>,
 }
 
 fn make_exceptions_page(
@@ -1635,7 +1650,9 @@ fn make_exceptions_page(
     page.addSubview(&scroll);
 
     let new_word = text_field("", rect(24.0, 66.0, 470.0, 26.0), mtm);
-    new_word.setPlaceholderString(Some(&NSString::from_str("word, or a comma-separated list")));
+    new_word.setPlaceholderString(Some(&NSString::from_str(
+        "words separated by spaces or commas",
+    )));
     page.addSubview(&new_word);
     page.addSubview(&action_button(
         "Add",
@@ -1645,7 +1662,7 @@ fn make_exceptions_page(
         mtm,
     ));
     page.addSubview(&multiline_label(
-        "Case-insensitive duplicates and blank entries are ignored. Each word must be a single token with no spaces.",
+        "Spaces and commas separate words, so \"two words\" adds two exceptions. Case-insensitive duplicates and blank entries are ignored.",
         rect(24.0, 26.0, 624.0, 32.0),
         mtm,
     ));
@@ -1878,7 +1895,7 @@ fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> F
         mtm,
     );
     sound_pack.setToolTip(Some(&NSString::from_str(
-        "Anime Reactions uses locally synthesized, nonverbal control-key sounds.",
+        "Anime Reactions synthesizes nonverbal control-key sounds locally; its six event cues are pre-rendered clips bundled with Upyr.",
     )));
     page.addSubview(&sound_pack);
     page.addSubview(&label("Volume", rect(372.0, 269.0, 58.0, 24.0), mtm));
@@ -2260,6 +2277,80 @@ fn mac_modifiers(flags: NSEventModifierFlags) -> Modifiers {
     modifiers
 }
 
+const SUPERSET_APP_ID: &str = "com.superset.desktop";
+
+/// Known terminals other than Superset, whose own checkbox manages it.
+fn known_terminals() -> impl Iterator<Item = &'static str> {
+    crate::input_context::KNOWN_TERMINAL_APPS
+        .iter()
+        .copied()
+        .filter(|app| *app != SUPERSET_APP_ID)
+}
+
+/// True when the "Correct words in terminals" checkbox should appear checked.
+fn terminal_correction_enabled(config: &Config) -> bool {
+    known_terminals().any(|terminal| {
+        config
+            .terminal_typing_apps
+            .iter()
+            .any(|app| app == terminal)
+    })
+}
+
+/// Applies the "Correct words in terminals" checkbox: checking opts every
+/// known terminal in; unchecking a previously checked box removes them again.
+/// Superset and hand-written entries are left to their own controls.
+fn set_terminal_correction(config: &mut Config, enabled: bool) {
+    if enabled {
+        for terminal in known_terminals() {
+            if !config
+                .terminal_typing_apps
+                .iter()
+                .any(|app| app == terminal)
+            {
+                config.terminal_typing_apps.push(terminal.to_owned());
+            }
+        }
+    } else if terminal_correction_enabled(config) {
+        config
+            .terminal_typing_apps
+            .retain(|app| !known_terminals().any(|terminal| terminal == app));
+    }
+}
+
+/// True when the "Slash commands in Superset" checkbox should appear checked.
+fn superset_slash_commands_enabled(config: &Config) -> bool {
+    config
+        .slash_command_apps
+        .iter()
+        .any(|app| app == SUPERSET_APP_ID)
+}
+
+/// Applies the "Slash commands in Superset" checkbox to both opt-in lists.
+/// Slash commands need tracked terminal typing, so checking the box adds
+/// Superset to both lists and unchecking a previously checked box removes it
+/// from both. Other entries are preserved, and an unchanged unchecked box
+/// leaves a hand-written terminal-only Superset opt-in alone.
+fn set_superset_slash_commands(config: &mut Config, enabled: bool) {
+    if enabled {
+        for apps in [
+            &mut config.slash_command_apps,
+            &mut config.terminal_typing_apps,
+        ] {
+            if !apps.iter().any(|app| app == SUPERSET_APP_ID) {
+                apps.push(SUPERSET_APP_ID.to_owned());
+            }
+        }
+    } else if superset_slash_commands_enabled(config) {
+        config
+            .slash_command_apps
+            .retain(|app| app != SUPERSET_APP_ID);
+        config
+            .terminal_typing_apps
+            .retain(|app| app != SUPERSET_APP_ID);
+    }
+}
+
 fn mac_key_code(code: u16) -> Option<Code> {
     crate::hotkey_bindings::mac_key_code(code)
 }
@@ -2275,5 +2366,92 @@ mod tests {
         assert_eq!(mac_key_code(40), Some(Code::KeyK));
         assert_eq!(mac_key_code(123), Some(Code::ArrowLeft));
         assert_eq!(mac_key_code(10), None);
+    }
+
+    fn app_lists(slash: &[&str], terminal: &[&str]) -> Config {
+        Config {
+            slash_command_apps: slash.iter().map(|app| (*app).to_owned()).collect(),
+            terminal_typing_apps: terminal.iter().map(|app| (*app).to_owned()).collect(),
+            ..Config::default()
+        }
+    }
+
+    #[test]
+    fn terminal_correction_opts_every_known_terminal_in_and_out() {
+        let mut config = app_lists(&[SUPERSET_APP_ID], &[SUPERSET_APP_ID, "com.example.repl"]);
+        assert!(!terminal_correction_enabled(&config));
+
+        set_terminal_correction(&mut config, true);
+        set_terminal_correction(&mut config, true);
+        assert!(terminal_correction_enabled(&config));
+        for terminal in [
+            "com.apple.Terminal",
+            "com.googlecode.iterm2",
+            "com.mitchellh.ghostty",
+        ] {
+            assert_eq!(
+                config
+                    .terminal_typing_apps
+                    .iter()
+                    .filter(|app| *app == terminal)
+                    .count(),
+                1,
+                "{terminal}"
+            );
+        }
+
+        // Unchecking removes the known terminals only: Superset belongs to its
+        // own checkbox and hand-written entries stay.
+        set_terminal_correction(&mut config, false);
+        assert!(!terminal_correction_enabled(&config));
+        assert_eq!(
+            config.terminal_typing_apps,
+            [SUPERSET_APP_ID, "com.example.repl"]
+        );
+    }
+
+    #[test]
+    fn checking_superset_slash_commands_opts_in_both_lists_once() {
+        let mut config = app_lists(&["com.example.cli"], &["com.apple.Terminal"]);
+
+        set_superset_slash_commands(&mut config, true);
+        set_superset_slash_commands(&mut config, true);
+
+        assert!(superset_slash_commands_enabled(&config));
+        assert_eq!(
+            config.slash_command_apps,
+            ["com.example.cli", SUPERSET_APP_ID]
+        );
+        assert_eq!(
+            config.terminal_typing_apps,
+            ["com.apple.Terminal", SUPERSET_APP_ID]
+        );
+    }
+
+    #[test]
+    fn unchecking_superset_slash_commands_removes_it_from_both_lists() {
+        let mut config = app_lists(
+            &["com.example.cli", SUPERSET_APP_ID],
+            &[SUPERSET_APP_ID, "com.apple.Terminal"],
+        );
+
+        set_superset_slash_commands(&mut config, false);
+
+        assert!(!superset_slash_commands_enabled(&config));
+        assert_eq!(config.slash_command_apps, ["com.example.cli"]);
+        assert_eq!(config.terminal_typing_apps, ["com.apple.Terminal"]);
+    }
+
+    #[test]
+    fn an_unchanged_unchecked_box_keeps_a_terminal_only_superset_opt_in() {
+        let mut config = app_lists(&[], &[SUPERSET_APP_ID, "com.apple.Terminal"]);
+
+        set_superset_slash_commands(&mut config, false);
+
+        assert!(config.slash_command_apps.is_empty());
+        assert_eq!(
+            config.terminal_typing_apps,
+            [SUPERSET_APP_ID, "com.apple.Terminal"]
+        );
     }
 }

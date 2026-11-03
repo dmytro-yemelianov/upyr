@@ -69,13 +69,51 @@ impl AutoWordTracker {
         self.active_layout = None;
     }
 
+    /// The current word as if a line break ended it now, without changing the
+    /// tracker. No boundary is appended: Enter is held back until the
+    /// correction is in place, so nothing follows the word on screen yet.
+    #[cfg(any(target_os = "macos", test))]
+    pub fn line_break_sample(&self) -> Option<WordSample> {
+        let word_start = self.current_word_start?;
+        let source_layout = self.current_word_layout?;
+        let final_layout = self.active_layout?;
+        if self.current_word_mixed && source_layout == final_layout {
+            return None;
+        }
+        let physical_word = self.physical_context[word_start..].to_owned();
+        if physical_word.is_empty() {
+            return None;
+        }
+        Some(WordSample {
+            #[cfg(any(target_os = "macos", test))]
+            physical_word: physical_word.clone(),
+            #[cfg(any(target_os = "macos", test))]
+            source_layout,
+            inner: upyr_core::WordSample::new(
+                physical_word,
+                self.physical_context.clone(),
+                source_layout,
+            ),
+            visible_runs: self.visible_runs.clone(),
+        })
+    }
+
     pub fn observe(&mut self, event: AutoKeyEvent) -> Option<WordSample> {
         let Some(key) = physical_key(event.key) else {
             self.clear();
             return None;
         };
         match key {
-            upyr_core::PhysicalKey::Space => return self.finish_word(),
+            upyr_core::PhysicalKey::Space => {
+                if self.current_word_start.is_none() {
+                    // A repeated space is not represented in the tracked
+                    // context; keeping the older words would select text that
+                    // no longer matches the screen.
+                    self.clear_context();
+                    return None;
+                }
+                return self.finish_word();
+            }
             upyr_core::PhysicalKey::Backspace => {
                 self.backspace();
                 return None;
@@ -216,14 +254,30 @@ impl AutoWordTracker {
     }
 }
 
+/// macOS evaluates through [`evaluate_with_caps_lock`], which also handles
+/// terminals and an accidental Caps Lock.
+#[cfg(not(target_os = "macos"))]
 pub fn evaluate(sample: &WordSample, config: &Config) -> AutoDecision {
-    let policy = correction_policy(config);
     let mapping = system_layout::installed_mapping().ok().flatten();
-    let decision = upyr_core::evaluate(&sample.inner, &policy, mapping.as_deref());
+    evaluate_with_mapping(sample, config, mapping.as_deref())
+}
+
+fn evaluate_with_mapping(
+    sample: &WordSample,
+    config: &Config,
+    mapping: Option<&[(char, char)]>,
+) -> AutoDecision {
+    let policy = correction_policy(config);
+    let decision = upyr_core::evaluate(&sample.inner, &policy, mapping);
     match decision {
         AutoDecision::Correct(mut correction) => {
-            correction.expected_source =
-                render_visible_context(&sample.visible_runs, mapping.as_deref());
+            // The engine may rewrite only the tail of the tracked context.
+            // Physical and visible text align character for character, so the
+            // selection is exactly that many trailing visible characters.
+            let visible = render_visible_context(&sample.visible_runs, mapping);
+            let corrected = correction.expected_source.chars().count();
+            let skip = visible.chars().count().saturating_sub(corrected);
+            correction.expected_source = visible.chars().skip(skip).collect();
             AutoDecision::Correct(correction)
         }
         decision => decision,
@@ -232,10 +286,110 @@ pub fn evaluate(sample: &WordSample, config: &Config) -> AutoDecision {
 
 /// Terminal edits are bounded to the current word, even when the language
 /// engine has accumulated an ambiguous phrase before it.
+/// `пРИВІТ`, `hELLO`: typed with Caps Lock on while Shift was held for the
+/// first letter. Returns the intended case (`Привіт`, `Hello`).
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn accidental_caps_fix(word: &str) -> Option<String> {
+    let cased = |c: &char| c.is_lowercase() || c.is_uppercase();
+    if !word
+        .chars()
+        .all(|c| cased(&c) || matches!(c, '\'' | '’' | 'ʼ'))
+    {
+        return None;
+    }
+    let mut letters = word.chars().filter(cased);
+    if !letters.next()?.is_lowercase() {
+        return None;
+    }
+    let rest: Vec<char> = letters.collect();
+    if rest.len() < 2 || !rest.iter().all(|c| c.is_uppercase()) {
+        return None;
+    }
+    let mut first = true;
+    Some(
+        word.chars()
+            .flat_map(|c| -> Vec<char> {
+                if !cased(&c) {
+                    vec![c]
+                } else if std::mem::take(&mut first) {
+                    c.to_uppercase().collect()
+                } else {
+                    c.to_lowercase().collect()
+                }
+            })
+            .collect(),
+    )
+}
+
+/// Evaluates a finished word, fixing an accidental Caps Lock first when it is
+/// on: `gHBDSN` becomes `Привіт` (layout and case), `пРИВІТ` becomes `Привіт`
+/// (case only, `Direction::Smart`, which must not switch layouts).
 #[cfg(target_os = "macos")]
-pub fn evaluate_terminal(sample: &WordSample, config: &Config) -> AutoDecision {
+pub fn evaluate_with_caps_lock(
+    sample: &WordSample,
+    config: &Config,
+    caps_lock: bool,
+    terminal: bool,
+) -> AutoDecision {
     let mapping = system_layout::installed_mapping().ok().flatten();
-    evaluate_terminal_with_mapping(sample, config, mapping.as_deref())
+    evaluate_caps_with_mapping(sample, config, mapping.as_deref(), caps_lock, terminal)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn evaluate_caps_with_mapping(
+    sample: &WordSample,
+    config: &Config,
+    mapping: Option<&[(char, char)]>,
+    caps_lock: bool,
+    terminal: bool,
+) -> AutoDecision {
+    let evaluate = |sample: &WordSample| {
+        if terminal {
+            evaluate_terminal_with_mapping(sample, config, mapping)
+        } else {
+            evaluate_with_mapping(sample, config, mapping)
+        }
+    };
+    if !caps_lock {
+        return evaluate(sample);
+    }
+    let visible = render_visible_context(&sample.visible_runs, mapping);
+    let boundary = if visible.ends_with(' ') { " " } else { "" };
+    let visible_word = visible
+        .strip_suffix(' ')
+        .unwrap_or(&visible)
+        .rsplit(' ')
+        .next()
+        .unwrap_or("");
+    let fixes = accidental_caps_fix(visible_word).zip(accidental_caps_fix(&sample.physical_word));
+    let context = sample.inner.physical_context();
+    let prefix = context
+        .strip_suffix(' ')
+        .unwrap_or(context)
+        .strip_suffix(sample.physical_word.as_str());
+    let (Some((fixed_visible, fixed_physical)), Some(prefix)) = (fixes, prefix) else {
+        return evaluate(sample);
+    };
+    // Judge the word as it was meant to be typed. Selection still targets the
+    // text on screen, which every path renders from the original key runs.
+    let intended = WordSample {
+        inner: upyr_core::WordSample::new(
+            fixed_physical.clone(),
+            format!("{prefix}{fixed_physical}{boundary}"),
+            sample.inner.source_layout(),
+        ),
+        visible_runs: sample.visible_runs.clone(),
+        physical_word: fixed_physical,
+        source_layout: sample.source_layout,
+    };
+    match evaluate(&intended) {
+        AutoDecision::Correct(correction) => AutoDecision::Correct(correction),
+        _ => AutoDecision::Correct(AutoCorrection {
+            expected_source: format!("{visible_word}{boundary}"),
+            replacement: format!("{fixed_visible}{boundary}"),
+            direction: upyr_core::Direction::Smart,
+        }),
+    }
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -243,6 +397,43 @@ fn evaluate_terminal_with_mapping(
     sample: &WordSample,
     config: &Config,
     mapping: Option<&[(char, char)]>,
+) -> AutoDecision {
+    evaluate_single_word(sample, config, mapping, " ")
+}
+
+/// The word before Enter on macOS: the ordinary decision first, then the
+/// short-word policy, because no later word can resolve `nfr` → `так` there.
+#[cfg(target_os = "macos")]
+pub fn evaluate_line_break(sample: &WordSample, config: &Config, caps_lock: bool) -> AutoDecision {
+    let mapping = system_layout::installed_mapping().ok().flatten();
+    evaluate_line_break_with_mapping(sample, config, mapping.as_deref(), caps_lock)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn evaluate_line_break_with_mapping(
+    sample: &WordSample,
+    config: &Config,
+    mapping: Option<&[(char, char)]>,
+    caps_lock: bool,
+) -> AutoDecision {
+    match evaluate_caps_with_mapping(sample, config, mapping, caps_lock, false) {
+        AutoDecision::Correct(correction) => AutoDecision::Correct(correction),
+        decision => match evaluate_single_word(sample, config, mapping, "") {
+            AutoDecision::Correct(correction) => AutoDecision::Correct(correction),
+            _ => decision,
+        },
+    }
+}
+
+/// Judges only the current word, with the short-word policy, as terminals do.
+/// `boundary` is what follows the word on screen: a space, or nothing yet
+/// when Enter is held behind the correction.
+#[cfg(any(target_os = "macos", test))]
+fn evaluate_single_word(
+    sample: &WordSample,
+    config: &Config,
+    mapping: Option<&[(char, char)]>,
+    boundary: &str,
 ) -> AutoDecision {
     let mut policy = correction_policy(config);
     let word = sample.physical_word.to_ascii_lowercase();
@@ -375,7 +566,7 @@ fn evaluate_terminal_with_mapping(
     }
     let single_word = upyr_core::WordSample::new(
         sample.physical_word.clone(),
-        format!("{} ", sample.physical_word),
+        format!("{}{boundary}", sample.physical_word),
         sample.source_layout,
     );
     match upyr_core::evaluate(&single_word, &policy, mapping) {
@@ -387,7 +578,7 @@ fn evaluate_terminal_with_mapping(
                 .rsplit(' ')
                 .next()
                 .unwrap_or("");
-            correction.expected_source = format!("{word} ");
+            correction.expected_source = format!("{word}{boundary}");
             AutoDecision::Correct(correction)
         }
         decision => decision,
@@ -425,7 +616,12 @@ fn correction_policy(config: &Config) -> upyr_core::AutoCorrectPolicy {
         },
         min_word_length: config.auto_correct_min_word_length,
         exceptions: config.auto_correct_exceptions.clone(),
-        triggers: upyr_core::builtin_triggers(),
+        triggers: config
+            .auto_correct_rules
+            .iter()
+            .filter_map(|rule| upyr_core::parse_trigger(rule).ok().flatten())
+            .chain(upyr_core::builtin_triggers())
+            .collect(),
     }
 }
 
@@ -468,6 +664,17 @@ pub(crate) fn physical_key(key: Keycode) -> Option<upyr_core::PhysicalKey> {
         Keycode::Comma => PhysicalKey::Comma,
         Keycode::Dot => PhysicalKey::Period,
         Keycode::Slash => PhysicalKey::Slash,
+        Keycode::Key1 => PhysicalKey::Digit1,
+        Keycode::Key2 => PhysicalKey::Digit2,
+        Keycode::Key3 => PhysicalKey::Digit3,
+        Keycode::Key4 => PhysicalKey::Digit4,
+        Keycode::Key5 => PhysicalKey::Digit5,
+        Keycode::Key6 => PhysicalKey::Digit6,
+        Keycode::Key7 => PhysicalKey::Digit7,
+        Keycode::Key8 => PhysicalKey::Digit8,
+        Keycode::Key9 => PhysicalKey::Digit9,
+        Keycode::Key0 => PhysicalKey::Digit0,
+        Keycode::Minus => PhysicalKey::Minus,
         Keycode::Space => PhysicalKey::Space,
         Keycode::Backspace => PhysicalKey::Backspace,
         Keycode::LShift | Keycode::RShift => PhysicalKey::Shift,
@@ -669,6 +876,114 @@ mod tests {
     }
 
     #[test]
+    fn accidental_caps_lock_words_are_recognized_by_their_inverted_case() {
+        for (typed, fixed) in [
+            ("пРИВІТ", "Привіт"),
+            ("hELLO", "Hello"),
+            ("gHBDSN", "Ghbdsn"),
+        ] {
+            assert_eq!(
+                accidental_caps_fix(typed).as_deref(),
+                Some(fixed),
+                "{typed}"
+            );
+        }
+        for typed in ["ПРИВІТ", "привіт", "Привіт", "пРИвіт", "hE", "a1B"] {
+            assert_eq!(accidental_caps_fix(typed), None, "{typed}");
+        }
+    }
+
+    #[test]
+    fn caps_lock_accidents_are_fixed_with_or_without_a_layout_change() {
+        let config = Config::default();
+        for (word, layout, expected, replacement, direction) in [
+            // Wrong layout as well: convert and fix the case.
+            (
+                "gHBDSN",
+                SystemLayout::English,
+                "gHBDSN ",
+                "Привіт ",
+                upyr_core::Direction::EnglishToUkrainian,
+            ),
+            // Right layout: only the case changes, and no layout switch.
+            (
+                "gHBDSN",
+                SystemLayout::Ukrainian,
+                "пРИВІТ ",
+                "Привіт ",
+                upyr_core::Direction::Smart,
+            ),
+            (
+                "hELLO",
+                SystemLayout::English,
+                "hELLO ",
+                "Hello ",
+                upyr_core::Direction::Smart,
+            ),
+        ] {
+            let sample = terminal_sample(word, &format!("{word} "), layout);
+            for terminal in [false, true] {
+                let decision = evaluate_caps_with_mapping(&sample, &config, None, true, terminal);
+                let AutoDecision::Correct(correction) = decision else {
+                    panic!("{expected:?} (terminal: {terminal}) was not fixed: {decision:?}");
+                };
+                assert_eq!(
+                    (
+                        correction.expected_source.as_str(),
+                        correction.replacement.as_str(),
+                        correction.direction
+                    ),
+                    (expected, replacement, direction),
+                    "terminal: {terminal}"
+                );
+            }
+        }
+        // Without Caps Lock the same shape is left alone (`iPHONE`-like text).
+        let sample = terminal_sample("hELLO", "hELLO ", SystemLayout::English);
+        assert!(!matches!(
+            evaluate_caps_with_mapping(&sample, &config, None, false, false),
+            AutoDecision::Correct(correction) if correction.replacement == "Hello "
+        ));
+    }
+
+    #[test]
+    fn user_rules_reach_both_correction_paths() {
+        let config = Config {
+            auto_correct_rules: vec!["zzzz correct".to_owned(), "ghbdsn keep".to_owned()],
+            ..Config::default()
+        };
+        for (path, decide) in [
+            (
+                "desktop",
+                evaluate_with_mapping as fn(&WordSample, &Config, Option<&[(char, char)]>) -> _,
+            ),
+            ("terminal", evaluate_terminal_with_mapping),
+        ] {
+            let forced = decide(
+                &terminal_sample("zzzz", "zzzz ", SystemLayout::English),
+                &config,
+                None,
+            );
+            let AutoDecision::Correct(correction) = forced else {
+                panic!("{path}: a user `correct` rule did not apply: {forced:?}");
+            };
+            assert_eq!(correction.replacement, "яяяя ", "{path}");
+            // A user `keep` beats the built-in `ghbdsn correct` trigger.
+            assert!(
+                !matches!(
+                    decide(
+                        &terminal_sample("ghbdsn", "ghbdsn ", SystemLayout::English),
+                        &config,
+                        None
+                    ),
+                    AutoDecision::Correct(_)
+                ),
+                "{path}: a user `keep` rule did not apply"
+            );
+        }
+    }
+
+    #[test]
     fn desktop_config_maps_to_portable_correction_policy() {
         for (source, expected) in [
             (
@@ -790,6 +1105,255 @@ mod tests {
     }
 
     #[test]
+    fn typed_number_row_punctuation_and_hyphens_are_corrected_in_both_paths() {
+        fn event(key: Keycode, shifted: bool) -> AutoKeyEvent {
+            AutoKeyEvent { key, shifted }
+        }
+        let letters = |word: &str| -> Vec<AutoKeyEvent> {
+            word.chars()
+                .map(|character| {
+                    let key = match character {
+                        'b' => Keycode::B,
+                        'd' => Keycode::D,
+                        'e' => Keycode::E,
+                        'g' => Keycode::G,
+                        'h' => Keycode::H,
+                        'l' => Keycode::L,
+                        'm' => Keycode::M,
+                        'n' => Keycode::N,
+                        'o' => Keycode::O,
+                        'q' => Keycode::Q,
+                        'r' => Keycode::R,
+                        's' => Keycode::S,
+                        'z' => Keycode::Z,
+                        _ => unreachable!("test words use these keys"),
+                    };
+                    event(key, false)
+                })
+                .collect()
+        };
+        let space = event(Keycode::Space, false);
+        for (layout, events, replacement) in [
+            (
+                SystemLayout::English,
+                [letters("ghbdsn"), vec![event(Keycode::Key1, true), space]].concat(),
+                "привіт! ",
+            ),
+            (
+                SystemLayout::English,
+                [letters("ghbdsn"), vec![event(Keycode::Key7, true), space]].concat(),
+                "привіт? ",
+            ),
+            (
+                SystemLayout::English,
+                [
+                    vec![event(Keycode::Comma, false)],
+                    letters("elm"),
+                    vec![event(Keycode::Minus, false)],
+                    letters("zrbq"),
+                    vec![space],
+                ]
+                .concat(),
+                "будь-який ",
+            ),
+            (
+                SystemLayout::Ukrainian,
+                [letters("hello"), vec![event(Keycode::Key1, true), space]].concat(),
+                "hello! ",
+            ),
+        ] {
+            let mut tracker = AutoWordTracker::default();
+            let mut sample = None;
+            for event in events {
+                if tracker.needs_layout_check() && AutoWordTracker::can_begin(event.key) {
+                    tracker.set_source_layout(Some(layout));
+                }
+                if let Some(finished) = tracker.observe(event) {
+                    sample = Some(finished);
+                }
+            }
+            let sample = sample.unwrap_or_else(|| panic!("{replacement:?} was never tracked"));
+            for (path, decision) in [
+                (
+                    "desktop",
+                    evaluate_with_mapping(&sample, &Config::default(), None),
+                ),
+                (
+                    "terminal",
+                    evaluate_terminal_with_mapping(&sample, &Config::default(), None),
+                ),
+            ] {
+                let AutoDecision::Correct(correction) = decision else {
+                    panic!("{path}: {replacement:?} was not corrected: {decision:?}");
+                };
+                assert_eq!(correction.replacement, replacement, "{path}");
+            }
+        }
+    }
+
+    #[test]
+    fn short_words_before_enter_use_the_short_word_policy() {
+        // Nothing follows the last word of a message to resolve it, so the
+        // common short words are corrected there as in terminals.
+        for (physical, layout, expected, replacement) in [
+            ("nfr", SystemLayout::English, "nfr", "так"),
+            ("zr", SystemLayout::English, "zr", "як"),
+            ("ghbdsn", SystemLayout::English, "ghbdsn", "привіт"),
+        ] {
+            let sample = WordSample {
+                inner: upyr_core::WordSample::new(physical, physical, layout),
+                physical_word: physical.to_owned(),
+                source_layout: layout,
+                visible_runs: vec![LayoutRun {
+                    layout,
+                    physical: physical.to_owned(),
+                }],
+            };
+            let decision =
+                evaluate_line_break_with_mapping(&sample, &Config::default(), None, false);
+            let AutoDecision::Correct(correction) = decision else {
+                panic!("{physical:?} before Enter was not corrected: {decision:?}");
+            };
+            assert_eq!(
+                (
+                    correction.expected_source.as_str(),
+                    correction.replacement.as_str()
+                ),
+                (expected, replacement)
+            );
+        }
+        // Real English stays.
+        let sample = WordSample {
+            inner: upyr_core::WordSample::new("is", "is", SystemLayout::English),
+            physical_word: "is".to_owned(),
+            source_layout: SystemLayout::English,
+            visible_runs: vec![LayoutRun {
+                layout: SystemLayout::English,
+                physical: "is".to_owned(),
+            }],
+        };
+        assert!(!matches!(
+            evaluate_line_break_with_mapping(&sample, &Config::default(), None, false),
+            AutoDecision::Correct(_)
+        ));
+    }
+
+    #[test]
+    fn a_line_break_sample_ends_the_word_without_a_boundary_or_side_effects() {
+        let mut tracker = AutoWordTracker::default();
+        for key in [
+            Keycode::O,
+            Keycode::K,
+            Keycode::Space,
+            Keycode::G,
+            Keycode::H,
+            Keycode::B,
+            Keycode::D,
+            Keycode::S,
+            Keycode::N,
+        ] {
+            if tracker.needs_layout_check() && AutoWordTracker::can_begin(key) {
+                tracker.set_source_layout(Some(SystemLayout::English));
+            }
+            tracker.observe(AutoKeyEvent {
+                key,
+                shifted: false,
+            });
+        }
+
+        let sample = tracker.line_break_sample().expect("a word is being typed");
+        let AutoDecision::Correct(correction) =
+            evaluate_with_mapping(&sample, &Config::default(), None)
+        else {
+            panic!("the word before Enter should be corrected");
+        };
+        // Enter is held back, so nothing follows the word on screen yet.
+        assert_eq!(correction.expected_source, "ghbdsn");
+        assert_eq!(correction.replacement, "привіт");
+
+        // Peeking does not finish the word: Space still completes it.
+        let finished = tracker
+            .observe(AutoKeyEvent {
+                key: Keycode::Space,
+                shifted: false,
+            })
+            .expect("the same word finishes at Space");
+        assert_eq!(finished.physical_word, "ghbdsn");
+        assert!(AutoWordTracker::default().line_break_sample().is_none());
+    }
+
+    #[test]
+    fn a_repeated_space_keeps_the_selection_aligned_with_the_screen() {
+        // Screen after typing: "nfr  ,elt " (two spaces). The selection the
+        // app makes must be a suffix of exactly that text.
+        let screen = "nfr  ,elt ";
+        let mut tracker = AutoWordTracker::default();
+        let mut sample = None;
+        for character in screen.chars() {
+            let key = match character {
+                ' ' => Keycode::Space,
+                ',' => Keycode::Comma,
+                'e' => Keycode::E,
+                'f' => Keycode::F,
+                'l' => Keycode::L,
+                'n' => Keycode::N,
+                'r' => Keycode::R,
+                't' => Keycode::T,
+                _ => unreachable!(),
+            };
+            if tracker.needs_layout_check() && AutoWordTracker::can_begin(key) {
+                tracker.set_source_layout(Some(SystemLayout::English));
+            }
+            if let Some(finished) = tracker.observe(AutoKeyEvent {
+                key,
+                shifted: false,
+            }) {
+                sample = Some(finished);
+            }
+        }
+        let sample = sample.expect("the last word is tracked");
+        if let AutoDecision::Correct(correction) =
+            evaluate_with_mapping(&sample, &Config::default(), None)
+        {
+            assert!(
+                screen.ends_with(&correction.expected_source),
+                "{:?} is not the end of {screen:?}",
+                correction.expected_source
+            );
+        }
+    }
+
+    #[test]
+    fn desktop_selects_only_the_visible_suffix_the_engine_corrects() {
+        // Real source-language words typed before a wrong-layout word stay
+        // untouched: only the final word may be selected and replaced.
+        for (word, context, layout, expected_source, replacement) in [
+            (
+                "ghbdsn",
+                "ok ghbdsn ",
+                SystemLayout::English,
+                "ghbdsn ",
+                "привіт ",
+            ),
+            (
+                "hello",
+                "s hello ",
+                SystemLayout::Ukrainian,
+                "руддщ ",
+                "hello ",
+            ),
+        ] {
+            let sample = terminal_sample(word, context, layout);
+            let decision = evaluate_with_mapping(&sample, &Config::default(), None);
+            let AutoDecision::Correct(correction) = decision else {
+                panic!("expected correction for {context:?}, got {decision:?}");
+            };
+            assert_eq!(correction.expected_source, expected_source);
+            assert_eq!(correction.replacement, replacement);
+        }
+    }
+
+    #[test]
     fn mixed_layout_word_uses_exact_visible_multiword_context() {
         fn type_keys(
             tracker: &mut AutoWordTracker,
@@ -850,12 +1414,10 @@ mod tests {
         )
         .expect("mixed-layout word sample");
 
-        let core_decision =
-            upyr_core::evaluate(&mixed.inner, &correction_policy(&Config::default()), None);
-        let AutoDecision::Correct(mut correction) = core_decision else {
-            panic!("expected correction, got {core_decision:?}");
+        let decision = evaluate_with_mapping(&mixed, &Config::default(), None);
+        let AutoDecision::Correct(correction) = decision else {
+            panic!("expected correction, got {decision:?}");
         };
-        correction.expected_source = render_visible_context(&mixed.visible_runs, None);
 
         assert_eq!(correction.expected_source, "nb dvsти ");
         assert_eq!(correction.replacement, "ти вміти ");

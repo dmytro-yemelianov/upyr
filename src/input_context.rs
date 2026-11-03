@@ -8,20 +8,25 @@ pub(crate) fn active() -> InputContext {
     platform::active()
 }
 
+/// Bundle identifiers of terminals where pasting is unreliable, so automatic
+/// correction types the replacement instead, once the user opts the app in.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) const KNOWN_TERMINAL_APPS: &[&str] = &[
+    "com.apple.Terminal",
+    "com.cmuxterm.app",
+    "com.googlecode.iterm2",
+    "com.mitchellh.ghostty",
+    "com.termius-dmg.mac",
+    "dev.warp.Warp-Stable",
+    "net.kovidgoyal.kitty",
+    "org.alacritty",
+    "com.github.wez.wezterm",
+    "com.superset.desktop",
+];
+
 #[cfg(any(target_os = "macos", test))]
 fn classify(bundle_identifier: Option<&str>, localized_name: Option<&str>) -> InputContext {
-    const TERMINAL_BUNDLE_IDENTIFIERS: &[&str] = &[
-        "com.apple.Terminal",
-        "com.cmuxterm.app",
-        "com.googlecode.iterm2",
-        "com.mitchellh.ghostty",
-        "com.termius-dmg.mac",
-        "dev.warp.Warp-Stable",
-        "net.kovidgoyal.kitty",
-        "org.alacritty",
-        "com.github.wez.wezterm",
-        "com.superset.desktop",
-    ];
+    const TERMINAL_BUNDLE_IDENTIFIERS: &[&str] = KNOWN_TERMINAL_APPS;
     const TERMINAL_NAMES: &[&str] = &[
         "Terminal",
         "cmux",
