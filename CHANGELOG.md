@@ -16,11 +16,11 @@ change between minor releases while the version is below 1.0.
 
 ### Added
 
-- macOS: the layout indicator (letters, or letters and flag) appears just
-  below the caret of the text being typed, or above it at the bottom of the
-  screen, in apps that expose the caret through Accessibility; elsewhere it
-  still follows the pointer. `upyr doctor` reports what the focused app
-  exposes.
+- macOS: the layout indicator appears just below the caret of the text being
+  typed, or above it at the bottom of the screen, in apps that expose the
+  caret through Accessibility. The flag row is centred on the caret; elsewhere
+  it stays near the bottom of the screen and the letters follow the pointer.
+  `upyr doctor` reports what the focused app exposes.
 - `upyr shell-init zsh|bash|fish`: prompt widgets that convert the command
   line (Ctrl+X Ctrl+L) or the word before the cursor (Ctrl+X L; the active
   region in zsh) through `upyr convert`, preferring the installed layouts.
@@ -29,7 +29,8 @@ change between minor releases while the version is below 1.0.
   (`tools/test_shell_widgets.py`), now also in CI.
 - macOS: Backspace as the first key after an automatic correction reverts it
   (`backspace_undo`, on by default); the word comes back as typed, without
-  the space or punctuation the Backspace deleted.
+  the space or punctuation the Backspace deleted. This works in the
+  `terminal_typing_apps` too.
 - macOS: Upyr learns from your own fixes (`auto_correct_learning`, on by
   default). A correction you revert twice becomes an exception for that
   word; a word you convert by hand twice becomes a `correct` rule. A revert

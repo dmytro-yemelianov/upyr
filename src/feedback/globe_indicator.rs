@@ -80,38 +80,61 @@ pub(super) fn show(active: Option<&str>, previous: Option<&str>, config: &Config
     let Some(target) = items.iter().position(|item| item.id == active) else {
         return false;
     };
-    let pointer = NSEvent::mouseLocation();
-    let screens = NSScreen::screens(mtm);
-    let screen = screens
-        .to_vec()
-        .into_iter()
-        .find(|screen| {
-            let frame = screen.frame();
-            pointer.x >= frame.origin.x
-                && pointer.y >= frame.origin.y
-                && pointer.x < frame.origin.x + frame.size.width
-                && pointer.y < frame.origin.y + frame.size.height
-        })
-        .or_else(|| NSScreen::mainScreen(mtm));
-    let Some(screen) = screen else { return false };
+    let width = SLOT * (2 * items.len() - 1) as f64;
+    // The row is centred under the caret when the app exposes it, and near
+    // the bottom of the pointer's screen otherwise.
+    let caret = super::platform::CaretOnScreen::find(mtm);
+    let screen = match &caret {
+        Some(caret) => caret.screen.clone(),
+        None => {
+            let pointer = NSEvent::mouseLocation();
+            let screen = NSScreen::screens(mtm)
+                .to_vec()
+                .into_iter()
+                .find(|screen| {
+                    let frame = screen.frame();
+                    pointer.x >= frame.origin.x
+                        && pointer.y >= frame.origin.y
+                        && pointer.x < frame.origin.x + frame.size.width
+                        && pointer.y < frame.origin.y + frame.size.height
+                })
+                .or_else(|| NSScreen::mainScreen(mtm));
+            let Some(screen) = screen else { return false };
+            screen
+        }
+    };
     INDICATOR.with_borrow_mut(|stored| {
         let indicator = stored.get_or_insert_with(|| Indicator::new(mtm));
         let was_showing = indicator.panel.isVisible();
-        let width = SLOT * (2 * items.len() - 1) as f64;
-        let visible = screen.visibleFrame();
-        indicator.panel.setFrame_display(
-            NSRect::new(
-                NSPoint::new(
-                    visible.origin.x + (visible.size.width - width) / 2.0,
-                    visible.origin.y + visible.size.height * 0.16,
-                ),
-                NSSize::new(width, HEIGHT),
-            ),
-            false,
-        );
         if indicator.items != items || indicator.backing_scale != screen.backingScaleFactor() {
             indicator.rebuild(items, screen.backingScaleFactor());
         }
+        let origin = match &caret {
+            Some(caret) => {
+                // Flags are drawn across the middle of the row.
+                let drawn = indicator
+                    .layers
+                    .iter()
+                    .map(|layer| layer.bounds().size.height)
+                    .fold(0.0, f64::max);
+                caret.origin(crate::caret::Panel {
+                    width,
+                    height: HEIGHT,
+                    margin: ((HEIGHT - drawn) / 2.0).max(0.0),
+                    centred: true,
+                })
+            }
+            None => {
+                let visible = screen.visibleFrame();
+                NSPoint::new(
+                    visible.origin.x + (visible.size.width - width) / 2.0,
+                    visible.origin.y + visible.size.height * 0.16,
+                )
+            }
+        };
+        indicator
+            .panel
+            .setFrame_display(NSRect::new(origin, NSSize::new(width, HEIGHT)), false);
         if !was_showing {
             let previous = previous.or(indicator.active.as_deref());
             let start = previous

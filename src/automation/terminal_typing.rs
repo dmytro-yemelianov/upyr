@@ -88,7 +88,8 @@ pub(super) fn plan_with_mapping<'a>(
     })
 }
 
-/// Undo only an edit which the forward terminal planner could have produced.
+/// Undo only an edit which the forward terminal planner could have produced,
+/// or that edit after Backspace deleted the space which ended the word.
 pub(super) fn plan_undo<'a>(expected: &str, original: &'a str) -> Option<Plan<'a>> {
     plan_undo_with_mapping(expected, original, None)
 }
@@ -98,7 +99,13 @@ pub(super) fn plan_undo_with_mapping<'a>(
     original: &'a str,
     mapping: Option<&[(char, char)]>,
 ) -> Option<Plan<'a>> {
-    plan_with_mapping(original, expected, mapping)?;
+    let forward =
+        |original: &str, expected: &str| plan_with_mapping(original, expected, mapping).is_some();
+    if !forward(original, expected)
+        && (expected.ends_with(' ') || !forward(&format!("{original} "), &format!("{expected} ")))
+    {
+        return None;
+    }
     Some(Plan {
         backspaces: expected.chars().count(),
         replacement: original,
@@ -425,6 +432,23 @@ mod tests {
             ("/c", ".с\x1b"),
         ] {
             assert!(plan_undo(corrected, original).is_none());
+        }
+    }
+
+    #[test]
+    fn undo_after_backspace_deleted_the_space_retypes_the_word_without_it() {
+        for (corrected, original) in [
+            ("hello", "руддщ"),
+            ("привіт,", "ghbdsn,"),
+            ("добре", "lj,ht"),
+        ] {
+            let plan = plan_undo(corrected, original).unwrap();
+            assert_eq!(plan.backspaces, corrected.chars().count());
+            assert_eq!(plan.replacement, original);
+        }
+        // Still only an edit the forward planner could have made.
+        for (corrected, original) in [("word", "bad\n"), ("word", "two words"), ("word", "")] {
+            assert!(plan_undo(corrected, original).is_none(), "{original:?}");
         }
     }
 
