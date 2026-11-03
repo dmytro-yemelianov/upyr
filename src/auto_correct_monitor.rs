@@ -210,12 +210,14 @@ impl CaptureState {
                 None
             }
             EventType::KeyPress(Key::ControlLeft) => {
+                // A modifier alone edits nothing; its shortcut key decides.
                 self.left_control = true;
-                Some(reset_event(Keycode::LControl))
+                None
             }
             EventType::KeyPress(Key::ControlRight) => {
+                // A modifier alone edits nothing; its shortcut key decides.
                 self.right_control = true;
-                Some(reset_event(Keycode::RControl))
+                None
             }
             EventType::KeyRelease(Key::ControlLeft) => {
                 self.left_control = false;
@@ -226,12 +228,14 @@ impl CaptureState {
                 None
             }
             EventType::KeyPress(Key::Alt) => {
+                // A modifier alone edits nothing; its shortcut key decides.
                 self.left_option = true;
-                Some(reset_event(Keycode::LAlt))
+                None
             }
             EventType::KeyPress(Key::AltGr) => {
+                // A modifier alone edits nothing; its shortcut key decides.
                 self.right_option = true;
-                Some(reset_event(Keycode::RAlt))
+                None
             }
             EventType::KeyRelease(Key::Alt) => {
                 self.left_option = false;
@@ -242,12 +246,14 @@ impl CaptureState {
                 None
             }
             EventType::KeyPress(Key::MetaLeft) => {
+                // A modifier alone edits nothing; its shortcut key decides.
                 self.left_meta = true;
-                Some(reset_event(Keycode::LMeta))
+                None
             }
             EventType::KeyPress(Key::MetaRight) => {
+                // A modifier alone edits nothing; its shortcut key decides.
                 self.right_meta = true;
-                Some(reset_event(Keycode::RMeta))
+                None
             }
             EventType::KeyRelease(Key::MetaLeft) => {
                 self.left_meta = false;
@@ -292,7 +298,13 @@ impl CaptureState {
         if self.chord_modifier_active() {
             self.shift_release_pending = false;
             self.clear_snapshot_missing_chords();
-            return None;
+            // Modifier+Space switches input sources (Ctrl+Space, Cmd+Space,
+            // Win+Space): the word goes on in the new layout. Any other
+            // shortcut may edit text or move the caret, so the word ends.
+            if key == Key::Space {
+                return None;
+            }
+            return Some(reset_event(Keycode::Escape));
         }
 
         let shifted = self.left_shift
@@ -1316,6 +1328,44 @@ mod tests {
     }
 
     #[test]
+    fn a_layout_switch_chord_keeps_the_word_being_typed() {
+        // Ctrl+Space, Ctrl+Option+Space, Cmd+Space or Win+Space switch input
+        // sources: the word continues in the new layout and can be repaired.
+        for modifiers in [
+            &[Key::ControlLeft][..],
+            &[Key::ControlLeft, Key::Alt][..],
+            &[Key::MetaLeft][..],
+        ] {
+            let mut state = CaptureState::default();
+            assert_eq!(
+                state.observe(EventType::KeyPress(Key::KeyG), Some("g")),
+                Some(AutoKeyEvent {
+                    key: Keycode::G,
+                    shifted: false,
+                })
+            );
+            for modifier in modifiers {
+                assert_eq!(state.observe(EventType::KeyPress(*modifier), None), None);
+            }
+            assert_eq!(
+                state.observe(EventType::KeyPress(Key::Space), None),
+                None,
+                "{modifiers:?}+Space must not end the word"
+            );
+            for modifier in modifiers {
+                state.observe(EventType::KeyRelease(*modifier), None);
+            }
+            assert_eq!(
+                state.observe(EventType::KeyPress(Key::KeyH), Some("р")),
+                Some(AutoKeyEvent {
+                    key: Keycode::H,
+                    shifted: false,
+                })
+            );
+        }
+    }
+
+    #[test]
     fn command_chord_resets_suppresses_and_then_recovers() {
         let mut state = CaptureState::default();
 
@@ -1326,13 +1376,14 @@ mod tests {
                 shifted: false,
             })
         );
+        // The modifier alone changes nothing; the shortcut key ends the word.
         assert_eq!(
             state.observe(EventType::KeyPress(Key::MetaLeft), None),
-            Some(reset_event(Keycode::LMeta))
+            None
         );
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyC), Some("c")),
-            None
+            Some(reset_event(Keycode::Escape))
         );
         assert_eq!(
             state.observe(EventType::KeyRelease(Key::MetaLeft), None),
@@ -1353,16 +1404,13 @@ mod tests {
 
         assert_eq!(
             state.observe(EventType::KeyPress(Key::ControlLeft), None),
-            Some(reset_event(Keycode::LControl))
+            None
         );
-        assert_eq!(
-            state.observe(EventType::KeyPress(Key::Alt), None),
-            Some(reset_event(Keycode::LAlt))
-        );
+        assert_eq!(state.observe(EventType::KeyPress(Key::Alt), None), None);
         state.observe(EventType::KeyRelease(Key::ControlLeft), None);
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
-            None
+            Some(reset_event(Keycode::Escape))
         );
         state.observe(EventType::KeyRelease(Key::Alt), None);
         assert_eq!(
@@ -1484,12 +1532,12 @@ mod tests {
 
         assert_eq!(
             state.observe(EventType::KeyPress(Key::MetaLeft), None),
-            Some(reset_event(Keycode::LMeta))
+            None
         );
         state.synchronize_momentary_modifiers(&[], Some("c"));
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyC), Some("c")),
-            None
+            Some(reset_event(Keycode::Escape))
         );
         assert!(!state.chord_modifier_active());
         assert_eq!(

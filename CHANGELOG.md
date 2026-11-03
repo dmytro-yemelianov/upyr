@@ -98,6 +98,10 @@ change between minor releases while the version is below 1.0.
 - Saving Settings no longer reverts changes made elsewhere while the window
   was open (CLI, `upyr globe`, the configuration file): the window's edits are
   merged onto the file as it is now, and only the fields it changed win.
+- Switching layouts with Ctrl+Space, Ctrl+Option+Space, Cmd+Space or Win+Space
+  in the middle of a word no longer drops the word: `g`, switch, `hbdsn` is
+  repaired to `привіт`. A bare modifier no longer ends the word either; a
+  shortcut key (Cmd+A, Ctrl+K, …) does, as it may edit text or move the caret.
 
 ### Planned
 
