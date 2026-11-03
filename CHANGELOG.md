@@ -73,6 +73,10 @@ change between minor releases while the version is below 1.0.
   there until the corrected word is pasted, then follows it, so a chat message
   is sent corrected instead of corrected after it has gone. Words that need no
   correction never delay Enter. Terminal-typing apps are unchanged.
+- "Correct words in terminals" in Settings → Automatic (macOS). Automatic
+  correction stayed silently off in Terminal, iTerm2, Ghostty, kitty, Warp,
+  Alacritty, WezTerm, Termius and cmux unless their bundle IDs were added to
+  the configuration file by hand; the checkbox now opts them in and out.
 
 ### Planned
 

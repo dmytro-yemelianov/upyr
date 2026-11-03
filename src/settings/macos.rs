@@ -77,6 +77,7 @@ struct Controls {
     repair_autostart: Retained<NSButton>,
     remove_autostart: Retained<NSButton>,
     auto_correct: Retained<NSButton>,
+    terminal_correction: Retained<NSButton>,
     slash_commands: Retained<NSButton>,
     sensitivity: Retained<NSPopUpButton>,
     minimum_word_length: Retained<NSTextField>,
@@ -830,8 +831,15 @@ impl NativeController {
             remove_autostart,
         ) = make_general_page(self, mtm);
         add_tab(&tabs, "General", &general, mtm);
-        let (automatic, auto_correct, sensitivity, minimum_word_length, auto_delay, slash_commands) =
-            make_automatic_page(mtm);
+        let AutomaticControls {
+            page: automatic,
+            enabled: auto_correct,
+            sensitivity,
+            minimum: minimum_word_length,
+            delay: auto_delay,
+            terminal_correction,
+            slash_commands,
+        } = make_automatic_page(mtm);
         add_tab(&tabs, "Automatic", &automatic, mtm);
         let ExceptionsControls {
             page: exceptions_page,
@@ -915,6 +923,7 @@ impl NativeController {
                 repair_autostart,
                 remove_autostart,
                 auto_correct,
+                terminal_correction,
                 slash_commands,
                 sensitivity,
                 minimum_word_length,
@@ -986,6 +995,7 @@ impl NativeController {
             .apply_to(&mut config.globe_switch.layout_flags);
         config.restore_clipboard = is_checked(&controls.restore_clipboard);
         config.auto_correct = is_checked(&controls.auto_correct);
+        set_terminal_correction(&mut config, is_checked(&controls.terminal_correction));
         set_superset_slash_commands(&mut config, is_checked(&controls.slash_commands));
         config.auto_correct_sensitivity = match controls.sensitivity.indexOfSelectedItem() {
             1 => AutoCorrectSensitivity::Balanced,
@@ -1053,6 +1063,10 @@ impl NativeController {
         set_checked(&controls.globe_switch, config.globe_switch.enabled);
         set_checked(&controls.restore_clipboard, config.restore_clipboard);
         set_checked(&controls.auto_correct, config.auto_correct);
+        set_checked(
+            &controls.terminal_correction,
+            terminal_correction_enabled(config),
+        );
         set_checked(
             &controls.slash_commands,
             superset_slash_commands_enabled(config),
@@ -1530,16 +1544,7 @@ fn make_general_page(
 }
 
 #[allow(clippy::type_complexity)]
-fn make_automatic_page(
-    mtm: MainThreadMarker,
-) -> (
-    Retained<NSView>,
-    Retained<NSButton>,
-    Retained<NSPopUpButton>,
-    Retained<NSTextField>,
-    Retained<NSTextField>,
-    Retained<NSButton>,
-) {
+fn make_automatic_page(mtm: MainThreadMarker) -> AutomaticControls {
     let page = page(mtm);
     page_header(
         &page,
@@ -1573,16 +1578,43 @@ fn make_automatic_page(
     ));
     page.addSubview(&label(
         "macOS Accessibility access is checked before input monitoring starts.",
-        rect(28.0, 96.0, 590.0, 24.0),
+        rect(28.0, 60.0, 590.0, 24.0),
         mtm,
     ));
-    let slash_commands = checkbox(
-        "Correct freshly typed /commands in Superset",
+    let terminal_correction = checkbox(
+        "Correct words in terminals (Terminal, iTerm2, Ghostty, kitty, Warp…)",
         rect(24.0, 124.0, 610.0, 26.0),
         mtm,
     );
+    terminal_correction.setToolTip(Some(&NSString::from_str(
+        "Terminals do not paste reliably, so Upyr deletes the word with Backspace and types the replacement, holding your next keys until it is done.",
+    )));
+    page.addSubview(&terminal_correction);
+    let slash_commands = checkbox(
+        "Correct freshly typed /commands in Superset",
+        rect(24.0, 92.0, 610.0, 26.0),
+        mtm,
+    );
     page.addSubview(&slash_commands);
-    (page, enabled, sensitivity, minimum, delay, slash_commands)
+    AutomaticControls {
+        page,
+        enabled,
+        sensitivity,
+        minimum,
+        delay,
+        terminal_correction,
+        slash_commands,
+    }
+}
+
+struct AutomaticControls {
+    page: Retained<NSView>,
+    enabled: Retained<NSButton>,
+    sensitivity: Retained<NSPopUpButton>,
+    minimum: Retained<NSTextField>,
+    delay: Retained<NSTextField>,
+    terminal_correction: Retained<NSButton>,
+    slash_commands: Retained<NSButton>,
 }
 
 fn make_exceptions_page(
@@ -2245,6 +2277,45 @@ fn mac_modifiers(flags: NSEventModifierFlags) -> Modifiers {
 
 const SUPERSET_APP_ID: &str = "com.superset.desktop";
 
+/// Known terminals other than Superset, whose own checkbox manages it.
+fn known_terminals() -> impl Iterator<Item = &'static str> {
+    crate::input_context::KNOWN_TERMINAL_APPS
+        .iter()
+        .copied()
+        .filter(|app| *app != SUPERSET_APP_ID)
+}
+
+/// True when the "Correct words in terminals" checkbox should appear checked.
+fn terminal_correction_enabled(config: &Config) -> bool {
+    known_terminals().any(|terminal| {
+        config
+            .terminal_typing_apps
+            .iter()
+            .any(|app| app == terminal)
+    })
+}
+
+/// Applies the "Correct words in terminals" checkbox: checking opts every
+/// known terminal in; unchecking a previously checked box removes them again.
+/// Superset and hand-written entries are left to their own controls.
+fn set_terminal_correction(config: &mut Config, enabled: bool) {
+    if enabled {
+        for terminal in known_terminals() {
+            if !config
+                .terminal_typing_apps
+                .iter()
+                .any(|app| app == terminal)
+            {
+                config.terminal_typing_apps.push(terminal.to_owned());
+            }
+        }
+    } else if terminal_correction_enabled(config) {
+        config
+            .terminal_typing_apps
+            .retain(|app| !known_terminals().any(|terminal| terminal == app));
+    }
+}
+
 /// True when the "Slash commands in Superset" checkbox should appear checked.
 fn superset_slash_commands_enabled(config: &Config) -> bool {
     config
@@ -2301,6 +2372,40 @@ mod tests {
             terminal_typing_apps: terminal.iter().map(|app| (*app).to_owned()).collect(),
             ..Config::default()
         }
+    }
+
+    #[test]
+    fn terminal_correction_opts_every_known_terminal_in_and_out() {
+        let mut config = app_lists(&[SUPERSET_APP_ID], &[SUPERSET_APP_ID, "com.example.repl"]);
+        assert!(!terminal_correction_enabled(&config));
+
+        set_terminal_correction(&mut config, true);
+        set_terminal_correction(&mut config, true);
+        assert!(terminal_correction_enabled(&config));
+        for terminal in [
+            "com.apple.Terminal",
+            "com.googlecode.iterm2",
+            "com.mitchellh.ghostty",
+        ] {
+            assert_eq!(
+                config
+                    .terminal_typing_apps
+                    .iter()
+                    .filter(|app| *app == terminal)
+                    .count(),
+                1,
+                "{terminal}"
+            );
+        }
+
+        // Unchecking removes the known terminals only: Superset belongs to its
+        // own checkbox and hand-written entries stay.
+        set_terminal_correction(&mut config, false);
+        assert!(!terminal_correction_enabled(&config));
+        assert_eq!(
+            config.terminal_typing_apps,
+            [SUPERSET_APP_ID, "com.example.repl"]
+        );
     }
 
     #[test]

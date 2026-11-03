@@ -522,6 +522,12 @@ const SEARCH_PARAMETERS: &[SearchParameter] = &[
     #[cfg(target_os = "macos")]
     SearchParameter {
         tab: SettingsTab::Automatic,
+        label: "Correct words in terminals",
+        terms: "terminal iterm ghostty kitty warp alacritty wezterm termius shell typing backspace",
+    },
+    #[cfg(target_os = "macos")]
+    SearchParameter {
+        tab: SettingsTab::Automatic,
         label: "Slash commands in Superset",
         terms: "slash command prefix terminal cli tui",
     },
@@ -1749,6 +1755,7 @@ mod tests {
 
         for label in [
             "Globe key switching",
+            "Correct words in terminals",
             "Slash commands in Superset",
             "Undo auto-correction",
             "All country flags",

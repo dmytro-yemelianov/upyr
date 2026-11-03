@@ -280,7 +280,11 @@ delivery of a prepared edit, text keys retain their order after the replacement.
 Paste, history edits, multiword
 rewrites and editor modes that reinterpret letter keys are outside this
 backend; it tracks input events rather than reading the terminal's real buffer.
-Other terminal applications remain disabled unless explicitly listed.
+Other terminal applications remain disabled until you opt in: Settings →
+Automatic → "Correct words in terminals" adds Terminal, iTerm2, Ghostty,
+kitty, Warp, Alacritty, WezTerm, Termius and cmux to `terminal_typing_apps`
+(and unchecking it removes them again); any other app can be listed by bundle
+identifier in the configuration file.
 
 For an opt-in live regression run on macOS, select this workspace in Superset,
 leave its window visible, then run:
