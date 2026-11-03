@@ -639,6 +639,8 @@ const SEARCH_PARAMETERS: &[SearchParameter] = &[
 #[cfg(not(target_os = "macos"))]
 struct SettingsApp {
     config: Config,
+    /// The configuration as loaded or last saved, the base of a save's merge.
+    loaded: Config,
     new_exception: String,
     launch_at_login: bool,
     autostart_status: autostart::AutostartStatus,
@@ -662,6 +664,7 @@ impl SettingsApp {
     ) -> Self {
         let launch_at_login = autostart_status.enabled;
         Self {
+            loaded: config.clone(),
             config,
             new_exception: String::new(),
             launch_at_login,
@@ -707,10 +710,14 @@ impl SettingsApp {
         // "two words" saves as two exceptions instead of failing validation.
         self.config.auto_correct_exceptions =
             normalize_exceptions(&self.config.auto_correct_exceptions);
-        if let Err(error) = self.config.write(true) {
+        // Keep changes made elsewhere while this window was open.
+        let config = Config::for_settings_save(&self.loaded, self.config.clone());
+        if let Err(error) = config.write(true) {
             self.status = Some((false, format!("Could not save settings: {error:#}")));
             return;
         }
+        self.loaded = config.clone();
+        self.config = config;
 
         match sync_launch_at_login(self.launch_at_login) {
             Ok(status) => {

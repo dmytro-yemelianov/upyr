@@ -297,6 +297,61 @@ impl Config {
         Ok(config)
     }
 
+    /// Three-way merge for a Settings save. `base` is what the window loaded,
+    /// `edited` what it would write, `current` the file as it is now. Fields
+    /// the window changed take its value; every other field keeps its current
+    /// on-disk value, so changes made while Settings was open (the CLI,
+    /// `upyr globe`, a hand edit) survive the save. Lists merge as a whole.
+    pub fn merge_edits(base: &Self, edited: &Self, current: &Self) -> Result<Self> {
+        fn merge(base: &toml::Value, edited: &toml::Value, current: &toml::Value) -> toml::Value {
+            match (base, edited, current) {
+                (
+                    toml::Value::Table(base),
+                    toml::Value::Table(edited),
+                    toml::Value::Table(current),
+                ) => {
+                    let mut merged = current.clone();
+                    for (key, edited_value) in edited {
+                        match (base.get(key), current.get(key)) {
+                            (Some(base_value), Some(current_value)) => {
+                                merged.insert(
+                                    key.clone(),
+                                    merge(base_value, edited_value, current_value),
+                                );
+                            }
+                            (Some(base_value), None) if base_value == edited_value => {}
+                            _ => {
+                                merged.insert(key.clone(), edited_value.clone());
+                            }
+                        }
+                    }
+                    // A key the window dropped (an emptied, unserialized list).
+                    for key in base.keys().filter(|key| !edited.contains_key(*key)) {
+                        merged.remove(key);
+                    }
+                    toml::Value::Table(merged)
+                }
+                _ if edited != base => edited.clone(),
+                _ => current.clone(),
+            }
+        }
+        let value = |config: &Self| {
+            toml::Value::try_from(config).context("could not represent the configuration")
+        };
+        merge(&value(base)?, &value(edited)?, &value(current)?)
+            .try_into()
+            .context("could not merge the configuration")
+    }
+
+    /// What a Settings window writes: its edits merged onto the file as it is
+    /// now. An unreadable file is replaced, so Settings can still repair it.
+    pub fn for_settings_save(base: &Self, edited: Self) -> Self {
+        match Self::load() {
+            Ok(current) => Self::merge_edits(base, &edited, &current).unwrap_or(edited),
+            Err(_) => edited,
+        }
+    }
+
     pub fn write(&self, overwrite: bool) -> Result<PathBuf> {
         self.validate()?;
         let path = config_path()?;
@@ -1042,6 +1097,52 @@ mod tests {
         let error = config.validate().unwrap_err().to_string();
 
         assert!(error.contains("resolve to the same shortcut"));
+    }
+
+    #[test]
+    fn settings_saves_keep_changes_made_elsewhere_while_the_window_was_open() {
+        let base = Config::default();
+        // In the window: automatic correction turned on.
+        let edited = Config {
+            auto_correct: true,
+            ..base.clone()
+        };
+        // Meanwhile, outside it: a terminal app, a rule and a Globe setting.
+        let mut current = base.clone();
+        current.terminal_typing_apps = vec!["com.example.terminal".to_owned()];
+        current.auto_correct_rules = vec!["ghbdsn keep".to_owned()];
+        current.globe_switch.tap_window_ms = 900;
+
+        let merged = Config::merge_edits(&base, &edited, &current).unwrap();
+        assert!(merged.auto_correct);
+        assert_eq!(merged.terminal_typing_apps, ["com.example.terminal"]);
+        assert_eq!(merged.auto_correct_rules, ["ghbdsn keep"]);
+        assert_eq!(merged.globe_switch.tap_window_ms, 900);
+    }
+
+    #[test]
+    fn settings_saves_win_for_fields_the_window_changed() {
+        let base = Config::default();
+        let edited = Config {
+            hotkey: "Ctrl+Alt+J".to_owned(),
+            auto_correct_exceptions: vec!["GitHub".to_owned()],
+            ..base.clone()
+        };
+        let current = Config {
+            hotkey: "Ctrl+Alt+K".to_owned(),
+            auto_correct_exceptions: vec!["Codex".to_owned()],
+            ..base.clone()
+        };
+        let merged = Config::merge_edits(&base, &edited, &current).unwrap();
+        assert_eq!(merged.hotkey, "Ctrl+Alt+J");
+        assert_eq!(merged.auto_correct_exceptions, ["GitHub"]);
+        // Clearing a list in the window clears it on disk too.
+        let base_with_rules = Config {
+            auto_correct_rules: vec!["zzz correct".to_owned()],
+            ..base.clone()
+        };
+        let merged = Config::merge_edits(&base_with_rules, &base, &base_with_rules).unwrap();
+        assert!(merged.auto_correct_rules.is_empty());
     }
 
     #[test]

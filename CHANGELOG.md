@@ -95,6 +95,9 @@ change between minor releases while the version is below 1.0.
   layout table included the Option layers, so converting a selection turned
   `«`, `»`, `…` and `’` into `±`, `Ú` and `∏`; it now holds only the plain and
   Shift layers the tracker reads (75 pairs on ABC + Ukrainian).
+- Saving Settings no longer reverts changes made elsewhere while the window
+  was open (CLI, `upyr globe`, the configuration file): the window's edits are
+  merged onto the file as it is now, and only the fields it changed win.
 
 ### Planned
 

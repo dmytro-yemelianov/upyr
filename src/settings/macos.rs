@@ -181,13 +181,15 @@ define_class!(
     impl NativeController {
         #[unsafe(method(saveSettings:))]
         fn save_settings(&self, _sender: &AnyObject) {
-            let config = match self.collect_config() {
+            let edited = match self.collect_config() {
                 Ok(config) => config,
                 Err(error) => {
                     self.set_status(false, &format!("Could not save settings: {error:#}"));
                     return;
                 }
             };
+            // Keep changes made elsewhere while this window was open.
+            let config = Config::for_settings_save(&self.ivars().config.borrow(), edited);
             if let Err(error) = config.write(true) {
                 self.set_status(false, &format!("Could not save settings: {error:#}"));
                 return;
