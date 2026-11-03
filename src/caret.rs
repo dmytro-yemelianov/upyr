@@ -15,35 +15,56 @@ pub struct Rect {
 
 /// Gap between the caret line and what the panel draws.
 const GAP: f64 = 6.0;
+/// Gap between the caret and what a superscript panel draws.
+const SIDE_GAP: f64 = 3.0;
+
+/// Where a panel goes next to the caret.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    /// Just below the caret line, starting at the caret; above the line
+    /// when the screen has no room below.
+    Below,
+    /// Like a superscript: just after the caret, its bottom at the middle of
+    /// the caret line, so it covers neither the text before the caret nor
+    /// the next line; below the line when the screen has no room above.
+    Superscript,
+}
 
 /// A panel shown next to the caret.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Panel {
     pub width: f64,
     pub height: f64,
+    /// Transparent space left and right of what the panel draws.
+    pub margin_x: f64,
     /// Transparent space above and below what the panel draws.
-    pub margin: f64,
-    /// Centred on the caret rather than starting at it.
-    pub centred: bool,
+    pub margin_y: f64,
+    pub place: Place,
 }
 
-/// Cocoa origin for `panel` next to `caret` (Quartz coordinates): just below
-/// the caret line, or above it when the screen's `visible` frame (Cocoa) has
-/// no room below. `main_height` is the height of the main display, which
-/// both coordinate systems share.
+/// Cocoa origin for `panel` next to `caret` (Quartz coordinates), kept on
+/// the screen's `visible` frame (Cocoa). `main_height` is the height of the
+/// main display, which both coordinate systems share.
 pub fn panel_origin(caret: Rect, main_height: f64, panel: Panel, visible: Rect) -> (f64, f64) {
     let caret_top = main_height - caret.y;
     let caret_bottom = caret_top - caret.height;
-    let below = caret_bottom - GAP - panel.height + panel.margin;
-    let y = if below + panel.margin >= visible.y {
-        below
-    } else {
-        caret_top + GAP - panel.margin
-    };
-    let x = if panel.centred {
-        caret.x - panel.width / 2.0
-    } else {
-        caret.x
+    let drawn_height = panel.height - 2.0 * panel.margin_y;
+    // Origins that put what the panel draws just below or just above the line.
+    let below = caret_bottom - GAP - panel.height + panel.margin_y;
+    let above = caret_top + GAP - panel.margin_y;
+    let (x, y) = match panel.place {
+        Place::Below => {
+            let fits = below + panel.margin_y >= visible.y;
+            (caret.x, if fits { below } else { above })
+        }
+        Place::Superscript => {
+            let bottom = caret_bottom + caret.height / 2.0;
+            let fits = bottom + drawn_height <= visible.y + visible.height;
+            (
+                caret.x + caret.width + SIDE_GAP - panel.margin_x,
+                if fits { bottom - panel.margin_y } else { below },
+            )
+        }
     };
     let right_edge = visible.x + visible.width - panel.width;
     (x.min(right_edge).max(visible.x), y)
@@ -222,26 +243,37 @@ mod tests {
         height: 875.0,
     };
 
-    /// The pointer-style label: drawn edge to edge, starting at the caret.
+    /// The letters label: drawn edge to edge, below the caret.
     const LABEL: Panel = Panel {
         width: 94.0,
         height: 42.0,
-        margin: 0.0,
-        centred: false,
+        margin_x: 0.0,
+        margin_y: 0.0,
+        place: Place::Below,
+    };
+
+    /// One small flag, 33 × 21, in a 39 × 50 panel.
+    const FLAG: Panel = Panel {
+        width: 39.0,
+        height: 50.0,
+        margin_x: 3.0,
+        margin_y: 14.5,
+        place: Place::Superscript,
+    };
+
+    const CARET: Rect = Rect {
+        x: 700.0,
+        y: 300.0,
+        width: 1.0,
+        height: 18.0,
     };
 
     #[test]
     fn the_panel_sits_just_below_the_caret_line() {
         // A caret 300 points from the top of a 900-point display.
-        let caret = Rect {
-            x: 200.0,
-            y: 300.0,
-            width: 1.0,
-            height: 18.0,
-        };
         assert_eq!(
-            panel_origin(caret, 900.0, LABEL, SCREEN),
-            (200.0, 900.0 - 318.0 - GAP - 42.0)
+            panel_origin(CARET, 900.0, LABEL, SCREEN),
+            (700.0, 900.0 - 318.0 - GAP - 42.0)
         );
     }
 
@@ -259,31 +291,25 @@ mod tests {
     }
 
     #[test]
-    fn a_centred_panel_keeps_what_it_draws_next_to_the_caret() {
-        // The flag row: transparent above and below its flags.
-        let row = Panel {
-            width: 234.0,
-            height: 100.0,
-            margin: 29.0,
-            centred: true,
-        };
-        let caret = Rect {
-            x: 700.0,
-            y: 300.0,
-            width: 1.0,
-            height: 18.0,
-        };
+    fn a_superscript_flag_starts_after_the_caret_raised_off_the_line() {
+        // The caret line spans 582..600; the flag is drawn from just after
+        // the caret, with its bottom at the middle of the line.
         assert_eq!(
-            panel_origin(caret, 900.0, row, SCREEN),
-            (700.0 - 117.0, 900.0 - 318.0 - GAP - 100.0 + 29.0)
+            panel_origin(CARET, 900.0, FLAG, SCREEN),
+            (701.0 + SIDE_GAP - 3.0, 591.0 - 14.5)
         );
-        let low = Rect { y: 880.0, ..caret };
+    }
+
+    #[test]
+    fn a_superscript_flag_drops_below_the_line_at_the_top_and_stays_on_screen() {
+        // The line spans 852..870, and the flag would end above 875.
+        let top = Rect { y: 30.0, ..CARET };
         assert_eq!(
-            panel_origin(low, 900.0, row, SCREEN).1,
-            900.0 - 880.0 + GAP - 29.0
+            panel_origin(top, 900.0, FLAG, SCREEN).1,
+            852.0 - GAP - 50.0 + 14.5
         );
-        let left = Rect { x: 20.0, ..caret };
-        assert_eq!(panel_origin(left, 900.0, row, SCREEN).0, 0.0);
+        let right = Rect { x: 1430.0, ..CARET };
+        assert_eq!(panel_origin(right, 900.0, FLAG, SCREEN).0, 1440.0 - 39.0);
     }
 
     #[test]

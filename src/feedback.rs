@@ -261,8 +261,9 @@ mod platform {
     const LABEL: crate::caret::Panel = crate::caret::Panel {
         width: INDICATOR_WIDTH,
         height: INDICATOR_HEIGHT,
-        margin: 0.0,
-        centred: false,
+        margin_x: 0.0,
+        margin_y: 0.0,
+        place: crate::caret::Place::Below,
     };
 
     pub fn hide_indicator() {

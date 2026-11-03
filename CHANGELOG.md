@@ -16,11 +16,14 @@ change between minor releases while the version is below 1.0.
 
 ### Added
 
-- macOS: the layout indicator appears just below the caret of the text being
-  typed, or above it at the bottom of the screen, in apps that expose the
-  caret through Accessibility. The flag row is centred on the caret; elsewhere
-  it stays near the bottom of the screen and the letters follow the pointer.
-  `upyr doctor` reports what the focused app exposes.
+- macOS: the layout indicator appears next to the caret of the text being
+  typed, in apps that expose the caret through Accessibility. The letters sit
+  just below the caret line. The flag shrinks to the active layout's flag at
+  half size, just after the caret and raised off the line like a superscript,
+  so it covers neither the text before the caret nor the next line.
+  Elsewhere the whole flag row stays near the bottom of the screen and the
+  letters follow the pointer. `upyr doctor` reports what the focused app
+  exposes.
 - `upyr shell-init zsh|bash|fish`: prompt widgets that convert the command
   line (Ctrl+X Ctrl+L) or the word before the cursor (Ctrl+X L; the active
   region in zsh) through `upyr convert`, preferring the installed layouts.
