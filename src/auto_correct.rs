@@ -75,7 +75,16 @@ impl AutoWordTracker {
             return None;
         };
         match key {
-            upyr_core::PhysicalKey::Space => return self.finish_word(),
+            upyr_core::PhysicalKey::Space => {
+                if self.current_word_start.is_none() {
+                    // A repeated space is not represented in the tracked
+                    // context; keeping the older words would select text that
+                    // no longer matches the screen.
+                    self.clear_context();
+                    return None;
+                }
+                return self.finish_word();
+            }
             upyr_core::PhysicalKey::Backspace => {
                 self.backspace();
                 return None;
@@ -481,6 +490,17 @@ pub(crate) fn physical_key(key: Keycode) -> Option<upyr_core::PhysicalKey> {
         Keycode::Comma => PhysicalKey::Comma,
         Keycode::Dot => PhysicalKey::Period,
         Keycode::Slash => PhysicalKey::Slash,
+        Keycode::Key1 => PhysicalKey::Digit1,
+        Keycode::Key2 => PhysicalKey::Digit2,
+        Keycode::Key3 => PhysicalKey::Digit3,
+        Keycode::Key4 => PhysicalKey::Digit4,
+        Keycode::Key5 => PhysicalKey::Digit5,
+        Keycode::Key6 => PhysicalKey::Digit6,
+        Keycode::Key7 => PhysicalKey::Digit7,
+        Keycode::Key8 => PhysicalKey::Digit8,
+        Keycode::Key9 => PhysicalKey::Digit9,
+        Keycode::Key0 => PhysicalKey::Digit0,
+        Keycode::Minus => PhysicalKey::Minus,
         Keycode::Space => PhysicalKey::Space,
         Keycode::Backspace => PhysicalKey::Backspace,
         Keycode::LShift | Keycode::RShift => PhysicalKey::Shift,
@@ -799,6 +819,134 @@ mod tests {
             };
             assert_eq!(correction.expected_source, expected_source);
             assert_eq!(correction.replacement, expected_replacement);
+        }
+    }
+
+    #[test]
+    fn typed_number_row_punctuation_and_hyphens_are_corrected_in_both_paths() {
+        fn event(key: Keycode, shifted: bool) -> AutoKeyEvent {
+            AutoKeyEvent { key, shifted }
+        }
+        let letters = |word: &str| -> Vec<AutoKeyEvent> {
+            word.chars()
+                .map(|character| {
+                    let key = match character {
+                        'b' => Keycode::B,
+                        'd' => Keycode::D,
+                        'e' => Keycode::E,
+                        'g' => Keycode::G,
+                        'h' => Keycode::H,
+                        'l' => Keycode::L,
+                        'm' => Keycode::M,
+                        'n' => Keycode::N,
+                        'o' => Keycode::O,
+                        'q' => Keycode::Q,
+                        'r' => Keycode::R,
+                        's' => Keycode::S,
+                        'z' => Keycode::Z,
+                        _ => unreachable!("test words use these keys"),
+                    };
+                    event(key, false)
+                })
+                .collect()
+        };
+        let space = event(Keycode::Space, false);
+        for (layout, events, replacement) in [
+            (
+                SystemLayout::English,
+                [letters("ghbdsn"), vec![event(Keycode::Key1, true), space]].concat(),
+                "привіт! ",
+            ),
+            (
+                SystemLayout::English,
+                [letters("ghbdsn"), vec![event(Keycode::Key7, true), space]].concat(),
+                "привіт? ",
+            ),
+            (
+                SystemLayout::English,
+                [
+                    vec![event(Keycode::Comma, false)],
+                    letters("elm"),
+                    vec![event(Keycode::Minus, false)],
+                    letters("zrbq"),
+                    vec![space],
+                ]
+                .concat(),
+                "будь-який ",
+            ),
+            (
+                SystemLayout::Ukrainian,
+                [letters("hello"), vec![event(Keycode::Key1, true), space]].concat(),
+                "hello! ",
+            ),
+        ] {
+            let mut tracker = AutoWordTracker::default();
+            let mut sample = None;
+            for event in events {
+                if tracker.needs_layout_check() && AutoWordTracker::can_begin(event.key) {
+                    tracker.set_source_layout(Some(layout));
+                }
+                if let Some(finished) = tracker.observe(event) {
+                    sample = Some(finished);
+                }
+            }
+            let sample = sample.unwrap_or_else(|| panic!("{replacement:?} was never tracked"));
+            for (path, decision) in [
+                (
+                    "desktop",
+                    evaluate_with_mapping(&sample, &Config::default(), None),
+                ),
+                (
+                    "terminal",
+                    evaluate_terminal_with_mapping(&sample, &Config::default(), None),
+                ),
+            ] {
+                let AutoDecision::Correct(correction) = decision else {
+                    panic!("{path}: {replacement:?} was not corrected: {decision:?}");
+                };
+                assert_eq!(correction.replacement, replacement, "{path}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_repeated_space_keeps_the_selection_aligned_with_the_screen() {
+        // Screen after typing: "nfr  ,elt " (two spaces). The selection the
+        // app makes must be a suffix of exactly that text.
+        let screen = "nfr  ,elt ";
+        let mut tracker = AutoWordTracker::default();
+        let mut sample = None;
+        for character in screen.chars() {
+            let key = match character {
+                ' ' => Keycode::Space,
+                ',' => Keycode::Comma,
+                'e' => Keycode::E,
+                'f' => Keycode::F,
+                'l' => Keycode::L,
+                'n' => Keycode::N,
+                'r' => Keycode::R,
+                't' => Keycode::T,
+                _ => unreachable!(),
+            };
+            if tracker.needs_layout_check() && AutoWordTracker::can_begin(key) {
+                tracker.set_source_layout(Some(SystemLayout::English));
+            }
+            if let Some(finished) = tracker.observe(AutoKeyEvent {
+                key,
+                shifted: false,
+            }) {
+                sample = Some(finished);
+            }
+        }
+        let sample = sample.expect("the last word is tracked");
+        if let AutoDecision::Correct(correction) =
+            evaluate_with_mapping(&sample, &Config::default(), None)
+        {
+            assert!(
+                screen.ends_with(&correction.expected_source),
+                "{:?} is not the end of {screen:?}",
+                correction.expected_source
+            );
         }
     }
 

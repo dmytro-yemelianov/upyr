@@ -26,7 +26,7 @@ use rdev::{EventType, Key};
 use tracing::error;
 use upyr_audio::KeyCue;
 
-use crate::auto_correct::{AutoKeyEvent, AutoWordTracker};
+use crate::auto_correct::AutoKeyEvent;
 
 #[cfg(not(target_os = "macos"))]
 const START_TIMEOUT: Duration = Duration::from_millis(250);
@@ -659,9 +659,12 @@ fn dispatch_key(state: &ListenerState, event: AutoKeyEvent) {
         return;
     }
     if subscription.suspended {
-        if AutoWordTracker::can_begin(event.key)
-            || matches!(event.key, Keycode::Space | Keycode::Backspace)
-        {
+        // Text and the user's resets are replayed in order: a click, Enter or
+        // arrow between two words must still separate them afterwards.
+        // Modifier resets are dropped: during a correction they come from
+        // Upyr's own Shift/Cmd/Ctrl chords where the platform cannot filter
+        // them out, and would erase text the user typed meanwhile.
+        if !is_modifier(event.key) {
             if subscription.deferred_text_events.len() < MAX_DEFERRED_TEXT_EVENTS {
                 subscription.deferred_text_events.push_back(event);
             } else {
@@ -672,6 +675,25 @@ fn dispatch_key(state: &ListenerState, event: AutoKeyEvent) {
         return;
     }
     (subscription.on_key_down)(event);
+}
+
+fn is_modifier(key: Keycode) -> bool {
+    matches!(
+        key,
+        Keycode::LShift
+            | Keycode::RShift
+            | Keycode::LControl
+            | Keycode::RControl
+            | Keycode::LAlt
+            | Keycode::RAlt
+            | Keycode::LOption
+            | Keycode::ROption
+            | Keycode::LMeta
+            | Keycode::RMeta
+            | Keycode::Command
+            | Keycode::RCommand
+            | Keycode::CapsLock
+    )
 }
 
 fn dispatch_key_sound(state: &ListenerState, cue: KeyCue) {
@@ -963,6 +985,7 @@ fn dispatch_activity(state: &ListenerState, event: ActivityEvent) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auto_correct::AutoWordTracker;
 
     fn test_monitor() -> (AutoCorrectMonitor, Arc<Mutex<Vec<AutoKeyEvent>>>) {
         let state = Arc::new(ListenerState::default());
@@ -1202,6 +1225,39 @@ mod tests {
 
             assert_eq!(*received.lock().expect("received lock"), [capital]);
         }
+    }
+
+    #[test]
+    fn resets_during_a_correction_are_replayed_in_order() {
+        // `ok`, a click (or Enter, an arrow), then `c` while the previous
+        // correction runs: replaying only the letters would join `okc`.
+        let (monitor, received) = test_monitor();
+        let key = |key| AutoKeyEvent {
+            key,
+            shifted: false,
+        };
+        monitor.set_suspended(true);
+        for event in [
+            key(Keycode::O),
+            key(Keycode::K),
+            reset_event(Keycode::Escape),
+            key(Keycode::Enter),
+            key(Keycode::C),
+        ] {
+            dispatch_key(&monitor.state, event);
+        }
+        monitor.set_suspended(false);
+
+        assert_eq!(
+            *received.lock().expect("received lock"),
+            [
+                key(Keycode::O),
+                key(Keycode::K),
+                reset_event(Keycode::Escape),
+                key(Keycode::Enter),
+                key(Keycode::C),
+            ]
+        );
     }
 
     #[test]

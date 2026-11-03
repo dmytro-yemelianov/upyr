@@ -29,6 +29,26 @@ change between minor releases while the version is below 1.0.
 - Collapse a selection whose copy arrived late with one arrow instead of
   moving the caret past the word, and release the selection when the selected
   text has nothing to convert.
+  built-in layout table used by the CLI and as the fallback for conversion.
+- Correct words with number-row punctuation and hyphens while typing. The live
+  tracker used to drop every digit-row key and `-`, so `ghbdsn!`, `ghbdsn?`
+  (Shift+7), `"ghbdsn"`, `(ghbdsn)` and `,elm-zrbq` were never corrected even
+  though the engine handled them. Bare digits still end tracking (`h264`,
+  `mp3`), and `@handle` and `user@host` stay technical while a quoted `@word@`
+  does not. Applies to the desktop app, terminal typing and the web demo.
+- Score words with the macOS Ukrainian apostrophe `ʼ` (typed on the backslash
+  key of the default Ukrainian layout) and the typographic `’` like ASCII `'`.
+  `пʼять` and `мʼясо` typed on the English layout were never corrected.
+- Prefer the current macOS default Ukrainian layout (Ukrainian-PC, shown as
+  "Ukrainian") over "Ukrainian – Legacy" when switching after a correction.
+- Treat a layout as English only when English is its primary language and its
+  letters are in QWERTY order. German, Hebrew, Polish and similar layouts that
+  merely list English, and Dvorak, Colemak, QWERTZ and AZERTY, used to be read
+  as US QWERTY, which could rewrite the wrong text; they are now unsupported.
+- Keep the selection aligned with the screen after a double space, which used
+  to make a multi-word correction fail its copy check.
+- Replay clicks, Enter, Tab and arrows that happen during a correction, so the
+  next word is not joined to the previous one (`ok`, click, `ckjdj` → `okckjdj`).
 
 ### Planned
 
