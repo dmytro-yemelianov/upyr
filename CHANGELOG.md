@@ -16,6 +16,10 @@ change between minor releases while the version is below 1.0.
 
 ### Fixed
 
+- `ок` typed on the English layout (`jr`) and `ok` typed on the Ukrainian one
+  (`щл`) are corrected; the model abstained on `jr` (it reads half-English),
+  so both are built-in rules now.
+
 - An unreadable configuration file no longer stops Upyr from starting with no
   message. The background app runs with defaults (on macOS it explains why and
   offers to open Settings), and Settings opens on the defaults, names the
