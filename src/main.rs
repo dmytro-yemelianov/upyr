@@ -247,7 +247,23 @@ fn doctor() -> Result<()> {
             }
         );
         let output = upyr::audio_output::current();
-        println!("Undo correction shortcut: {}", config.undo_hotkey);
+        println!(
+            "Undo correction: {}{}",
+            config.undo_hotkey,
+            if config.backspace_undo {
+                ", or Backspace right after it"
+            } else {
+                ""
+            }
+        );
+        println!(
+            "Learning from your fixes: {}",
+            if config.auto_correct_learning {
+                "on"
+            } else {
+                "off"
+            }
+        );
         println!(
             "Audio output: {} — {}; Upyr volume {}% (headphone limit {}%)",
             output.name,

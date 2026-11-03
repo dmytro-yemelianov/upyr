@@ -88,6 +88,8 @@ enum Phase {
     Paste {
         conversion: Conversion,
         characters: usize,
+        /// The replaced text, for a manual conversion only.
+        manual_source: Option<String>,
     },
     Restore,
     Done,
@@ -106,6 +108,8 @@ pub(crate) struct Pipeline<E: Effects> {
     phase: Phase,
     selection: Selection,
     deadline: Instant,
+    /// The text a manual conversion replaced, once it has been pasted.
+    manual_source: Option<String>,
 }
 
 impl<E: Effects> Pipeline<E> {
@@ -117,7 +121,15 @@ impl<E: Effects> Pipeline<E> {
             phase: Phase::Initial,
             selection: Selection::Existing,
             deadline: now,
+            manual_source: None,
         }
+    }
+
+    /// What the user converted by hand (the selection or the previous word),
+    /// once the replacement has been pasted. Automatic edits, undo and text
+    /// transforms are not the user's own layout fixes.
+    pub fn manual_source(&self) -> Option<&str> {
+        self.manual_source.as_deref()
     }
 
     pub fn automatic(&self) -> bool {
@@ -234,6 +246,9 @@ impl<E: Effects> Pipeline<E> {
                     return self.finish(SelectionOutcome::NoConvertibleText);
                 }
                 let characters = selected.chars().count();
+                let manual_source =
+                    matches!(self.request, Request::Selection | Request::PreviousWord)
+                        .then(|| selected.clone());
                 self.effects.write(&conversion.text)?;
                 Ok(self.wait(
                     now,
@@ -241,18 +256,21 @@ impl<E: Effects> Pipeline<E> {
                     Phase::Paste {
                         conversion,
                         characters,
+                        manual_source,
                     },
                 ))
             }
             Phase::Paste {
                 conversion,
                 characters,
+                manual_source,
             } => {
                 if !self.effects.owns_clipboard() {
                     self.effects.recover_selection(self.selection, false)?;
                     return self.finish(SelectionOutcome::ClipboardChanged);
                 }
                 let outcome = self.effects.paste(&conversion, characters)?;
+                self.manual_source = manual_source;
                 self.effects.stop_guard();
                 if self.config.restore_clipboard {
                     self.wait(now, self.config.restore_delay_ms, Phase::Restore);
@@ -1111,6 +1129,30 @@ mod tests {
             Progress::Finished(Some(SelectionOutcome::Converted { .. }))
         ));
         assert_eq!(state.borrow().pasted.as_deref(), Some("Kyiv"));
+    }
+
+    #[test]
+    fn a_manual_conversion_reports_the_text_it_converted() {
+        let (mut manual, state, now) = task(Request::PreviousWord, false);
+        state.borrow_mut().copied = Some("jr ".to_owned());
+        assert_eq!(manual.manual_source(), None);
+        ready_to_paste(&mut manual, now);
+        next(&mut manual).unwrap();
+        assert_eq!(manual.manual_source(), Some("jr "));
+
+        // Automatic edits and text transforms are not the user's own fixes.
+        for request in [
+            Request::Automatic {
+                expected: "ghbdsn".to_owned(),
+                replacement: "привіт".to_owned(),
+            },
+            Request::Transform(upyr_core::TextTransform::CycleCase),
+        ] {
+            let (mut task, _, now) = task(request, false);
+            ready_to_paste(&mut task, now);
+            next(&mut task).unwrap();
+            assert_eq!(task.manual_source(), None);
+        }
     }
 
     #[test]

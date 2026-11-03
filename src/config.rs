@@ -246,6 +246,15 @@ pub struct Config {
     /// stays off, toggled from the menu bar. Omitted when empty.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub auto_correct_disabled_apps: Vec<String>,
+    /// macOS: Backspace as the first key after an automatic correction
+    /// reverts it. Omitted while on.
+    #[serde(skip_serializing_if = "is_true")]
+    pub backspace_undo: bool,
+    /// Remember the user's own fixes: a correction reverted twice adds an
+    /// exception, a word converted by hand twice adds a `correct` rule.
+    /// Omitted while on.
+    #[serde(skip_serializing_if = "is_true")]
+    pub auto_correct_learning: bool,
     /// Optional shortcut transliterating the selection (Ukrainian → Latin by
     /// the 2010 national system). Empty means off; omitted when empty.
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -287,6 +296,8 @@ impl Default for Config {
             auto_correct_exceptions: Vec::new(),
             auto_correct_rules: Vec::new(),
             auto_correct_disabled_apps: Vec::new(),
+            backspace_undo: true,
+            auto_correct_learning: true,
             transliterate_hotkey: String::new(),
             case_hotkey: String::new(),
             modifier_gesture: ModifierGesture::Disabled,
@@ -423,6 +434,48 @@ impl Config {
             true
         } else {
             false
+        }
+    }
+
+    /// Applies what Upyr learned from the user's fixes. Returns false when it
+    /// changes nothing. A learned rule never overrides the user's own
+    /// exception or rule for the same word.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) fn learn(&mut self, lesson: &crate::learning::Lesson) -> bool {
+        use crate::learning::Lesson;
+        let same_word =
+            |listed: &str, word: &str| listed.trim().to_lowercase() == word.to_lowercase();
+        let rule_pattern = |rule: &str| rule.split_whitespace().next().unwrap_or("").to_owned();
+        match lesson {
+            Lesson::Exception(word) => {
+                if self
+                    .auto_correct_exceptions
+                    .iter()
+                    .any(|listed| same_word(listed, word))
+                {
+                    return false;
+                }
+                let learned_rule = format!("{word} correct");
+                self.auto_correct_rules
+                    .retain(|rule| !same_word(rule, &learned_rule));
+                self.auto_correct_exceptions.push(word.clone());
+                true
+            }
+            Lesson::Rule(word) => {
+                if self
+                    .auto_correct_exceptions
+                    .iter()
+                    .any(|listed| same_word(listed, word))
+                    || self
+                        .auto_correct_rules
+                        .iter()
+                        .any(|rule| same_word(&rule_pattern(rule), word))
+                {
+                    return false;
+                }
+                self.auto_correct_rules.push(format!("{word} correct"));
+                true
+            }
         }
     }
 
@@ -563,6 +616,11 @@ impl Config {
         config.validate()?;
         Ok(config)
     }
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde passes a reference.
+const fn is_true(value: &bool) -> bool {
+    *value
 }
 
 fn write_config_file(path: &Path, source: &[u8], overwrite: bool) -> Result<()> {
@@ -1181,6 +1239,54 @@ mod tests {
         let error = config.validate().unwrap_err().to_string();
 
         assert!(error.contains("resolve to the same shortcut"));
+    }
+
+    #[test]
+    fn backspace_undo_and_learning_are_on_and_only_written_when_off() {
+        let config = Config::default();
+        assert!(config.backspace_undo && config.auto_correct_learning);
+        let saved = toml::to_string(&config).unwrap();
+        assert!(!saved.contains("backspace_undo") && !saved.contains("auto_correct_learning"));
+        let off = Config {
+            backspace_undo: false,
+            auto_correct_learning: false,
+            ..Config::default()
+        };
+        let saved = toml::to_string(&off).unwrap();
+        assert!(saved.contains("backspace_undo = false"));
+        let read: Config = toml::from_str(&saved).unwrap();
+        assert!(!read.backspace_undo && !read.auto_correct_learning);
+    }
+
+    #[test]
+    fn a_learned_exception_replaces_the_learned_rule_for_its_word() {
+        use crate::learning::Lesson;
+        let mut config = Config {
+            auto_correct_rules: vec!["jr correct".to_owned(), "*zzz* keep".to_owned()],
+            ..Config::default()
+        };
+        assert!(config.learn(&Lesson::Exception("jr".to_owned())));
+        assert_eq!(config.auto_correct_exceptions, ["jr"]);
+        assert_eq!(config.auto_correct_rules, ["*zzz* keep"]);
+        // Already known.
+        assert!(!config.learn(&Lesson::Exception("JR".to_owned())));
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn a_learned_rule_never_overrides_the_users_own_choice() {
+        use crate::learning::Lesson;
+        let mut config = Config {
+            auto_correct_exceptions: vec!["Ghbdsn".to_owned()],
+            auto_correct_rules: vec!["руку keep".to_owned()],
+            ..Config::default()
+        };
+        assert!(!config.learn(&Lesson::Rule("ghbdsn".to_owned())));
+        assert!(!config.learn(&Lesson::Rule("руку".to_owned())));
+        assert!(config.learn(&Lesson::Rule("щл".to_owned())));
+        assert!(!config.learn(&Lesson::Rule("щл".to_owned())));
+        assert_eq!(config.auto_correct_rules, ["руку keep", "щл correct"]);
+        config.validate().unwrap();
     }
 
     #[test]

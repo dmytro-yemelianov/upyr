@@ -16,7 +16,10 @@ mod feedback;
 pub mod globe_switch;
 mod hotkey_bindings;
 mod input_context;
+// Only the macOS app has undo and the guarded pipeline that learning uses.
 pub mod layout;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod learning;
 mod modifier_gesture;
 pub mod settings;
 #[cfg(any(target_os = "macos", test))]

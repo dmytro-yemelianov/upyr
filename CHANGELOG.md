@@ -16,6 +16,14 @@ change between minor releases while the version is below 1.0.
 
 ### Added
 
+- macOS: Backspace as the first key after an automatic correction reverts it
+  (`backspace_undo`, on by default); the word comes back as typed, without
+  the space or punctuation the Backspace deleted.
+- macOS: Upyr learns from your own fixes (`auto_correct_learning`, on by
+  default). A correction you revert twice becomes an exception for that
+  word; a word you convert by hand twice becomes a `correct` rule. A revert
+  followed by converting the same word back counts as a slip, not a lesson,
+  and a learned rule never overrides your own exception or rule.
 - Transliterate the selection to Latin by the 2010 national system (`Київ` →
   `Kyiv`, `Згорани` → `Zghorany`) and cycle its case (lower → UPPER → Title),
   with optional `transliterate_hotkey` / `case_hotkey` shortcuts (off by
