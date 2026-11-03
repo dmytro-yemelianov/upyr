@@ -71,6 +71,16 @@ def fake_upyr(path: Path) -> None:
     path.chmod(0o755)
 
 
+# Queries a shell sends its terminal, and a terminal's answers. fish 4 asks
+# for the cursor position and the device attributes at startup and loses
+# what is typed before the answers come.
+ANSWERS = (
+    (b"\x1b[6n", b"\x1b[1;1R"),
+    (b"\x1b[0c", b"\x1b[?62;22c"),
+    (b"\x1b[c", b"\x1b[?62;22c"),
+)
+
+
 def read_for(fd: int, seconds: float) -> str:
     chunks = []
     deadline = time.monotonic() + seconds
@@ -84,6 +94,9 @@ def read_for(fd: int, seconds: float) -> str:
             break
         if not data:
             break
+        for query, answer in ANSWERS:
+            for _ in range(data.count(query)):
+                os.write(fd, answer)
         chunks.append(data)
     return b"".join(chunks).decode("utf-8", "replace")
 
