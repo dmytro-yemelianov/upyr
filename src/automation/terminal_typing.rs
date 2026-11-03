@@ -217,6 +217,11 @@ mod native {
         }
 
         /// Right arrows that collapse an abandoned selection to its end.
+        /// Only the trigger: releases held input without inserting anything.
+        pub fn empty() -> Result<Self> {
+            Self::keystrokes(&[], &[])
+        }
+
         /// Recovery is wanted even when late, so it is its own fallback.
         pub fn right_arrows(count: usize) -> Result<Self> {
             let strokes = right_arrow_strokes(count);
@@ -301,7 +306,25 @@ mod native {
         batch::hold(pid, signal, duration)
     }
 
-    pub(in crate::automation) use batch::HoldSignal;
+    pub(crate) use batch::{HeldLineBreak, HoldSignal};
+
+    /// Holds the next Enter in `pid` behind the correction `id` (see batch).
+    pub(crate) fn arm_line_break(
+        pid: i32,
+        id: u64,
+        duration: std::time::Duration,
+        notify: impl Fn(HeldLineBreak) + Send + 'static,
+    ) -> Result<()> {
+        batch::arm_line_break(pid, id, duration, notify)
+    }
+
+    pub(crate) fn disarm_line_break() {
+        batch::disarm_line_break();
+    }
+
+    pub(crate) fn release_held(pid: i32) -> Result<bool> {
+        batch::release_held(pid)
+    }
 
     // Apple virtual key codes and the flags enigo's proven shortcuts carry.
     const COMMAND_KEY: u16 = 55;
@@ -350,7 +373,11 @@ mod native {
 }
 
 #[cfg(target_os = "macos")]
-pub(super) use native::{HoldSignal, Prepared, hold_target, warm_target};
+pub(crate) use native::{
+    HeldLineBreak, HoldSignal, arm_line_break, disarm_line_break, release_held,
+};
+#[cfg(target_os = "macos")]
+pub(super) use native::{Prepared, hold_target, warm_target};
 
 #[cfg(test)]
 mod tests {

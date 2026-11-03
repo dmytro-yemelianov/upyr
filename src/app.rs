@@ -61,13 +61,34 @@ enum AppEvent {
     },
     #[cfg(target_os = "macos")]
     AccessibilityGranted,
+    /// The target's tap holds an Enter behind the pending correction.
+    #[cfg(target_os = "macos")]
+    LineBreakHeld(crate::automation::HeldLineBreak),
     #[cfg(target_os = "macos")]
     GlobeSwitched(Option<String>, system_layout::ActiveInputSource),
+}
+
+/// A correction armed for the word being typed, applied if Enter ends it.
+#[cfg(target_os = "macos")]
+#[derive(Default)]
+struct LineBreak {
+    next_id: u64,
+    pending: Option<PendingLineBreak>,
+}
+
+#[cfg(target_os = "macos")]
+struct PendingLineBreak {
+    id: u64,
+    correction: AutoCorrection,
+    /// Enter was seen; the tap's report for it may still be on its way.
+    entered_at: Option<std::time::Instant>,
 }
 
 struct App {
     #[cfg(target_os = "macos")]
     conversion: Option<PendingConversion>,
+    #[cfg(target_os = "macos")]
+    line_break: LineBreak,
     #[cfg(target_os = "macos")]
     queued_conversion: Option<PendingConversion>,
     manager: GlobalHotKeyManager,
@@ -215,6 +236,8 @@ pub fn run(config: Config, hotkey_override: Option<String>) -> Result<()> {
         undo_hotkey,
         #[cfg(target_os = "macos")]
         undo_record: None,
+        #[cfg(target_os = "macos")]
+        line_break: LineBreak::default(),
         #[cfg(target_os = "macos")]
         pending_undo: None,
         config,
@@ -495,7 +518,7 @@ impl App {
         } else {
             ConversionRequest::Selection
         };
-        self.start_conversion(request, self.config.clone(), None);
+        self.start_conversion(request, self.config.clone(), None, None);
     }
 
     #[cfg(target_os = "macos")]
@@ -504,8 +527,12 @@ impl App {
         request: ConversionRequest,
         config: Config,
         generation: Option<u64>,
+        held: Option<(i32, std::sync::Arc<crate::automation::HoldSignal>)>,
     ) {
         if self.processing {
+            if let Some((pid, _)) = held {
+                let _ = crate::automation::release_held(pid);
+            }
             return;
         }
         let undo_text = match &request {
@@ -519,7 +546,7 @@ impl App {
         // The guard stamps Quartz input counters and starts holding input
         // first. A key that arrives during the slower identity queries below
         // must count as new input, not be folded into the stamp.
-        let task = match ConversionTask::desktop(config, request) {
+        let task = match ConversionTask::desktop_with_hold(config, request, held) {
             Ok(task) => task,
             Err(error) => {
                 error!(%error, "could not begin conversion");
@@ -822,6 +849,7 @@ impl App {
             },
             config,
             None,
+            None,
         );
     }
 
@@ -886,8 +914,12 @@ impl App {
         }
 
         let Some(sample) = self.auto_tracker.observe(event) else {
+            #[cfg(target_os = "macos")]
+            self.refresh_line_break(event.key);
             return;
         };
+        #[cfg(target_os = "macos")]
+        self.refresh_line_break(event.key);
         #[cfg(target_os = "macos")]
         let decision = if crate::input_context::terminal_typing_enabled(&self.config) {
             crate::auto_correct::evaluate_terminal(&sample, &self.config)
@@ -1073,6 +1105,100 @@ impl App {
             },
             config,
             Some(generation),
+            None,
+        );
+    }
+
+    /// Arms the target's tap to hold Enter while the word being typed would be
+    /// corrected if it ended now, so a chat message is sent corrected rather
+    /// than corrected after it has gone. Any other state disarms it.
+    #[cfg(target_os = "macos")]
+    fn refresh_line_break(&mut self, key: device_query::Keycode) {
+        if matches!(
+            key,
+            device_query::Keycode::Enter | device_query::Keycode::NumpadEnter
+        ) {
+            // The tap may already hold this Enter and report it shortly: keep
+            // the candidate for that report, but never arm the next Enter.
+            crate::automation::disarm_line_break();
+            if let Some(pending) = &mut self.line_break.pending {
+                pending
+                    .entered_at
+                    .get_or_insert_with(std::time::Instant::now);
+            }
+            return;
+        }
+        if self.line_break.pending.as_ref().is_some_and(|pending| {
+            pending
+                .entered_at
+                .is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(300))
+        }) {
+            return;
+        }
+        let correction = (!crate::input_context::terminal_typing_enabled(&self.config))
+            .then(|| self.auto_tracker.line_break_sample())
+            .flatten()
+            .and_then(|sample| match evaluate(&sample, &self.config) {
+                AutoDecision::Correct(correction) => Some(correction),
+                _ => None,
+            });
+        let armed = correction.and_then(|correction| {
+            let pid = crate::automation::frontmost_pid()?;
+            self.line_break.next_id = self.line_break.next_id.wrapping_add(1);
+            let id = self.line_break.next_id;
+            let proxy = self.event_proxy.clone();
+            // Selection, copy and paste with the same margin as a held edit.
+            let budget = 30_u64
+                .saturating_add(self.config.copy_delay_ms)
+                .saturating_add(self.config.paste_delay_ms)
+                .saturating_add(750);
+            match crate::automation::arm_line_break(
+                pid,
+                id,
+                std::time::Duration::from_millis(budget),
+                move |held| {
+                    let _ = proxy.send_event(AppEvent::LineBreakHeld(held));
+                },
+            ) {
+                Ok(()) => Some(PendingLineBreak {
+                    id,
+                    correction,
+                    entered_at: None,
+                }),
+                Err(error) => {
+                    debug!(%error, "could not arm Enter for automatic correction");
+                    None
+                }
+            }
+        });
+        if armed.is_none() {
+            crate::automation::disarm_line_break();
+        }
+        self.line_break.pending = armed;
+    }
+
+    #[cfg(target_os = "macos")]
+    fn handle_line_break_held(&mut self, held: crate::automation::HeldLineBreak) {
+        let pending = self.line_break.pending.take();
+        let correction = pending
+            .filter(|pending| pending.id == held.id)
+            .map(|pending| pending.correction)
+            .filter(|_| !self.paused && self.config.auto_correct);
+        let Some(correction) = correction else {
+            let _ = crate::automation::release_held(held.pid);
+            return;
+        };
+        debug!(direction = ?correction.direction, "correcting the word before Enter");
+        let mut config = self.config.clone();
+        config.direction = correction.direction;
+        self.start_conversion(
+            ConversionRequest::Automatic {
+                expected: correction.expected_source,
+                replacement: correction.replacement,
+            },
+            config,
+            None,
+            Some((held.pid, held.signal)),
         );
     }
 
@@ -1453,6 +1579,8 @@ impl ApplicationHandler<AppEvent> for App {
                 self.handle_modifier_gesture(action)
             }
             AppEvent::AutoKey(event) => self.handle_auto_key(event),
+            #[cfg(target_os = "macos")]
+            AppEvent::LineBreakHeld(held) => self.handle_line_break_held(held),
             AppEvent::KeySound(cue) => self.handle_key_sound(cue),
             AppEvent::ApplyAutoCorrection {
                 generation,

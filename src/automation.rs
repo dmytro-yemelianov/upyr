@@ -27,9 +27,13 @@ mod terminal_typing;
 #[cfg(target_os = "macos")]
 pub(crate) use input_guard::FocusTarget;
 #[cfg(target_os = "macos")]
-pub(crate) use input_guard::modifiers_released;
+pub(crate) use input_guard::{frontmost_pid, modifiers_released};
 #[cfg(target_os = "macos")]
 pub(crate) use pipeline::{ConversionTask, Progress, Request};
+#[cfg(target_os = "macos")]
+pub(crate) use terminal_typing::{
+    HeldLineBreak, HoldSignal, arm_line_break, disarm_line_break, release_held,
+};
 
 #[cfg(test)]
 pub(crate) fn terminal_plan_counts_for_test(

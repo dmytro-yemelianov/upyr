@@ -18,8 +18,8 @@ use std::{
 };
 
 /// Shared between the hold worker and the main-thread conversion guard.
-#[derive(Default)]
-pub(in crate::automation) struct HoldSignal {
+#[derive(Debug, Default)]
+pub(crate) struct HoldSignal {
     active: AtomicBool,
     broken: AtomicBool,
 }
@@ -66,6 +66,39 @@ enum Policy {
     Terminal,
     /// GUI selection edits hold every key until the paste or the recovery.
     Selection,
+}
+
+/// A line break held because the main thread had a correction pending for the
+/// word before it. Enter waits in the target's stream behind that correction.
+#[derive(Debug)]
+pub(crate) struct HeldLineBreak {
+    pub id: u64,
+    pub pid: i32,
+    pub signal: Arc<HoldSignal>,
+}
+
+/// Armed by the main thread while the word being typed would be corrected if
+/// it ended now; consumed by the first Enter the target receives.
+struct LineBreakArm {
+    id: u64,
+    duration: Duration,
+    notify: Box<dyn Fn(HeldLineBreak) + Send>,
+}
+
+type SharedArm = Arc<std::sync::Mutex<Option<LineBreakArm>>>;
+
+/// Whether the tap holds this event as the line break ending a word that has
+/// a pending correction: a user's first Return or keypad Enter key-down, while
+/// no edit is already holding input.
+fn holds_line_break(
+    kind: u32,
+    own: bool,
+    keycode: i64,
+    autorepeat: i64,
+    job_active: bool,
+    armed: bool,
+) -> bool {
+    armed && !job_active && !own && kind == 10 && autorepeat == 0 && matches!(keycode, 36 | 76)
 }
 
 struct HoldStart {
@@ -183,6 +216,7 @@ struct State {
     target_pid: i32,
     job: Option<Job>,
     disabled: bool,
+    line_break: SharedArm,
 }
 
 unsafe extern "C" fn deliver(proxy: Ref, kind: u32, event: Event, context: *mut c_void) -> Event {
@@ -197,10 +231,42 @@ unsafe extern "C" fn deliver(proxy: Ref, kind: u32, event: Event, context: *mut 
         }
         return event;
     }
+    let own = unsafe { CGEventGetIntegerValueField(event, 41) } == i64::from(std::process::id());
+    if kind == 10 && state.job.is_none() {
+        let keycode = unsafe { CGEventGetIntegerValueField(event, 9) };
+        let autorepeat = unsafe { CGEventGetIntegerValueField(event, 8) };
+        let mut slot = state
+            .line_break
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if holds_line_break(kind, own, keycode, autorepeat, false, slot.is_some()) {
+            if let Some(arm) = slot.take() {
+                drop(slot);
+                // Enter and everything after it wait until the correction of
+                // the word before it is pasted (or abandoned).
+                let signal = Arc::new(HoldSignal::default());
+                signal.active.store(true, Ordering::SeqCst);
+                let mut job = Job::new(
+                    Policy::Selection,
+                    None,
+                    Some(Arc::clone(&signal)),
+                    Instant::now() + arm.duration,
+                );
+                job.queued_keydowns = 1;
+                job.queued.push(Owned(unsafe { CFRetain(event.cast()) }));
+                state.job = Some(job);
+                (arm.notify)(HeldLineBreak {
+                    id: arm.id,
+                    pid: state.target_pid,
+                    signal,
+                });
+                return std::ptr::null_mut();
+            }
+        }
+    }
     let Some(job) = state.job.as_mut() else {
         return event;
     };
-    let own = unsafe { CGEventGetIntegerValueField(event, 41) } == i64::from(std::process::id());
     let own_trigger = kind == 11
         && own
         && job.request.as_ref().is_some_and(|request| {
@@ -320,6 +386,7 @@ unsafe impl Send for Ready {}
 struct Worker {
     pid: i32,
     commands: mpsc::Sender<Command>,
+    line_break: SharedArm,
     ready: Option<mpsc::Receiver<std::result::Result<Ready, String>>>,
     run_loop: Option<Ready>,
     handle: Option<JoinHandle<()>>,
@@ -333,11 +400,13 @@ impl Worker {
     fn start(pid: i32) -> Result<Self> {
         let (commands, receiver) = mpsc::channel();
         let (ready_sender, ready) = mpsc::channel();
+        let line_break = SharedArm::default();
+        let worker_arm = Arc::clone(&line_break);
         let handle = std::thread::Builder::new()
             .name("upyr-terminal-edit".to_owned())
             .spawn(move || {
                 let errors = ready_sender.clone();
-                if let Err(error) = run(pid, receiver, ready_sender) {
+                if let Err(error) = run(pid, receiver, ready_sender, worker_arm) {
                     let _ = errors.send(Err(error.to_string()));
                 }
             })
@@ -345,6 +414,7 @@ impl Worker {
         Ok(Self {
             pid,
             commands,
+            line_break,
             ready: Some(ready),
             run_loop: None,
             handle: Some(handle),
@@ -431,6 +501,49 @@ pub(super) fn post(
     })
 }
 
+/// Arms the target's tap to hold the next Enter behind the correction of the
+/// word being typed. `notify` runs on the worker thread when Enter is held.
+pub(super) fn arm_line_break(
+    target_pid: i32,
+    id: u64,
+    duration: Duration,
+    notify: impl Fn(HeldLineBreak) + Send + 'static,
+) -> Result<()> {
+    warm(target_pid)?;
+    WORKER.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let worker = slot.as_mut().context("hold worker is unavailable")?;
+        worker.ensure_ready()?;
+        *worker
+            .line_break
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(LineBreakArm {
+            id,
+            duration,
+            notify: Box::new(notify),
+        });
+        Ok(())
+    })
+}
+
+/// No word with a pending correction is being typed any more.
+pub(super) fn disarm_line_break() {
+    WORKER.with(|slot| {
+        if let Some(worker) = slot.borrow().as_ref() {
+            *worker
+                .line_break
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        }
+    });
+}
+
+/// Releases a held line break without any edit: Enter goes through as typed.
+pub(super) fn release_held(target_pid: i32) -> Result<bool> {
+    // No real window id: nothing is inserted, the held keys are flushed.
+    release(Prepared::empty()?, target_pid, -1, || true)
+}
+
 /// Starts holding the target's keyboard input behind a GUI selection edit.
 /// Returns `false` when the hold could not be established in time; the caller
 /// then keeps its listen-only guard semantics.
@@ -511,11 +624,13 @@ fn run(
     target_pid: i32,
     commands: mpsc::Receiver<Command>,
     ready: mpsc::Sender<std::result::Result<Ready, String>>,
+    line_break: SharedArm,
 ) -> Result<()> {
     let mut state = Box::new(State {
         target_pid,
         job: None,
         disabled: false,
+        line_break,
     });
     let mask = [1, 2, 3, 4, 6, 7, 10, 11, 12, 22, 25, 26, 27]
         .into_iter()
@@ -663,6 +778,22 @@ mod tests {
         for kind in [2, 4, 5, 26] {
             assert_eq!(selection_hold_action(kind, false), SelectionHold::Pass);
         }
+    }
+
+    #[test]
+    fn only_a_fresh_user_enter_with_a_pending_correction_is_held() {
+        // Return (36) and keypad Enter (76) key-downs from the user.
+        for code in [36, 76] {
+            assert!(holds_line_break(10, false, code, 0, false, true));
+        }
+        // No pending correction, a repeat, Upyr's own key, a key-up, another
+        // key, or an edit already holding input: Enter passes untouched.
+        assert!(!holds_line_break(10, false, 36, 0, false, false));
+        assert!(!holds_line_break(10, false, 36, 1, false, true));
+        assert!(!holds_line_break(10, true, 36, 0, false, true));
+        assert!(!holds_line_break(11, false, 36, 0, false, true));
+        assert!(!holds_line_break(10, false, 49, 0, false, true));
+        assert!(!holds_line_break(10, false, 36, 0, true, true));
     }
 
     #[test]

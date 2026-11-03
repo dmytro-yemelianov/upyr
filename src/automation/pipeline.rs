@@ -340,26 +340,76 @@ fn start_hold(guard: &super::input_guard::InputGuard, config: &Config) -> Option
 
 #[cfg(target_os = "macos")]
 impl Pipeline<Desktop> {
-    pub fn desktop(config: Config, request: Request) -> Result<Self> {
+    /// `held` is input the target process's tap already holds behind this
+    /// edit (a held Enter): the edit adopts that hold instead of starting one,
+    /// so Enter follows the paste. A hold that cannot be adopted is released.
+    pub fn desktop_with_hold(
+        config: Config,
+        request: Request,
+        held: Option<(i32, std::sync::Arc<super::terminal_typing::HoldSignal>)>,
+    ) -> Result<Self> {
         use anyhow::Context;
         let terminal = request.tracked() && crate::input_context::terminal_typing_enabled(&config);
         let restore_source = match &request {
             Request::Undo { source_id, .. } => Some(source_id.clone()),
             _ => None,
         };
-        let guard = super::input_guard::InputGuard::new(terminal)?;
-        let hold = (!terminal && request.tracked())
-            .then(|| start_hold(&guard, &config))
-            .flatten();
+        let guard = match &held {
+            Some((_, signal)) => {
+                super::input_guard::InputGuard::with_hold(terminal, std::sync::Arc::clone(signal))
+            }
+            None => super::input_guard::InputGuard::new(terminal),
+        };
+        let guard = match guard {
+            Ok(guard) => guard,
+            Err(error) => {
+                if let Some((pid, _)) = held {
+                    let _ = super::terminal_typing::release_held(pid);
+                }
+                return Err(error);
+            }
+        };
+        let hold = match held {
+            Some((pid, _)) => {
+                let adopted = (!terminal && guard.target_pid() == pid)
+                    .then(|| guard.target_window())
+                    .flatten()
+                    .map(|window| GuiHold { pid, window });
+                if adopted.is_none() {
+                    // Focus moved or the target is a terminal: let Enter go.
+                    let _ = super::terminal_typing::release_held(pid);
+                }
+                adopted
+            }
+            None => (!terminal && request.tracked())
+                .then(|| start_hold(&guard, &config))
+                .flatten(),
+        };
+        let devices = enigo::Enigo::new(&enigo::Settings::default())
+            .context("could not connect to desktop input")
+            .and_then(|enigo| {
+                arboard::Clipboard::new()
+                    .context("could not access the system clipboard")
+                    .map(|clipboard| (enigo, clipboard))
+            });
+        let (enigo, clipboard) = match devices {
+            Ok(devices) => devices,
+            Err(error) => {
+                // Held keys must not wait for the deadline behind an edit
+                // that will never start.
+                if let Some(hold) = &hold {
+                    let _ = super::terminal_typing::release_held(hold.pid);
+                }
+                return Err(error);
+            }
+        };
         let effects = Desktop {
             restore_source,
             guard: Some(guard),
+            enigo,
+            clipboard,
             hold,
             selection_released: false,
-            enigo: enigo::Enigo::new(&enigo::Settings::default())
-                .context("could not connect to desktop input")?,
-            clipboard: arboard::Clipboard::new()
-                .context("could not access the system clipboard")?,
             config: config.clone(),
             saved: None,
             probe: None,

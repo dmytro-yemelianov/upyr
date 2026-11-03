@@ -66,6 +66,14 @@ change between minor releases while the version is below 1.0.
   automatic correction happens after Space; the browser adapter and live demo
   already ship; maintainer tools that download data are listed.
 
+### Added
+
+- Correct the last word before Enter on macOS. While a word that would be
+  corrected is being typed, the target app's input tap is armed; Enter is held
+  there until the corrected word is pasted, then follows it, so a chat message
+  is sent corrected instead of corrected after it has gone. Words that need no
+  correction never delay Enter. Terminal-typing apps are unchanged.
+
 ### Planned
 
 - Notarized Developer ID distribution for macOS.

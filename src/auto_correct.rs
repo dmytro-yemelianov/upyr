@@ -69,6 +69,35 @@ impl AutoWordTracker {
         self.active_layout = None;
     }
 
+    /// The current word as if a line break ended it now, without changing the
+    /// tracker. No boundary is appended: Enter is held back until the
+    /// correction is in place, so nothing follows the word on screen yet.
+    #[cfg(any(target_os = "macos", test))]
+    pub fn line_break_sample(&self) -> Option<WordSample> {
+        let word_start = self.current_word_start?;
+        let source_layout = self.current_word_layout?;
+        let final_layout = self.active_layout?;
+        if self.current_word_mixed && source_layout == final_layout {
+            return None;
+        }
+        let physical_word = self.physical_context[word_start..].to_owned();
+        if physical_word.is_empty() {
+            return None;
+        }
+        Some(WordSample {
+            #[cfg(any(target_os = "macos", test))]
+            physical_word: physical_word.clone(),
+            #[cfg(any(target_os = "macos", test))]
+            source_layout,
+            inner: upyr_core::WordSample::new(
+                physical_word,
+                self.physical_context.clone(),
+                source_layout,
+            ),
+            visible_runs: self.visible_runs.clone(),
+        })
+    }
+
     pub fn observe(&mut self, event: AutoKeyEvent) -> Option<WordSample> {
         let Some(key) = physical_key(event.key) else {
             self.clear();
@@ -907,6 +936,50 @@ mod tests {
                 assert_eq!(correction.replacement, replacement, "{path}");
             }
         }
+    }
+
+    #[test]
+    fn a_line_break_sample_ends_the_word_without_a_boundary_or_side_effects() {
+        let mut tracker = AutoWordTracker::default();
+        for key in [
+            Keycode::O,
+            Keycode::K,
+            Keycode::Space,
+            Keycode::G,
+            Keycode::H,
+            Keycode::B,
+            Keycode::D,
+            Keycode::S,
+            Keycode::N,
+        ] {
+            if tracker.needs_layout_check() && AutoWordTracker::can_begin(key) {
+                tracker.set_source_layout(Some(SystemLayout::English));
+            }
+            tracker.observe(AutoKeyEvent {
+                key,
+                shifted: false,
+            });
+        }
+
+        let sample = tracker.line_break_sample().expect("a word is being typed");
+        let AutoDecision::Correct(correction) =
+            evaluate_with_mapping(&sample, &Config::default(), None)
+        else {
+            panic!("the word before Enter should be corrected");
+        };
+        // Enter is held back, so nothing follows the word on screen yet.
+        assert_eq!(correction.expected_source, "ghbdsn");
+        assert_eq!(correction.replacement, "привіт");
+
+        // Peeking does not finish the word: Space still completes it.
+        let finished = tracker
+            .observe(AutoKeyEvent {
+                key: Keycode::Space,
+                shifted: false,
+            })
+            .expect("the same word finishes at Space");
+        assert_eq!(finished.physical_word, "ghbdsn");
+        assert!(AutoWordTracker::default().line_break_sample().is_none());
     }
 
     #[test]

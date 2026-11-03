@@ -115,6 +115,13 @@ pub(super) fn input_counts() -> [u32; 6] {
     INPUT_KINDS.map(|kind| unsafe { CGEventSourceCounterForEventType(0, kind) })
 }
 
+/// Process ID of the frontmost application, the one receiving keystrokes.
+pub(crate) fn frontmost_pid() -> Option<i32> {
+    MainThreadMarker::new()?;
+    let application = front_application()?;
+    Some(unsafe { objc2::msg_send![&*application, processIdentifier] })
+}
+
 pub(crate) fn modifiers_released() -> bool {
     (unsafe { CGEventSourceFlagsState(0) }) & (MODIFIERS & !(1 << 16)) == 0
 }
@@ -295,6 +302,12 @@ impl InputGuard {
     }
 
     pub fn new(terminal: bool) -> Result<Self> {
+        Self::with_hold(terminal, Arc::default())
+    }
+
+    /// A guard for an edit whose input the target's tap already holds (a held
+    /// Enter): that input has not reached the editor and is not activity.
+    pub fn with_hold(terminal: bool, hold: Arc<HoldSignal>) -> Result<Self> {
         MainThreadMarker::new().context("conversion guards must run on the main thread")?;
         // Quartz counters catch input which reached WindowServer while the
         // main-thread observer was busy, before any destructive key is posted.
@@ -309,7 +322,7 @@ impl InputGuard {
             interrupted: Cell::new(false),
             edited: Cell::new(false),
             modifiers: Cell::new(unsafe { CGEventSourceFlagsState(0) } & MODIFIERS),
-            hold: Arc::default(),
+            hold,
         });
         let mask = [1, 3, 10, 12, 14, 22, 25]
             .into_iter()
