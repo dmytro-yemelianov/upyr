@@ -75,7 +75,16 @@ impl AutoWordTracker {
             return None;
         };
         match key {
-            upyr_core::PhysicalKey::Space => return self.finish_word(),
+            upyr_core::PhysicalKey::Space => {
+                if self.current_word_start.is_none() {
+                    // A repeated space is not represented in the tracked
+                    // context; keeping the older words would select text that
+                    // no longer matches the screen.
+                    self.clear_context();
+                    return None;
+                }
+                return self.finish_word();
+            }
             upyr_core::PhysicalKey::Backspace => {
                 self.backspace();
                 return None;
@@ -897,6 +906,47 @@ mod tests {
                 };
                 assert_eq!(correction.replacement, replacement, "{path}");
             }
+        }
+    }
+
+    #[test]
+    fn a_repeated_space_keeps_the_selection_aligned_with_the_screen() {
+        // Screen after typing: "nfr  ,elt " (two spaces). The selection the
+        // app makes must be a suffix of exactly that text.
+        let screen = "nfr  ,elt ";
+        let mut tracker = AutoWordTracker::default();
+        let mut sample = None;
+        for character in screen.chars() {
+            let key = match character {
+                ' ' => Keycode::Space,
+                ',' => Keycode::Comma,
+                'e' => Keycode::E,
+                'f' => Keycode::F,
+                'l' => Keycode::L,
+                'n' => Keycode::N,
+                'r' => Keycode::R,
+                't' => Keycode::T,
+                _ => unreachable!(),
+            };
+            if tracker.needs_layout_check() && AutoWordTracker::can_begin(key) {
+                tracker.set_source_layout(Some(SystemLayout::English));
+            }
+            if let Some(finished) = tracker.observe(AutoKeyEvent {
+                key,
+                shifted: false,
+            }) {
+                sample = Some(finished);
+            }
+        }
+        let sample = sample.expect("the last word is tracked");
+        if let AutoDecision::Correct(correction) =
+            evaluate_with_mapping(&sample, &Config::default(), None)
+        {
+            assert!(
+                screen.ends_with(&correction.expected_source),
+                "{:?} is not the end of {screen:?}",
+                correction.expected_source
+            );
         }
     }
 

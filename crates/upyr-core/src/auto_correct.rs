@@ -283,7 +283,15 @@ impl AutoWordTracker {
 
     pub fn observe(&mut self, event: PhysicalKeyEvent) -> Option<WordSample> {
         match event.key {
-            PhysicalKey::Space => return self.finish_word(),
+            PhysicalKey::Space => {
+                if self.current_word_start.is_none() {
+                    // A repeated space is not part of the context; older words
+                    // would no longer match the text before the caret.
+                    self.physical_context.clear();
+                    return None;
+                }
+                return self.finish_word();
+            }
             PhysicalKey::Backspace => {
                 self.backspace();
                 return None;
@@ -540,7 +548,7 @@ fn evaluate_candidates<S: CandidateScorer + ?Sized>(
         && candidates
             .target_word
             .chars()
-            .all(|character| character.is_alphabetic() || matches!(character, '\'' | '’'));
+            .all(|character| character.is_alphabetic() || is_apostrophe(character));
     // The relaxed threshold exists for physical `[];'\\,./` keys becoming
     // Ukrainian letters. It must not run in reverse: otherwise ordinary
     // Ukrainian words such as `рубці` can be mistaken for punctuation-heavy
@@ -1036,7 +1044,8 @@ fn language_tokens(text: &str) -> Vec<String> {
         .map(|token| {
             token
                 .chars()
-                .filter(|character| character.is_alphabetic() || matches!(character, '\'' | '’'))
+                .filter(|character| character.is_alphabetic() || is_apostrophe(*character))
+                .map(ascii_apostrophe)
                 .collect::<String>()
                 .to_lowercase()
         })
@@ -1081,8 +1090,26 @@ fn physical_layout_punctuation_evidence(source: &str, target: &str) -> usize {
 }
 
 fn normalize_word(word: &str) -> String {
-    word.trim_matches(|character: char| !character.is_alphabetic())
+    word.trim_matches(|character: char| !character.is_alphabetic() || is_apostrophe(character))
+        .chars()
+        .map(ascii_apostrophe)
+        .collect::<String>()
         .to_lowercase()
+}
+
+/// ASCII `'`, the typographic `’` and macOS Ukrainian's modifier letter `ʼ`
+/// (U+02BC, typed on the backslash key) all spell the same Ukrainian
+/// apostrophe. The model and dictionaries are built with ASCII `'`.
+fn is_apostrophe(character: char) -> bool {
+    matches!(character, '\'' | '’' | 'ʼ')
+}
+
+fn ascii_apostrophe(character: char) -> char {
+    if is_apostrophe(character) {
+        '\''
+    } else {
+        character
+    }
 }
 
 fn is_terminal_delimiter(character: char) -> bool {
@@ -2037,6 +2064,29 @@ mod tests {
 
     fn keys(parts: &[&[(PhysicalKey, bool)]]) -> Vec<(PhysicalKey, bool)> {
         parts.concat()
+    }
+
+    #[test]
+    fn modifier_and_typographic_apostrophes_score_like_ascii() {
+        // macOS "Ukrainian" (Ukrainian-PC) types U+02BC on the backslash key
+        // and ґ on backquote; the model and dictionaries use ASCII `'`.
+        let english = "qwertyuiop[]asdfghjkl;'zxcvbnm,./\\`";
+        let ukrainian_pc = "йцукенгшщзхїфівапролджєячсмитьбю.ʼґ";
+        let mapping: Vec<(char, char)> = english.chars().zip(ukrainian_pc.chars()).collect();
+        for (physical, intended) in [("g\\znm", "пʼять"), ("v\\zcj", "мʼясо")] {
+            let correction = correction(super::evaluate(
+                &context_sample(physical, &format!("{physical} "), InputLayout::English),
+                &production_policy(),
+                Some(&mapping),
+            ));
+            // The layout's own apostrophe is what gets typed back.
+            assert_eq!(correction.replacement, format!("{intended} "));
+        }
+        let ascii = language_likelihood(Language::Ukrainian, "п'ять");
+        for apostrophe in ['ʼ', '’'] {
+            let other = language_likelihood(Language::Ukrainian, &format!("п{apostrophe}ять"));
+            assert_eq!(other.coverage, ascii.coverage, "{apostrophe:?}");
+        }
     }
 
     #[test]

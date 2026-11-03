@@ -487,8 +487,10 @@ mod platform {
         match target {
             SystemLayout::English if id == "com.apple.keylayout.abc" => 0,
             SystemLayout::English if id == "com.apple.keylayout.us" => 1,
-            SystemLayout::Ukrainian if id.ends_with(".ukrainian") => 0,
-            SystemLayout::Ukrainian if id.ends_with(".ukrainian-pc") => 1,
+            // Ukrainian-PC is the current macOS default ("Ukrainian"); the bare
+            // ID is shown as "Ukrainian – Legacy".
+            SystemLayout::Ukrainian if id.ends_with(".ukrainian-pc") => 0,
+            SystemLayout::Ukrainian if id.ends_with(".ukrainian") => 1,
             _ => 2,
         }
     }
@@ -496,7 +498,9 @@ mod platform {
     fn classify(id: &str, name: &str, languages: &[String]) -> Option<SystemLayout> {
         let id = id.to_lowercase();
         let name = name.to_lowercase();
-        let language_family = languages.iter().find_map(|language| {
+        // The first language is the one the source is designed for; many
+        // layouts (German, Hebrew, Polish, ...) also list English after it.
+        let language_family = languages.first().and_then(|language| {
             let language = language.to_ascii_lowercase();
             let primary = language
                 .split(['-', '_'])
@@ -517,6 +521,14 @@ mod platform {
             || matches!(name.as_str(), "abc" | "u.s." | "us" | "english")
         {
             return Some(SystemLayout::English);
+        }
+        // Physical keys are read as US QWERTY, so English layouts that move
+        // the letters are unsupported rather than silently misread.
+        let moves_letters = ["dvorak", "colemak", "qwertz", "azerty", "workman"]
+            .iter()
+            .any(|variant| id.contains(variant) || name.contains(variant));
+        if moves_letters {
+            return None;
         }
         language_family
     }
@@ -679,10 +691,59 @@ mod platform {
         }
 
         #[test]
-        fn prefers_standard_ukrainian_and_abc_english() {
+        fn english_means_a_qwerty_layout_whose_primary_language_is_english() {
+            let languages = |list: &[&str]| -> Vec<String> {
+                list.iter().map(|language| (*language).to_owned()).collect()
+            };
+            // The tracker reads physical keys as US QWERTY. A layout that only
+            // lists English among other languages, or moves the letters, would
+            // make it rewrite the wrong text.
+            for (id, name, list) in [
+                ("com.apple.keylayout.German", "German", &["de", "en"][..]),
+                ("com.apple.keylayout.Hebrew", "Hebrew", &["he", "en"][..]),
+                ("com.apple.keylayout.Polish", "Polish", &["pl", "en"][..]),
+                ("com.apple.keylayout.Dvorak", "Dvorak", &["en"][..]),
+                ("com.apple.keylayout.Colemak", "Colemak", &["en"][..]),
+                (
+                    "com.apple.keylayout.ABC-QWERTZ",
+                    "ABC – QWERTZ",
+                    &["en"][..],
+                ),
+                (
+                    "com.apple.keylayout.ABC-AZERTY",
+                    "ABC – AZERTY",
+                    &["en"][..],
+                ),
+            ] {
+                assert_eq!(classify(id, name, &languages(list)), None, "{id}");
+            }
+            for (id, name, list) in [
+                (
+                    "com.apple.keylayout.British-PC",
+                    "British – PC",
+                    &["en-GB"][..],
+                ),
+                (
+                    "com.apple.keylayout.USInternational-PC",
+                    "U.S. International – PC",
+                    &["en", "fr"][..],
+                ),
+            ] {
+                assert_eq!(
+                    classify(id, name, &languages(list)),
+                    Some(SystemLayout::English),
+                    "{id}"
+                );
+            }
+        }
+
+        #[test]
+        fn prefers_current_macos_ukrainian_and_abc_english() {
+            // Current macOS names Ukrainian-PC "Ukrainian" (the default) and
+            // com.apple.keylayout.Ukrainian "Ukrainian – Legacy".
             assert!(
-                preference("com.apple.keylayout.Ukrainian", SystemLayout::Ukrainian)
-                    < preference("com.apple.keylayout.Ukrainian-PC", SystemLayout::Ukrainian)
+                preference("com.apple.keylayout.Ukrainian-PC", SystemLayout::Ukrainian)
+                    < preference("com.apple.keylayout.Ukrainian", SystemLayout::Ukrainian)
             );
             assert!(
                 preference("com.apple.keylayout.ABC", SystemLayout::English)
