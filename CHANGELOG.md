@@ -91,6 +91,10 @@ change between minor releases while the version is below 1.0.
 
 ### Fixed
 
+- macOS: a long correction no longer freezes Upyr when it ends. Each
+  conversion opened its own keyboard connection, and closing it waits about
+  20 ms for every key it sent, so after a 30-character word the Globe key and
+  typing waited close to a second. One connection now serves every conversion.
 - `ок` typed on the English layout (`jr`) and `ok` typed on the Ukrainian one
   (`щл`) are corrected; the model abstained on `jr` (it reads half-English),
   so both are built-in rules now.

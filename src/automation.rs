@@ -21,6 +21,8 @@ use tracing::{debug, warn};
 #[cfg(target_os = "macos")]
 mod input_guard;
 #[cfg(any(target_os = "macos", test))]
+mod keyboard;
+#[cfg(any(target_os = "macos", test))]
 mod pipeline;
 #[cfg(any(target_os = "macos", test))]
 mod terminal_typing;

@@ -309,7 +309,7 @@ pub(crate) type ConversionTask = Pipeline<Desktop>;
 pub(crate) struct Desktop {
     config: Config,
     restore_source: Option<String>,
-    enigo: enigo::Enigo,
+    keyboard: super::keyboard::Lease<enigo::Enigo>,
     clipboard: arboard::Clipboard,
     guard: Option<super::input_guard::InputGuard>,
     /// The target's keyboard input waits behind this edit while held.
@@ -405,14 +405,12 @@ impl Pipeline<Desktop> {
                 .then(|| start_hold(&guard, &config))
                 .flatten(),
         };
-        let devices = enigo::Enigo::new(&enigo::Settings::default())
-            .context("could not connect to desktop input")
-            .and_then(|enigo| {
-                arboard::Clipboard::new()
-                    .context("could not access the system clipboard")
-                    .map(|clipboard| (enigo, clipboard))
-            });
-        let (enigo, clipboard) = match devices {
+        let devices = super::keyboard::lease().and_then(|keyboard| {
+            arboard::Clipboard::new()
+                .context("could not access the system clipboard")
+                .map(|clipboard| (keyboard, clipboard))
+        });
+        let (keyboard, clipboard) = match devices {
             Ok(devices) => devices,
             Err(error) => {
                 // Held keys must not wait for the deadline behind an edit
@@ -426,7 +424,7 @@ impl Pipeline<Desktop> {
         let effects = Desktop {
             restore_source,
             guard: Some(guard),
-            enigo,
+            keyboard,
             clipboard,
             hold,
             selection_released: false,
@@ -547,16 +545,16 @@ impl Effects for Desktop {
     fn select(&mut self, selection: Selection) -> Result<()> {
         match selection {
             Selection::Existing => Ok(()),
-            Selection::Word => super::select_previous_word(&mut self.enigo),
+            Selection::Word => super::select_previous_word(&mut self.keyboard.get()),
             Selection::Characters(count) => {
-                super::select_previous_characters(&mut self.enigo, count)
+                super::select_previous_characters(&mut self.keyboard.get(), count)
             }
         }
     }
     fn copy(&mut self) -> Result<()> {
         self.saved = Some(super::snapshot(&mut self.clipboard));
         self.probe = Some(super::arm_copy_probe(&mut self.clipboard)?);
-        super::send_shortcut(&mut self.enigo, super::Shortcut::Copy)
+        super::send_shortcut(&mut self.keyboard.get(), super::Shortcut::Copy)
     }
     fn read_copy(&mut self) -> Option<String> {
         let selected = super::read_copied_text(&mut self.clipboard, self.probe.as_ref()?)?;
@@ -628,7 +626,7 @@ impl Effects for Desktop {
         // TIS selection can replay a pending key event on macOS. Select the
         // destination before posting Cmd+V, never while that event is queued.
         let layout_switched = self.switch_layout(conversion.direction)?;
-        super::send_shortcut(&mut self.enigo, super::Shortcut::Paste)?;
+        super::send_shortcut(&mut self.keyboard.get(), super::Shortcut::Paste)?;
         Ok(SelectionOutcome::Converted {
             direction: conversion.direction,
             characters,
@@ -670,12 +668,12 @@ impl Effects for Desktop {
         }
         match selection {
             Selection::Word if missing && !late_copy => {
-                super::undo_previous_word_selection(&mut self.enigo)
+                super::undo_previous_word_selection(&mut self.keyboard.get())
             }
             _ => {
+                let mut keyboard = self.keyboard.get();
                 for _ in 0..arrows {
-                    self.enigo
-                        .key(enigo::Key::RightArrow, enigo::Direction::Click)?;
+                    keyboard.key(enigo::Key::RightArrow, enigo::Direction::Click)?;
                 }
                 Ok(())
             }
