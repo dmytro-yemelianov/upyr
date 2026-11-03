@@ -91,6 +91,16 @@ change between minor releases while the version is below 1.0.
 
 ### Fixed
 
+- macOS: words corrected while typing no longer reach clipboard-history apps
+  such as Paste, in apps that expose the selection through Accessibility.
+  Upyr checked the selected word with a copy, which left it on the clipboard
+  unmarked for about 90 ms, until Upyr's own hidden copy replaced it. It now
+  reads the selection through Accessibility, which also skips that 90 ms
+  wait, and copies only where an app does not expose its selection.
+- macOS: a long correction no longer freezes Upyr when it ends. Each
+  conversion opened its own keyboard connection, and closing it waits about
+  20 ms for every key it sent, so after a 30-character word the Globe key and
+  typing waited close to a second. One connection now serves every conversion.
 - `ок` typed on the English layout (`jr`) and `ok` typed on the Ukrainian one
   (`щл`) are corrected; the model abstained on `jr` (it reads half-English),
   so both are built-in rules now.

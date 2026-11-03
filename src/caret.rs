@@ -1,6 +1,7 @@
-//! Where the text caret is on screen, read from the focused element's
-//! Accessibility attributes (macOS). Apps that expose no caret give `None`,
-//! and callers fall back to the pointer.
+//! Where the text caret is on screen, and what text is selected, read from
+//! the focused element's Accessibility attributes (macOS). Apps that expose
+//! neither give `None`: callers put the indicator at the pointer and copy
+//! the selection instead.
 
 /// A rectangle with its origin at the bottom left and y growing up (Cocoa),
 /// or at the top left of the main display with y growing down (Quartz and
@@ -82,7 +83,7 @@ pub fn plausible(caret: Rect) -> bool {
 }
 
 #[cfg(target_os = "macos")]
-pub use native::caret;
+pub use native::{caret, selected_text};
 
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
@@ -134,6 +135,11 @@ mod native {
     unsafe extern "C" {
         fn CFRelease(value: Ref);
         fn CFStringCreateWithCString(allocator: Ref, string: *const i8, encoding: u32) -> Ref;
+        fn CFGetTypeID(value: Ref) -> usize;
+        fn CFStringGetTypeID() -> usize;
+        fn CFStringGetLength(string: Ref) -> isize;
+        fn CFStringGetMaximumSizeForEncoding(length: isize, encoding: u32) -> isize;
+        fn CFStringGetCString(string: Ref, buffer: *mut i8, size: isize, encoding: u32) -> u8;
     }
 
     /// A Core Foundation object this module owns (a Copy or Create result).
@@ -191,9 +197,8 @@ mod native {
             })
     }
 
-    /// The caret of the focused text element in Quartz coordinates, or None
-    /// when the app does not expose one.
-    pub fn caret() -> Option<Rect> {
+    /// The focused element of the frontmost app.
+    fn focused() -> Option<Owned> {
         let system = Owned::new(unsafe { AXUIElementCreateSystemWide() })?;
         unsafe { AXUIElementSetMessagingTimeout(system.0, TIMEOUT_SECONDS) };
         // Some apps answer only through their application element.
@@ -203,6 +208,30 @@ mod native {
             attribute(&application, c"AXFocusedUIElement")
         })?;
         unsafe { AXUIElementSetMessagingTimeout(element.0, TIMEOUT_SECONDS) };
+        Some(element)
+    }
+
+    /// The text selected in the focused element, or None when the app does
+    /// not expose it.
+    pub fn selected_text() -> Option<String> {
+        let text = attribute(&focused()?, c"AXSelectedText")?;
+        if unsafe { CFGetTypeID(text.0) != CFStringGetTypeID() } {
+            return None;
+        }
+        let length = unsafe { CFStringGetLength(text.0) };
+        let capacity = unsafe { CFStringGetMaximumSizeForEncoding(length, UTF8) }.checked_add(1)?;
+        let mut buffer = vec![0_u8; usize::try_from(capacity).ok()?];
+        if unsafe { CFStringGetCString(text.0, buffer.as_mut_ptr().cast(), capacity, UTF8) } == 0 {
+            return None;
+        }
+        let text = CStr::from_bytes_until_nul(&buffer).ok()?;
+        text.to_str().ok().map(str::to_owned)
+    }
+
+    /// The caret of the focused text element in Quartz coordinates, or None
+    /// when the app does not expose one.
+    pub fn caret() -> Option<Rect> {
+        let element = focused()?;
         let selection = attribute(&element, c"AXSelectedTextRange")?;
         let mut range = CFRange::default();
         if unsafe { AXValueGetValue(selection.0, AX_VALUE_CFRANGE, (&raw mut range).cast()) } == 0 {
