@@ -1,6 +1,7 @@
 # Decision engine and WebAssembly plan
 
-Status: in progress; portable core and headless WASM ABI implemented
+Status: in progress; portable core, headless WASM ABI, and a site-local browser
+adapter with a live playground implemented
 
 This document defines two coordinated delivery tracks:
 
@@ -49,8 +50,10 @@ Completed extraction work:
 ## Decision
 
 The current root package remains the desktop host. The workspace now has two
-additional Rust crates; the TypeScript facade and demo remain the next web
-delivery layer:
+additional Rust crates. A site-local browser adapter
+([`site/upyr-web.js`](../../site/upyr-web.js)) and the live playground
+([`site/demo.js`](../../site/demo.js)) already ship on the project site; the
+published TypeScript facade package remains the next web delivery layer:
 
 ```text
 Cargo.toml
@@ -231,7 +234,10 @@ mutation.
 The planned `createUpyr`, `createSession`, and `attach` convenience APIs belong
 to `packages/upyr-web`. That layer will verify `expectedSource`, derive UTF-16
 DOM ranges, preserve undo, handle controlled components, and apply edits after
-the matching browser input event. It is not implemented or published to npm yet.
+the matching browser input event. The package is not published to npm yet; a
+site-local `attach` in [`site/upyr-web.js`](../../site/upyr-web.js) already
+verifies `expectedSource` and applies edits after the matching input event for
+the site's live playground.
 
 ## Browser event contract
 

@@ -1861,7 +1861,7 @@ fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> F
         mtm,
     );
     sound_pack.setToolTip(Some(&NSString::from_str(
-        "Anime Reactions uses locally synthesized, nonverbal control-key sounds.",
+        "Anime Reactions synthesizes nonverbal control-key sounds locally; its six event cues are pre-rendered clips bundled with Upyr.",
     )));
     page.addSubview(&sound_pack);
     page.addSubview(&label("Volume", rect(372.0, 269.0, 58.0, 24.0), mtm));
