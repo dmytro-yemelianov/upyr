@@ -14,6 +14,12 @@ change between minor releases while the version is below 1.0.
   builds against the unpatched scanner, since a `[patch]` never applied to
   installs from crates.io.
 
+### Added
+
+- Pause automatic correction in one app from the menu bar (macOS): "Pause
+  automatic correction in <app>" names the app you were typing in and keeps it
+  in `auto_correct_disabled_apps`; `upyr doctor` lists them.
+
 ### Fixed
 
 - `ок` typed on the English layout (`jr`) and `ok` typed on the Ukrainian one

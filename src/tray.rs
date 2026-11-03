@@ -20,6 +20,8 @@ pub const TRAY_FLIP_FRAME_DELAY_MS: u64 = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayAction {
+    /// Switch automatic correction off or on for the frontmost app (macOS).
+    ToggleCurrentApp,
     ConvertPreviousWord,
     ConvertSelection,
     TogglePaused,
@@ -37,6 +39,7 @@ pub struct Tray {
     previous_word: MenuItem,
     convert: MenuItem,
     pause: CheckMenuItem,
+    current_app: CheckMenuItem,
     edit_config: MenuItem,
     about: MenuItem,
     reload_config: MenuItem,
@@ -67,6 +70,8 @@ impl Tray {
         let convert = MenuItem::new("Convert selected text", true, None);
         let (pause_label, pause_checked) = pause_presentation(false);
         let pause = CheckMenuItem::new(pause_label, true, pause_checked, None);
+        let (app_label, app_checked, app_enabled) = app_presentation(None, false);
+        let current_app = CheckMenuItem::new(app_label, app_enabled, app_checked, None);
         let edit_config = MenuItem::new("Settings…", true, None);
         let about = MenuItem::new("About Upyr…", true, None);
         let reload_config = MenuItem::new("Reload configuration", true, None);
@@ -83,6 +88,8 @@ impl Tray {
             &previous_word,
             &convert,
             &pause,
+            #[cfg(target_os = "macos")]
+            &current_app,
             &second_separator,
             &edit_config,
             &about,
@@ -109,6 +116,7 @@ impl Tray {
             previous_word,
             convert,
             pause,
+            current_app,
             edit_config,
             about,
             reload_config,
@@ -125,6 +133,8 @@ impl Tray {
             Some(TrayAction::ConvertSelection)
         } else if id == self.pause.id() {
             Some(TrayAction::TogglePaused)
+        } else if id == self.current_app.id() {
+            Some(TrayAction::ToggleCurrentApp)
         } else if id == self.edit_config.id() {
             Some(TrayAction::OpenSettings)
         } else if id == self.about.id() {
@@ -150,6 +160,15 @@ impl Tray {
         self._icon
             .set_tooltip(Some(tooltip(config, paused)))
             .context("failed to update tray tooltip")
+    }
+
+    /// Names the app the per-app item acts on: the one last typed in.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub fn set_current_app(&self, name: Option<&str>, disabled: bool) {
+        let (label, checked, enabled) = app_presentation(name, disabled);
+        self.current_app.set_text(label);
+        self.current_app.set_checked(checked);
+        self.current_app.set_enabled(enabled);
     }
 
     pub fn set_flip_frame(&self, frame: u8) -> Result<()> {
@@ -287,6 +306,19 @@ impl ksni::Tray for LinuxTray {
 /// Pausing stops every Upyr action (shortcuts, gestures, automatic
 /// correction, Globe switching and key sounds), so the item names the app
 /// rather than a shortcut. Its check mark shows the paused state.
+/// Label, check mark and availability of "Pause automatic correction in …".
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+fn app_presentation(name: Option<&str>, disabled: bool) -> (String, bool, bool) {
+    (
+        format!(
+            "Pause automatic correction in {}",
+            name.unwrap_or("this app")
+        ),
+        disabled,
+        name.is_some(),
+    )
+}
+
 fn pause_presentation(paused: bool) -> (&'static str, bool) {
     ("Pause Upyr", paused)
 }
@@ -475,6 +507,30 @@ fn inside_ellipse(x: f32, y: f32, center_x: f32, center_y: f32, rx: f32, ry: f32
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_per_app_item_names_the_app_it_acts_on() {
+        assert_eq!(
+            super::app_presentation(Some("Slack"), false),
+            (
+                "Pause automatic correction in Slack".to_owned(),
+                false,
+                true
+            )
+        );
+        assert_eq!(
+            super::app_presentation(Some("Slack"), true),
+            ("Pause automatic correction in Slack".to_owned(), true, true)
+        );
+        assert_eq!(
+            super::app_presentation(None, false),
+            (
+                "Pause automatic correction in this app".to_owned(),
+                false,
+                false
+            )
+        );
+    }
+
     use super::*;
 
     #[test]

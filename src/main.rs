@@ -195,6 +195,14 @@ fn doctor() -> Result<()> {
         config.auto_correct_min_word_length
     );
     println!(
+        "Automatic correction off in: {}",
+        if config.auto_correct_disabled_apps.is_empty() {
+            "no apps".to_owned()
+        } else {
+            config.auto_correct_disabled_apps.join(", ")
+        }
+    );
+    println!(
         "Correction rules: {} of yours, {} built in",
         config.auto_correct_rules.len(),
         upyr_core::builtin_triggers().len()

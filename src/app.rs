@@ -89,6 +89,9 @@ struct App {
     conversion: Option<PendingConversion>,
     #[cfg(target_os = "macos")]
     line_break: LineBreak,
+    /// Bundle identifier of the app last typed in, named by the tray item.
+    #[cfg(target_os = "macos")]
+    typing_app: Option<String>,
     #[cfg(target_os = "macos")]
     queued_conversion: Option<PendingConversion>,
     manager: GlobalHotKeyManager,
@@ -238,6 +241,8 @@ pub fn run(config: Config, hotkey_override: Option<String>) -> Result<()> {
         undo_record: None,
         #[cfg(target_os = "macos")]
         line_break: LineBreak::default(),
+        #[cfg(target_os = "macos")]
+        typing_app: None,
         #[cfg(target_os = "macos")]
         pending_undo: None,
         config,
@@ -861,6 +866,12 @@ impl App {
             return;
         }
         #[cfg(target_os = "macos")]
+        if self.auto_correct_paused_here() {
+            self.auto_tracker.clear();
+            crate::automation::disarm_line_break();
+            return;
+        }
+        #[cfg(target_os = "macos")]
         if self.handle_slash_key(event) {
             self.auto_tracker.clear();
             return;
@@ -1428,6 +1439,7 @@ impl App {
                 Ok(())
             }
             Some(TrayAction::TogglePaused) => self.toggle_paused(),
+            Some(TrayAction::ToggleCurrentApp) => self.toggle_current_app(),
             Some(TrayAction::OpenSettings) => settings::spawn(),
             Some(TrayAction::OpenAbout) => settings::spawn_about(),
             Some(TrayAction::ReloadConfiguration) => self.reload_configuration(),
@@ -1455,6 +1467,48 @@ impl App {
     fn handle_menu(&mut self, event_loop: &ActiveEventLoop, event: &MenuEvent) {
         let action = self.tray.as_ref().and_then(|tray| tray.action(event));
         self.handle_tray_action(event_loop, action);
+    }
+
+    /// Keeps the tray's per-app item naming the app being typed in, and says
+    /// whether automatic correction is switched off there.
+    #[cfg(target_os = "macos")]
+    fn auto_correct_paused_here(&mut self) -> bool {
+        let app = crate::input_context::frontmost_app();
+        if app.as_ref().map(|(id, _)| id) != self.typing_app.as_ref() {
+            self.typing_app = app.as_ref().map(|(id, _)| id.clone());
+            if let Some(tray) = &self.tray {
+                tray.set_current_app(
+                    app.as_ref().map(|(_, name)| name.as_str()),
+                    crate::input_context::auto_correct_disabled(&self.config),
+                );
+            }
+        }
+        crate::input_context::auto_correct_disabled(&self.config)
+    }
+
+    /// Switches automatic correction off or back on for the frontmost app.
+    /// A menu-bar click leaves that app frontmost on macOS.
+    fn toggle_current_app(&mut self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            let Some((id, name)) = crate::input_context::frontmost_app() else {
+                return Ok(());
+            };
+            let mut config = Config::load()?;
+            let disabled = config.toggle_auto_correct_app(&id);
+            config.write(true)?;
+            info!(app = %id, disabled, "toggled automatic correction for an app");
+            self.config.auto_correct_disabled_apps = config.auto_correct_disabled_apps;
+            self.typing_app = Some(id);
+            if let Some(tray) = &self.tray {
+                tray.set_current_app(Some(&name), disabled);
+            }
+            if disabled {
+                self.reset_auto_context();
+                crate::automation::disarm_line_break();
+            }
+        }
+        Ok(())
     }
 
     fn toggle_autostart(&self) -> Result<()> {

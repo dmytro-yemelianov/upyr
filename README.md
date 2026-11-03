@@ -27,7 +27,7 @@ Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in
 - Provides searchable, tabbed settings, press-to-record shortcuts, an optional pointer-side language flag, and three local sound packs with event/key controls and master volume (every cue is synthesized on-device except the Anime Reactions pack's six bundled, pre-rendered event cues).
 - By default, snapshots supported clipboard formats and attempts to restore them after conversion; temporary conversion content is concealed from supported clipboard-history systems.
 
-The menu-bar or system-tray app can convert text, pause or resume correction, open Settings, reload configuration, manage launch at login, and quit.
+The menu-bar or system-tray app can convert text, pause or resume correction, open Settings, reload configuration, manage launch at login, and quit. On macOS it can also pause automatic correction in the app you are typing in; those apps are kept in `auto_correct_disabled_apps`.
 
 ## Install on macOS
 

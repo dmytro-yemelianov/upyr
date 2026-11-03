@@ -242,6 +242,10 @@ pub struct Config {
     /// so older versions keep reading the file.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub auto_correct_rules: Vec<String>,
+    /// Applications (bundle identifiers on macOS) where automatic correction
+    /// stays off, toggled from the menu bar. Omitted when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub auto_correct_disabled_apps: Vec<String>,
     /// Optional modifier-only gesture. Disabled means no keyboard-state polling occurs.
     pub modifier_gesture: ModifierGesture,
     pub modifier_gesture_action: GestureAction,
@@ -274,6 +278,7 @@ impl Default for Config {
             slash_command_apps: Vec::new(),
             auto_correct_exceptions: Vec::new(),
             auto_correct_rules: Vec::new(),
+            auto_correct_disabled_apps: Vec::new(),
             modifier_gesture: ModifierGesture::Disabled,
             modifier_gesture_action: GestureAction::PreviousWord,
             modifier_gesture_timeout_ms: 500,
@@ -369,6 +374,20 @@ impl Config {
         match Self::load() {
             Ok(current) => Self::merge_edits(base, &edited, &current).unwrap_or(edited),
             Err(_) => edited,
+        }
+    }
+
+    /// Switches automatic correction off or back on for one application.
+    /// Returns true when it is now off there.
+    pub fn toggle_auto_correct_app(&mut self, app: &str) -> bool {
+        let before = self.auto_correct_disabled_apps.len();
+        self.auto_correct_disabled_apps
+            .retain(|listed| !listed.eq_ignore_ascii_case(app));
+        if self.auto_correct_disabled_apps.len() == before {
+            self.auto_correct_disabled_apps.push(app.to_owned());
+            true
+        } else {
+            false
         }
     }
 
@@ -1117,6 +1136,24 @@ mod tests {
         let error = config.validate().unwrap_err().to_string();
 
         assert!(error.contains("resolve to the same shortcut"));
+    }
+
+    #[test]
+    fn switching_correction_off_per_app_toggles_one_entry() {
+        let mut config = Config::default();
+        assert!(config.toggle_auto_correct_app("com.tinyspeck.slackmacgap"));
+        assert_eq!(
+            config.auto_correct_disabled_apps,
+            ["com.tinyspeck.slackmacgap"]
+        );
+        // Bundle identifiers compare case-insensitively, as matching does.
+        assert!(!config.toggle_auto_correct_app("COM.tinyspeck.SlackMacGap"));
+        assert!(config.auto_correct_disabled_apps.is_empty());
+        let saved = toml::to_string_pretty(&config).unwrap();
+        assert!(
+            !saved.contains("auto_correct_disabled_apps"),
+            "an empty list must not make older versions reject the file"
+        );
     }
 
     #[test]

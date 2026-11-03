@@ -82,6 +82,16 @@ mod platform {
         })
     }
 
+    /// Bundle identifier and display name of the app receiving keystrokes.
+    pub(super) fn frontmost_app() -> Option<(String, String)> {
+        let application = NSWorkspace::sharedWorkspace().frontmostApplication()?;
+        let id = application.bundleIdentifier()?.to_string();
+        let name = application
+            .localizedName()
+            .map_or_else(|| id.clone(), |name| name.to_string());
+        Some((id, name))
+    }
+
     pub(super) fn active() -> InputContext {
         let Some(application) = NSWorkspace::sharedWorkspace().frontmostApplication() else {
             return InputContext::Gui;
@@ -99,6 +109,19 @@ mod platform {
         );
         context
     }
+}
+
+/// The app receiving keystrokes, as (bundle identifier, display name).
+#[cfg(target_os = "macos")]
+pub(crate) fn frontmost_app() -> Option<(String, String)> {
+    platform::frontmost_app()
+}
+
+/// Automatic correction was switched off for the frontmost app.
+#[cfg(target_os = "macos")]
+pub(crate) fn auto_correct_disabled(config: &crate::config::Config) -> bool {
+    !config.auto_correct_disabled_apps.is_empty()
+        && platform::matches_application(&config.auto_correct_disabled_apps)
 }
 
 #[cfg(target_os = "macos")]
