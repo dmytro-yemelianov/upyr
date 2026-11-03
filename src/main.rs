@@ -194,6 +194,11 @@ fn doctor() -> Result<()> {
         config.auto_correct_sensitivity,
         config.auto_correct_min_word_length
     );
+    println!(
+        "Correction rules: {} of yours, {} built in",
+        config.auto_correct_rules.len(),
+        upyr_core::builtin_triggers().len()
+    );
     // Terminal typing and slash commands are only implemented on macOS.
     #[cfg(target_os = "macos")]
     {

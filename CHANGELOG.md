@@ -77,6 +77,11 @@ change between minor releases while the version is below 1.0.
   correction stayed silently off in Terminal, iTerm2, Ghostty, kitty, Warp,
   Alacritty, WezTerm, Termius and cmux unless their bundle IDs were added to
   the configuration file by hand; the checkbox now opts them in and out.
+- Your own correction rules: `auto_correct_rules` in the configuration file
+  takes `pattern correct|keep [english|ukrainian]` entries with `*` wildcards,
+  written either as the keys typed (`ghbdsn`) or as the text seen (`руку`).
+  The engine supported these rules since 0.4, but only its tests could use
+  them. They apply to normal and terminal correction; a matching `keep` wins.
 
 ### Planned
 

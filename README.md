@@ -247,6 +247,24 @@ upyr settings
 
 The settings app exposes General, Automatic, Exceptions, Shortcuts, Feedback, and Advanced tabs. Automatic sensitivity can be conservative, balanced, or aggressive; deliberate strings can be added on the Exceptions tab. Feedback includes three local sound packs: Upyr Original, Pocket Arcade, and the opt-in Anime Reactions pack. Every key cue and most event cues are synthesized locally (the Anime pack's six application-event cues are the one exception; see below); keyboard feedback crosses into the app as physical key categories only and never stores typed characters. Use `UPYR_CONFIG` to select a different config file.
 
+Exceptions only stop a correction. For anything more specific, add rules to the
+configuration file; they apply before the built-in ones, and a matching `keep`
+always wins:
+
+```toml
+auto_correct_rules = [
+  "ghbdsn correct",       # always fix this key sequence typed on English
+  "руку keep",            # never touch this word typed on Ukrainian
+  "*cfqn* correct",       # any word containing these keys (prefix: `word*`, suffix: `*word`)
+  "hello correct ukrainian",
+]
+```
+
+A pattern is either the keys as typed on a US keyboard or the text as it
+appears when typed on the Ukrainian layout (Cyrillic patterns default to the
+Ukrainian layout). `upyr doctor` reports how many rules are active, and an
+invalid rule is reported by name when the file is loaded.
+
 The versioned TOML schema currently uses `config_version = 12`. Older supported schemas migrate in memory; configurations from a newer unsupported schema are rejected rather than guessed. Migration preserves existing sound choices and adds `undo_hotkey = "CmdOrCtrl+Alt+Z"` (with a fallback if a conversion shortcut already uses it) and `sounds.headphone_volume_percent = 12`. See the generated default file after `upyr init` for every option and its current value.
 
 On macOS, **Feedback → Headphone limit** controls a separate ceiling for Upyr's

@@ -476,7 +476,12 @@ fn correction_policy(config: &Config) -> upyr_core::AutoCorrectPolicy {
         },
         min_word_length: config.auto_correct_min_word_length,
         exceptions: config.auto_correct_exceptions.clone(),
-        triggers: upyr_core::builtin_triggers(),
+        triggers: config
+            .auto_correct_rules
+            .iter()
+            .filter_map(|rule| upyr_core::parse_trigger(rule).ok().flatten())
+            .chain(upyr_core::builtin_triggers())
+            .collect(),
     }
 }
 
@@ -728,6 +733,43 @@ mod tests {
             Some(upyr_core::PhysicalKey::Quote)
         );
         assert_eq!(physical_key(Keycode::Left), None);
+    }
+
+    #[test]
+    fn user_rules_reach_both_correction_paths() {
+        let config = Config {
+            auto_correct_rules: vec!["zzzz correct".to_owned(), "ghbdsn keep".to_owned()],
+            ..Config::default()
+        };
+        for (path, decide) in [
+            (
+                "desktop",
+                evaluate_with_mapping as fn(&WordSample, &Config, Option<&[(char, char)]>) -> _,
+            ),
+            ("terminal", evaluate_terminal_with_mapping),
+        ] {
+            let forced = decide(
+                &terminal_sample("zzzz", "zzzz ", SystemLayout::English),
+                &config,
+                None,
+            );
+            let AutoDecision::Correct(correction) = forced else {
+                panic!("{path}: a user `correct` rule did not apply: {forced:?}");
+            };
+            assert_eq!(correction.replacement, "яяяя ", "{path}");
+            // A user `keep` beats the built-in `ghbdsn correct` trigger.
+            assert!(
+                !matches!(
+                    decide(
+                        &terminal_sample("ghbdsn", "ghbdsn ", SystemLayout::English),
+                        &config,
+                        None
+                    ),
+                    AutoDecision::Correct(_)
+                ),
+                "{path}: a user `keep` rule did not apply"
+            );
+        }
     }
 
     #[test]

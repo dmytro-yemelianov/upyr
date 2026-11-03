@@ -234,6 +234,14 @@ pub struct Config {
     pub slash_command_apps: Vec<String>,
     /// Words which should never trigger automatic correction.
     pub auto_correct_exceptions: Vec<String>,
+    /// Deterministic rules, one per entry: `pattern correct|keep [layout]`.
+    /// The pattern is the keys as typed on a US keyboard (`ghbdsn`) or the text
+    /// as seen when typed on the Ukrainian layout (`руку`); `*` at either end
+    /// matches a prefix, suffix or any position. They apply before the
+    /// built-in rules, and a matching `keep` always wins. Omitted when empty
+    /// so older versions keep reading the file.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub auto_correct_rules: Vec<String>,
     /// Optional modifier-only gesture. Disabled means no keyboard-state polling occurs.
     pub modifier_gesture: ModifierGesture,
     pub modifier_gesture_action: GestureAction,
@@ -265,6 +273,7 @@ impl Default for Config {
             terminal_typing_apps: Vec::new(),
             slash_command_apps: Vec::new(),
             auto_correct_exceptions: Vec::new(),
+            auto_correct_rules: Vec::new(),
             modifier_gesture: ModifierGesture::Disabled,
             modifier_gesture_action: GestureAction::PreviousWord,
             modifier_gesture_timeout_ms: 500,
@@ -399,6 +408,11 @@ impl Config {
             .any(|word| word.trim().is_empty() || word.chars().any(char::is_whitespace))
         {
             bail!("auto_correct_exceptions must contain non-empty single words");
+        }
+        for rule in &self.auto_correct_rules {
+            if let Err(error) = upyr_core::parse_trigger(rule) {
+                bail!("auto_correct_rules entry {rule:?} is invalid: {error}");
+            }
         }
         Ok(())
     }
@@ -1028,6 +1042,28 @@ mod tests {
         let error = config.validate().unwrap_err().to_string();
 
         assert!(error.contains("resolve to the same shortcut"));
+    }
+
+    #[test]
+    fn correction_rules_are_validated_and_omitted_until_used() {
+        let saved = toml::to_string_pretty(&Config::default()).unwrap();
+        assert!(
+            !saved.contains("auto_correct_rules"),
+            "an empty rule list must not make older versions reject the file"
+        );
+
+        let config = Config {
+            auto_correct_rules: vec!["ghbdsn keep".to_owned(), "*zzz* correct".to_owned()],
+            ..Config::default()
+        };
+        config.validate().unwrap();
+
+        let invalid = Config {
+            auto_correct_rules: vec!["ghbdsn fix".to_owned()],
+            ..Config::default()
+        };
+        let error = format!("{:#}", invalid.validate().unwrap_err());
+        assert!(error.contains("ghbdsn fix"), "{error}");
     }
 
     #[test]

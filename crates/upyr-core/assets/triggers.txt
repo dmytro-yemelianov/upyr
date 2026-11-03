@@ -16,8 +16,8 @@
 # The wildcard form is the clean-room counterpart to Punto for Windows' live
 # `A` rule tag: a reverse-engineering pass showed that Windows treats `A` as an
 # unconditional word-position match, while the macOS build parses it but never
-# tests it. Domain vocabulary added here (users cannot configure triggers) raises recall
-# without touching the scorer.
+# tests it. Users add their own rules in the same format through the
+# `auto_correct_rules` configuration list, which is consulted before this table.
 
 ghbdsn   correct   # привіт
 ckjdj    correct   # слово
