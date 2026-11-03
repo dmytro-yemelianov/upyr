@@ -1165,11 +1165,10 @@ impl App {
             .then(|| self.auto_tracker.line_break_sample())
             .flatten()
             .and_then(|sample| {
-                match crate::auto_correct::evaluate_with_caps_lock(
+                match crate::auto_correct::evaluate_line_break(
                     &sample,
                     &self.config,
                     crate::automation::caps_lock_on(),
-                    false,
                 ) {
                     AutoDecision::Correct(correction) => Some(correction),
                     _ => None,

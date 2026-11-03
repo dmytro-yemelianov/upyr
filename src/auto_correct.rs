@@ -398,6 +398,43 @@ fn evaluate_terminal_with_mapping(
     config: &Config,
     mapping: Option<&[(char, char)]>,
 ) -> AutoDecision {
+    evaluate_single_word(sample, config, mapping, " ")
+}
+
+/// The word before Enter on macOS: the ordinary decision first, then the
+/// short-word policy, because no later word can resolve `nfr` → `так` there.
+#[cfg(target_os = "macos")]
+pub fn evaluate_line_break(sample: &WordSample, config: &Config, caps_lock: bool) -> AutoDecision {
+    let mapping = system_layout::installed_mapping().ok().flatten();
+    evaluate_line_break_with_mapping(sample, config, mapping.as_deref(), caps_lock)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn evaluate_line_break_with_mapping(
+    sample: &WordSample,
+    config: &Config,
+    mapping: Option<&[(char, char)]>,
+    caps_lock: bool,
+) -> AutoDecision {
+    match evaluate_caps_with_mapping(sample, config, mapping, caps_lock, false) {
+        AutoDecision::Correct(correction) => AutoDecision::Correct(correction),
+        decision => match evaluate_single_word(sample, config, mapping, "") {
+            AutoDecision::Correct(correction) => AutoDecision::Correct(correction),
+            _ => decision,
+        },
+    }
+}
+
+/// Judges only the current word, with the short-word policy, as terminals do.
+/// `boundary` is what follows the word on screen: a space, or nothing yet
+/// when Enter is held behind the correction.
+#[cfg(any(target_os = "macos", test))]
+fn evaluate_single_word(
+    sample: &WordSample,
+    config: &Config,
+    mapping: Option<&[(char, char)]>,
+    boundary: &str,
+) -> AutoDecision {
     let mut policy = correction_policy(config);
     let word = sample.physical_word.to_ascii_lowercase();
     let intended_word = match sample.source_layout {
@@ -529,7 +566,7 @@ fn evaluate_terminal_with_mapping(
     }
     let single_word = upyr_core::WordSample::new(
         sample.physical_word.clone(),
-        format!("{} ", sample.physical_word),
+        format!("{}{boundary}", sample.physical_word),
         sample.source_layout,
     );
     match upyr_core::evaluate(&single_word, &policy, mapping) {
@@ -541,7 +578,7 @@ fn evaluate_terminal_with_mapping(
                 .rsplit(' ')
                 .next()
                 .unwrap_or("");
-            correction.expected_source = format!("{word} ");
+            correction.expected_source = format!("{word}{boundary}");
             AutoDecision::Correct(correction)
         }
         decision => decision,
@@ -1152,6 +1189,53 @@ mod tests {
                 assert_eq!(correction.replacement, replacement, "{path}");
             }
         }
+    }
+
+    #[test]
+    fn short_words_before_enter_use_the_short_word_policy() {
+        // Nothing follows the last word of a message to resolve it, so the
+        // common short words are corrected there as in terminals.
+        for (physical, layout, expected, replacement) in [
+            ("nfr", SystemLayout::English, "nfr", "так"),
+            ("zr", SystemLayout::English, "zr", "як"),
+            ("ghbdsn", SystemLayout::English, "ghbdsn", "привіт"),
+        ] {
+            let sample = WordSample {
+                inner: upyr_core::WordSample::new(physical, physical, layout),
+                physical_word: physical.to_owned(),
+                source_layout: layout,
+                visible_runs: vec![LayoutRun {
+                    layout,
+                    physical: physical.to_owned(),
+                }],
+            };
+            let decision =
+                evaluate_line_break_with_mapping(&sample, &Config::default(), None, false);
+            let AutoDecision::Correct(correction) = decision else {
+                panic!("{physical:?} before Enter was not corrected: {decision:?}");
+            };
+            assert_eq!(
+                (
+                    correction.expected_source.as_str(),
+                    correction.replacement.as_str()
+                ),
+                (expected, replacement)
+            );
+        }
+        // Real English stays.
+        let sample = WordSample {
+            inner: upyr_core::WordSample::new("is", "is", SystemLayout::English),
+            physical_word: "is".to_owned(),
+            source_layout: SystemLayout::English,
+            visible_runs: vec![LayoutRun {
+                layout: SystemLayout::English,
+                physical: "is".to_owned(),
+            }],
+        };
+        assert!(!matches!(
+            evaluate_line_break_with_mapping(&sample, &Config::default(), None, false),
+            AutoDecision::Correct(_)
+        ));
     }
 
     #[test]

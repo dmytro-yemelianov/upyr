@@ -89,6 +89,8 @@ change between minor releases while the version is below 1.0.
 - Fix an accidental Caps Lock on macOS: a word typed as `пРИВІТ` or `hELLO`
   while Caps Lock is on becomes `Привіт` / `Hello` (and `gHBDSN` becomes
   `Привіт`), and Caps Lock is turned off for the next words.
+- The last word before Enter uses the short-word policy terminals already
+  use, since no later word can resolve it: `nfr⏎` → `так⏎`, `zr⏎` → `як⏎`.
 
 ### Planned
 
