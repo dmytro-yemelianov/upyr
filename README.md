@@ -247,6 +247,13 @@ upyr settings
 
 The settings app exposes General, Automatic, Exceptions, Shortcuts, Feedback, and Advanced tabs. Automatic sensitivity can be conservative, balanced, or aggressive; deliberate strings can be added on the Exceptions tab. Feedback includes three local sound packs: Upyr Original, Pocket Arcade, and the opt-in Anime Reactions pack. Every key cue and most event cues are synthesized locally (the Anime pack's six application-event cues are the one exception; see below); keyboard feedback crosses into the app as physical key categories only and never stores typed characters. Use `UPYR_CONFIG` to select a different config file.
 
+Two optional shortcuts act on the selection without switching layouts:
+`transliterate_hotkey` writes Ukrainian in Latin by the 2010 national system
+(`Київ` → `Kyiv`; the system is not reversible), and `case_hotkey` cycles
+lower → UPPER → Title. Both are off until set, for example
+`transliterate_hotkey = "CmdOrCtrl+Alt+T"`. The same transforms are available
+as `upyr transliterate` and `upyr case`.
+
 Exceptions only stop a correction. For anything more specific, add rules to the
 configuration file; they apply before the built-in ones, and a matching `keep`
 always wins:

@@ -246,6 +246,14 @@ pub struct Config {
     /// stays off, toggled from the menu bar. Omitted when empty.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub auto_correct_disabled_apps: Vec<String>,
+    /// Optional shortcut transliterating the selection (Ukrainian → Latin by
+    /// the 2010 national system). Empty means off; omitted when empty.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub transliterate_hotkey: String,
+    /// Optional shortcut cycling the selection's case (lower → UPPER →
+    /// Title). Empty means off; omitted when empty.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub case_hotkey: String,
     /// Optional modifier-only gesture. Disabled means no keyboard-state polling occurs.
     pub modifier_gesture: ModifierGesture,
     pub modifier_gesture_action: GestureAction,
@@ -279,6 +287,8 @@ impl Default for Config {
             auto_correct_exceptions: Vec::new(),
             auto_correct_rules: Vec::new(),
             auto_correct_disabled_apps: Vec::new(),
+            transliterate_hotkey: String::new(),
+            case_hotkey: String::new(),
             modifier_gesture: ModifierGesture::Disabled,
             modifier_gesture_action: GestureAction::PreviousWord,
             modifier_gesture_timeout_ms: 500,
@@ -377,6 +387,31 @@ impl Config {
         }
     }
 
+    /// The enabled text-transform shortcuts.
+    pub fn transform_hotkeys(&self) -> Result<Vec<(upyr_core::TextTransform, HotKey)>> {
+        [
+            (
+                upyr_core::TextTransform::Transliterate,
+                "transliterate_hotkey",
+                &self.transliterate_hotkey,
+            ),
+            (
+                upyr_core::TextTransform::CycleCase,
+                "case_hotkey",
+                &self.case_hotkey,
+            ),
+        ]
+        .into_iter()
+        .filter(|(_, _, value)| !value.trim().is_empty())
+        .map(|(transform, name, value)| {
+            let shortcut: HotKey = value
+                .parse()
+                .with_context(|| format!("invalid {name} {value:?}"))?;
+            Ok((transform, shortcut))
+        })
+        .collect()
+    }
+
     /// Switches automatic correction off or back on for one application.
     /// Returns true when it is now off there.
     pub fn toggle_auto_correct_app(&mut self, app: &str) -> bool {
@@ -457,6 +492,16 @@ impl Config {
         // Settings window can record it, so it can conflict only there.
         if cfg!(target_os = "macos") && [hotkey, last_word_hotkey].contains(&undo) {
             bail!("undo_hotkey must differ from the conversion shortcuts");
+        }
+        let mut taken = vec![hotkey, last_word_hotkey];
+        if cfg!(target_os = "macos") {
+            taken.push(undo);
+        }
+        for (_, shortcut) in self.transform_hotkeys()? {
+            if taken.contains(&shortcut) {
+                bail!("transliterate_hotkey and case_hotkey must differ from every other shortcut");
+            }
+            taken.push(shortcut);
         }
         if !(10..=2_000).contains(&self.copy_delay_ms) {
             bail!("copy_delay_ms must be between 10 and 2000");
@@ -1136,6 +1181,35 @@ mod tests {
         let error = config.validate().unwrap_err().to_string();
 
         assert!(error.contains("resolve to the same shortcut"));
+    }
+
+    #[test]
+    fn transform_shortcuts_are_optional_validated_and_distinct() {
+        let saved = toml::to_string_pretty(&Config::default()).unwrap();
+        assert!(!saved.contains("transliterate_hotkey") && !saved.contains("case_hotkey"));
+        assert!(Config::default().transform_hotkeys().unwrap().is_empty());
+
+        let config = Config {
+            transliterate_hotkey: "CmdOrCtrl+Alt+T".to_owned(),
+            case_hotkey: "CmdOrCtrl+Alt+U".to_owned(),
+            ..Config::default()
+        };
+        config.validate().unwrap();
+        assert_eq!(config.transform_hotkeys().unwrap().len(), 2);
+
+        for clash in [Config::default().hotkey, "CmdOrCtrl+Alt+U".to_owned()] {
+            let config = Config {
+                transliterate_hotkey: clash.clone(),
+                case_hotkey: "CmdOrCtrl+Alt+U".to_owned(),
+                ..Config::default()
+            };
+            assert!(config.validate().is_err(), "{clash} must be rejected");
+        }
+        let invalid = Config {
+            case_hotkey: "Ctrl+".to_owned(),
+            ..Config::default()
+        };
+        assert!(invalid.validate().is_err());
     }
 
     #[test]

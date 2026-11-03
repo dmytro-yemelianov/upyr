@@ -44,6 +44,18 @@ enum Command {
         #[arg(allow_hyphen_values = true)]
         text: Vec<String>,
     },
+    /// Transliterate Ukrainian text to Latin (2010 national system), from the
+    /// arguments or stdin.
+    Transliterate {
+        #[arg(allow_hyphen_values = true)]
+        text: Vec<String>,
+    },
+    /// Cycle the case of the text (lower → UPPER → Title), from the arguments
+    /// or stdin.
+    Case {
+        #[arg(allow_hyphen_values = true)]
+        text: Vec<String>,
+    },
     /// Write the default configuration file.
     Init {
         #[arg(long)]
@@ -111,6 +123,14 @@ fn main() -> Result<()> {
         #[cfg(target_os = "macos")]
         Command::Globe { action } => manage_globe(action),
         Command::Run { hotkey } => app::run(Config::load()?, hotkey),
+        Command::Transliterate { text } => {
+            println!("{}", upyr_core::transliterate(&read_input(text)?));
+            Ok(())
+        }
+        Command::Case { text } => {
+            println!("{}", upyr_core::cycle_case(&read_input(text)?));
+            Ok(())
+        }
         Command::Convert {
             direction,
             installed,

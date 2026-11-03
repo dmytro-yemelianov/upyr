@@ -84,7 +84,14 @@ enum CopyProbe {
 
 /// Copies the current selection, converts it, and pastes it back into the active app.
 pub fn convert_selection(config: &Config) -> Result<SelectionOutcome> {
-    convert_selection_if_matches(config, None, None, None)
+    convert_selection_with(config, None)
+}
+
+fn convert_selection_with(
+    config: &Config,
+    transform: Option<upyr_core::TextTransform>,
+) -> Result<SelectionOutcome> {
+    convert_selection_if_matches(config, None, None, None, transform)
 }
 
 fn convert_selection_if_matches(
@@ -92,6 +99,7 @@ fn convert_selection_if_matches(
     expected_source: Option<&str>,
     replacement: Option<&str>,
     on_text_committed: Option<&mut dyn FnMut()>,
+    transform: Option<upyr_core::TextTransform>,
 ) -> Result<SelectionOutcome> {
     let mut enigo = Enigo::new(&Settings::default()).context(
         "could not connect to desktop input; check Accessibility permissions or DISPLAY",
@@ -121,7 +129,10 @@ fn convert_selection_if_matches(
         return Ok(SelectionOutcome::TextMismatch);
     }
 
-    let conversion = selection_conversion(&selected, config.direction, replacement);
+    let conversion = match transform {
+        Some(transform) => transformed(&selected, transform),
+        None => selection_conversion(&selected, config.direction, replacement),
+    };
     if !conversion.changed {
         restore(&mut clipboard, saved)?;
         return Ok(SelectionOutcome::NoConvertibleText);
@@ -197,6 +208,30 @@ fn convert_with_installed_mapping(text: &str, direction: Direction) -> crate::la
             convert(text, direction)
         }
     }
+}
+
+/// A transform keeps the layout: `Smart` makes every layout follow a no-op.
+fn transformed(selected: &str, transform: upyr_core::TextTransform) -> crate::layout::Conversion {
+    let text = transform.apply(selected);
+    crate::layout::Conversion {
+        changed: text != selected,
+        text,
+        direction: Direction::Smart,
+    }
+}
+
+/// Transliterates or re-cases the current selection (Windows and Linux; macOS
+/// runs the same transform through its guarded pipeline).
+#[cfg(not(target_os = "macos"))]
+pub fn transform_selection(
+    config: &Config,
+    transform: upyr_core::TextTransform,
+) -> Result<SelectionOutcome> {
+    let config = Config {
+        switch_layout: false,
+        ..config.clone()
+    };
+    convert_selection_with(&config, Some(transform))
 }
 
 fn selection_conversion(
@@ -284,7 +319,7 @@ pub fn convert_previous_word_if_matches(
     )?;
     select_previous_word(&mut enigo)?;
     thread::sleep(Duration::from_millis(30));
-    let outcome = convert_selection_if_matches(config, expected_source, None, None);
+    let outcome = convert_selection_if_matches(config, expected_source, None, None, None);
     if matches!(outcome, Ok(SelectionOutcome::NoSelection)) {
         undo_previous_word_selection(&mut enigo)?;
     }
@@ -325,6 +360,7 @@ pub fn convert_previous_input_if_matches(
         Some(expected_source),
         Some(replacement),
         Some(on_text_committed),
+        None,
     );
     if matches!(outcome, Ok(SelectionOutcome::NoSelection)) {
         undo_previous_characters_selection(&mut enigo, characters)?;

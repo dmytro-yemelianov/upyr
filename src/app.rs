@@ -97,6 +97,8 @@ struct App {
     manager: GlobalHotKeyManager,
     hotkey: HotKey,
     last_word_hotkey: HotKey,
+    /// Optional transliterate / change-case shortcuts.
+    transform_hotkeys: Vec<(upyr_core::TextTransform, HotKey)>,
     /// `upyr run --hotkey`, reapplied on top of every reloaded configuration.
     hotkey_override: Option<String>,
     #[cfg(target_os = "macos")]
@@ -176,10 +178,12 @@ pub fn run(config: Config, hotkey_override: Option<String>) -> Result<()> {
         .undo_hotkey
         .parse()
         .context("invalid undo shortcut")?;
+    let transform_hotkeys = config.transform_hotkeys()?;
     #[allow(unused_mut)]
     let mut startup_keys = vec![hotkey, last_word_hotkey];
     #[cfg(target_os = "macos")]
     startup_keys.push(undo_hotkey);
+    startup_keys.extend(transform_hotkeys.iter().map(|(_, key)| *key));
     let manager = GlobalHotKeyManager::new().context("failed to initialize global hotkeys")?;
     manager.register_all(&startup_keys).with_context(|| {
         format!(
@@ -234,6 +238,7 @@ pub fn run(config: Config, hotkey_override: Option<String>) -> Result<()> {
         manager,
         hotkey,
         last_word_hotkey,
+        transform_hotkeys,
         hotkey_override,
         #[cfg(target_os = "macos")]
         undo_hotkey,
@@ -514,6 +519,38 @@ impl App {
         self.set_auto_suspended(false);
     }
 
+    /// Transliterates or re-cases the selection; the layout never changes.
+    #[cfg(target_os = "macos")]
+    fn perform_transform(&mut self, transform: upyr_core::TextTransform) {
+        self.clear_undo();
+        let mut config = self.config.clone();
+        config.switch_layout = false;
+        self.start_conversion(ConversionRequest::Transform(transform), config, None, None);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn perform_transform(&mut self, transform: upyr_core::TextTransform) {
+        if self.processing {
+            return;
+        }
+        self.processing = true;
+        self.set_auto_suspended(true);
+        self.reset_auto_context();
+        match crate::automation::transform_selection(&self.config, transform) {
+            Ok(SelectionOutcome::Converted { .. }) => info!(?transform, "transformed selection"),
+            Ok(outcome) => {
+                debug!(?transform, ?outcome, "selection was not transformed");
+                self.play_error_sound();
+            }
+            Err(error) => {
+                error!(%error, "selection transform failed");
+                self.play_error_sound();
+            }
+        }
+        self.processing = false;
+        self.set_auto_suspended(false);
+    }
+
     #[cfg(target_os = "macos")]
     fn perform_conversion(&mut self, previous_word: bool) {
         #[cfg(target_os = "macos")]
@@ -748,6 +785,14 @@ impl App {
             }
             return;
         }
+        if let Some(&(transform, _)) = self
+            .transform_hotkeys
+            .iter()
+            .find(|(_, key)| key.id() == event.id)
+        {
+            self.perform_transform(transform);
+            return;
+        }
         if event.id == self.hotkey.id() {
             self.perform_conversion(false);
         } else if event.id == self.last_word_hotkey.id() {
@@ -770,6 +815,7 @@ impl App {
         let mut keys = vec![self.hotkey, self.last_word_hotkey];
         #[cfg(target_os = "macos")]
         keys.push(self.undo_hotkey);
+        keys.extend(self.transform_hotkeys.iter().map(|(_, key)| *key));
         keys
     }
 
@@ -1365,10 +1411,12 @@ impl App {
             .undo_hotkey
             .parse()
             .context("invalid undo shortcut")?;
+        let new_transforms = new_config.transform_hotkeys()?;
         #[allow(unused_mut)]
         let mut new_keys = vec![new_hotkey, new_last_word_hotkey];
         #[cfg(target_os = "macos")]
         new_keys.push(new_undo);
+        new_keys.extend(new_transforms.iter().map(|(_, key)| *key));
         #[cfg(target_os = "macos")]
         let new_accessibility_blocked = !self.paused && !accessibility::is_trusted();
         if !self.paused && new_keys != self.active_hotkeys() {
@@ -1401,6 +1449,7 @@ impl App {
         self.config = new_config;
         self.hotkey = new_hotkey;
         self.last_word_hotkey = new_last_word_hotkey;
+        self.transform_hotkeys = new_transforms;
         self.gesture = new_gesture;
         self.auto_monitor = new_auto_monitor;
         self.reset_auto_context();

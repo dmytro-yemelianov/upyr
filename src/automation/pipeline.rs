@@ -9,6 +9,8 @@ use std::time::{Duration, Instant};
 #[derive(Debug)]
 pub(crate) enum Request {
     Selection,
+    /// Transliterate or re-case the selection; never switches layouts.
+    Transform(upyr_core::TextTransform),
     PreviousWord,
     Undo {
         expected: String,
@@ -176,7 +178,7 @@ impl<E: Effects> Pipeline<E> {
         match std::mem::replace(&mut self.phase, Phase::Working) {
             Phase::Initial => {
                 self.selection = match &self.request {
-                    Request::Selection => Selection::Existing,
+                    Request::Selection | Request::Transform(_) => Selection::Existing,
                     Request::PreviousWord => Selection::Word,
                     Request::Automatic {
                         expected,
@@ -546,6 +548,9 @@ impl Effects for Desktop {
         Some(selected)
     }
     fn convert(&self, selected: &str, request: &Request) -> Conversion {
+        if let Request::Transform(transform) = request {
+            return super::transformed(selected, *transform);
+        }
         let replacement = match request {
             Request::Automatic { replacement, .. } | Request::Undo { replacement, .. } => {
                 Some(replacement.as_str())
@@ -760,6 +765,9 @@ mod tests {
             Some(selected)
         }
         fn convert(&self, selected: &str, request: &Request) -> Conversion {
+            if let Request::Transform(transform) = request {
+                return super::super::transformed(selected, *transform);
+            }
             match request {
                 Request::Automatic { replacement, .. } | Request::Undo { replacement, .. } => {
                     Conversion {
@@ -1088,6 +1096,21 @@ mod tests {
         drop(task);
         assert_eq!(state.borrow().pasted.as_deref(), Some("привіт"));
         assert_eq!(state.borrow().recoveries, 0);
+    }
+
+    #[test]
+    fn a_text_transform_replaces_the_selection_with_the_transformed_text() {
+        let (mut task, state, now) = task(
+            Request::Transform(upyr_core::TextTransform::Transliterate),
+            false,
+        );
+        state.borrow_mut().copied = Some("Київ".to_owned());
+        ready_to_paste(&mut task, now);
+        assert!(matches!(
+            next(&mut task).unwrap(),
+            Progress::Finished(Some(SelectionOutcome::Converted { .. }))
+        ));
+        assert_eq!(state.borrow().pasted.as_deref(), Some("Kyiv"));
     }
 
     #[test]

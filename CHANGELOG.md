@@ -16,6 +16,12 @@ change between minor releases while the version is below 1.0.
 
 ### Added
 
+- Transliterate the selection to Latin by the 2010 national system (`Київ` →
+  `Kyiv`, `Згорани` → `Zghorany`) and cycle its case (lower → UPPER → Title),
+  with optional `transliterate_hotkey` / `case_hotkey` shortcuts (off by
+  default) and `upyr transliterate` / `upyr case` for scripts. Neither
+  switches the layout. The system is not reversible, so there is no Latin →
+  Ukrainian direction.
 - Pause automatic correction in one app from the menu bar (macOS): "Pause
   automatic correction in <app>" names the app you were typing in and keeps it
   in `auto_correct_disabled_apps`; `upyr doctor` lists them.
