@@ -6,6 +6,14 @@ change between minor releases while the version is below 1.0.
 
 ## [Unreleased]
 
+### Security
+
+- Build `wayland-scanner` 0.31.11 from crates.io, which ships the
+  `quick-xml` 0.41 fix for RUSTSEC-2026-0194 / RUSTSEC-2026-0195, and drop the
+  vendored 0.31.10 backport and its `[patch]`. `cargo install upyr` no longer
+  builds against the unpatched scanner, since a `[patch]` never applied to
+  installs from crates.io.
+
 ### Fixed
 
 - An unreadable configuration file no longer stops Upyr from starting with no
