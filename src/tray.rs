@@ -65,7 +65,8 @@ impl Tray {
         let status = MenuItem::new(status_text(config, false), false, None);
         let previous_word = MenuItem::new("Fix previous word", true, None);
         let convert = MenuItem::new("Convert selected text", true, None);
-        let pause = CheckMenuItem::new("Pause shortcut", true, false, None);
+        let (pause_label, pause_checked) = pause_presentation(false);
+        let pause = CheckMenuItem::new(pause_label, true, pause_checked, None);
         let edit_config = MenuItem::new("Settings…", true, None);
         let about = MenuItem::new("About Upyr…", true, None);
         let reload_config = MenuItem::new("Reload configuration", true, None);
@@ -140,7 +141,7 @@ impl Tray {
     }
 
     pub fn update(&self, config: &Config, paused: bool) -> Result<()> {
-        self.pause.set_checked(paused);
+        self.pause.set_checked(pause_presentation(paused).1);
         let autostart_status = autostart::status()?;
         let (autostart_label, autostart_checked) = autostart_presentation(autostart_status.state);
         self.autostart.set_text(autostart_label);
@@ -260,8 +261,8 @@ impl ksni::Tray for LinuxTray {
             self.action_item("Fix previous word", TrayAction::ConvertPreviousWord),
             self.action_item("Convert selected text", TrayAction::ConvertSelection),
             KsniCheckmarkItem {
-                label: "Pause shortcut".to_owned(),
-                checked: self.paused,
+                label: pause_presentation(self.paused).0.to_owned(),
+                checked: pause_presentation(self.paused).1,
                 activate: Box::new(|tray: &mut Self| tray.emit(TrayAction::TogglePaused)),
                 ..Default::default()
             }
@@ -281,6 +282,13 @@ impl ksni::Tray for LinuxTray {
             self.action_item("Quit Upyr", TrayAction::Quit),
         ]
     }
+}
+
+/// Pausing stops every Upyr action (shortcuts, gestures, automatic
+/// correction, Globe switching and key sounds), so the item names the app
+/// rather than a shortcut. Its check mark shows the paused state.
+fn pause_presentation(paused: bool) -> (&'static str, bool) {
+    ("Pause Upyr", paused)
 }
 
 fn autostart_presentation(state: autostart::AutostartState) -> (&'static str, bool) {
@@ -521,6 +529,12 @@ mod tests {
         assert!(landing.scale_y < 1.0);
         assert!((settled.center_y - LOGICAL_CENTER).abs() < f32::EPSILON);
         assert_eq!((settled.scale_x, settled.scale_y), (1.0, 1.0));
+    }
+
+    #[test]
+    fn pause_item_names_the_whole_app_and_checks_while_paused() {
+        assert_eq!(pause_presentation(false), ("Pause Upyr", false));
+        assert_eq!(pause_presentation(true), ("Pause Upyr", true));
     }
 
     #[test]

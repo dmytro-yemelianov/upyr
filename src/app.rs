@@ -73,6 +73,8 @@ struct App {
     manager: GlobalHotKeyManager,
     hotkey: HotKey,
     last_word_hotkey: HotKey,
+    /// `upyr run --hotkey`, reapplied on top of every reloaded configuration.
+    hotkey_override: Option<String>,
     #[cfg(target_os = "macos")]
     undo_hotkey: HotKey,
     #[cfg(target_os = "macos")]
@@ -134,7 +136,10 @@ struct PendingUndo {
     expires: std::time::Instant,
 }
 
-pub fn run(config: Config) -> Result<()> {
+/// Runs the background app. `hotkey_override` is `upyr run --hotkey`; it is
+/// applied now and reapplied after every configuration reload.
+pub fn run(config: Config, hotkey_override: Option<String>) -> Result<()> {
+    let config = config.with_hotkey_override(hotkey_override.as_deref())?;
     config.validate()?;
     let instance = acquire_single_instance()?;
     if !instance.is_single() {
@@ -205,6 +210,7 @@ pub fn run(config: Config) -> Result<()> {
         manager,
         hotkey,
         last_word_hotkey,
+        hotkey_override,
         #[cfg(target_os = "macos")]
         undo_hotkey,
         #[cfg(target_os = "macos")]
@@ -712,6 +718,16 @@ impl App {
         }
     }
 
+    fn handle_modifier_gesture(&mut self, action: GestureAction) {
+        // Same rule as handle_hotkey: Settings is recording keys, so a
+        // double-tap there must not also convert text in the background app.
+        if settings::is_open() {
+            debug!("ignoring modifier gesture while Upyr Settings is open");
+            return;
+        }
+        self.perform_conversion(action == GestureAction::PreviousWord);
+    }
+
     fn active_hotkeys(&self) -> Vec<HotKey> {
         #[allow(unused_mut)]
         let mut keys = vec![self.hotkey, self.last_word_hotkey];
@@ -1164,12 +1180,12 @@ impl App {
             },
             &self.config,
         );
-        info!(paused = self.paused, "updated shortcut state");
+        info!(paused = self.paused, "updated pause state");
         Ok(())
     }
 
     fn reload_configuration(&mut self) -> Result<()> {
-        let new_config = Config::load()?;
+        let new_config = Config::load()?.with_hotkey_override(self.hotkey_override.as_deref())?;
         let (new_hotkey, new_last_word_hotkey) = parse_hotkeys(&new_config)?;
         #[cfg(target_os = "macos")]
         let new_undo: HotKey = new_config
@@ -1429,7 +1445,7 @@ impl ApplicationHandler<AppEvent> for App {
             #[cfg(target_os = "linux")]
             AppEvent::Tray(action) => self.handle_tray_action(event_loop, Some(action)),
             AppEvent::ModifierGesture(action) if !self.paused => {
-                self.perform_conversion(action == GestureAction::PreviousWord);
+                self.handle_modifier_gesture(action)
             }
             AppEvent::AutoKey(event) => self.handle_auto_key(event),
             AppEvent::KeySound(cue) => self.handle_key_sound(cue),
