@@ -91,6 +91,10 @@ change between minor releases while the version is below 1.0.
   `Привіт`), and Caps Lock is turned off for the next words.
 - The last word before Enter uses the short-word policy terminals already
   use, since no later word can resolve it: `nfr⏎` → `так⏎`, `zr⏎` → `як⏎`.
+- Manual conversion on macOS no longer rewrites typography. The installed
+  layout table included the Option layers, so converting a selection turned
+  `«`, `»`, `…` and `’` into `±`, `Ú` and `∏`; it now holds only the plain and
+  Shift layers the tracker reads (75 pairs on ABC + Ukrainian).
 
 ### Planned
 

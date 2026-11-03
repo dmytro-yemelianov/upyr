@@ -117,7 +117,6 @@ mod platform {
     const KEY_ACTION_DOWN: u16 = 0;
     const NO_DEAD_KEYS: u32 = 1;
     const SHIFT_MODIFIER: u32 = 2;
-    const OPTION_MODIFIER: u32 = 8;
     const MAX_TRANSLATED_UNITS: usize = 8;
 
     const KEY_CODES: &[u16] = &[
@@ -318,12 +317,9 @@ mod platform {
         let mut english_seen = HashSet::new();
         let mut ukrainian_seen = HashSet::new();
 
-        for modifier in [
-            0,
-            SHIFT_MODIFIER,
-            OPTION_MODIFIER,
-            SHIFT_MODIFIER | OPTION_MODIFIER,
-        ] {
+        // Plain and Shift only: those are the keys the tracker reads. The
+        // Option layer turned typography into junk on conversion (`«` -> `±`).
+        for modifier in [0, SHIFT_MODIFIER] {
             for key_code in KEY_CODES {
                 let Some(english_character) =
                     translate_key(english_layout, *key_code, modifier, keyboard_type)
