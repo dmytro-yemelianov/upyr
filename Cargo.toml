@@ -101,10 +101,3 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graph
 [profile.release]
 lto = "thin"
 strip = true
-
-# RUSTSEC-2026-0194 / RUSTSEC-2026-0195: crates.io still publishes
-# wayland-scanner 0.31.10 with quick-xml 0.39, while upstream master's
-# scanner code is no longer compatible with released wayland-client 0.31.14.
-# Keep the minimal compatible scanner backport until a patched release lands.
-[patch.crates-io]
-wayland-scanner = { path = "vendor/wayland-scanner-0.31.10" }

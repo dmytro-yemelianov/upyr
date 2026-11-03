@@ -166,7 +166,7 @@ mod platform {
 
     use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
     use objc2_app_kit::{
-        NSBackingStoreType, NSColor, NSEvent, NSFont, NSPanel, NSStatusWindowLevel,
+        NSBackingStoreType, NSColor, NSEvent, NSFont, NSPanel, NSScreen, NSStatusWindowLevel,
         NSTextAlignment, NSTextField, NSWindowCollectionBehavior, NSWindowStyleMask,
     };
     use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
@@ -193,14 +193,78 @@ mod platform {
         INDICATOR.with_borrow_mut(|indicator| {
             let indicator = indicator.get_or_insert_with(|| make_indicator(main_thread));
             indicator.label.setStringValue(&NSString::from_str(text));
-            let pointer = NSEvent::mouseLocation();
-            indicator
-                .panel
-                .setFrameOrigin(NSPoint::new(pointer.x + 16.0, pointer.y + 18.0));
+            let origin = CaretOnScreen::find(main_thread)
+                .map(|caret| caret.origin(LABEL))
+                .unwrap_or_else(|| {
+                    let pointer = NSEvent::mouseLocation();
+                    NSPoint::new(pointer.x + 16.0, pointer.y + 18.0)
+                });
+            indicator.panel.setFrameOrigin(origin);
             indicator.panel.orderFrontRegardless();
         });
         true
     }
+
+    /// The caret of the focused text and the screen that holds it, when the
+    /// app exposes the caret through Accessibility.
+    pub(super) struct CaretOnScreen {
+        caret: crate::caret::Rect,
+        main_height: f64,
+        pub screen: Retained<NSScreen>,
+    }
+
+    impl CaretOnScreen {
+        pub(super) fn find(main_thread: MainThreadMarker) -> Option<Self> {
+            let Some(caret) = crate::caret::caret() else {
+                tracing::debug!("the focused app exposes no caret; indicator stays off it");
+                return None;
+            };
+            let screens = NSScreen::screens(main_thread);
+            // The first screen is the main display, whose top left is the
+            // origin of the caret's coordinates.
+            let main_height = screens.firstObject()?.frame().size.height;
+            let middle = NSPoint::new(caret.x, main_height - caret.y - caret.height / 2.0);
+            let screen = screens.to_vec().into_iter().find(|screen| {
+                let frame = screen.frame();
+                middle.x >= frame.origin.x
+                    && middle.y >= frame.origin.y
+                    && middle.x < frame.origin.x + frame.size.width
+                    && middle.y < frame.origin.y + frame.size.height
+            })?;
+            Some(Self {
+                caret,
+                main_height,
+                screen,
+            })
+        }
+
+        /// Where `panel` goes next to the caret.
+        pub(super) fn origin(&self, panel: crate::caret::Panel) -> NSPoint {
+            let visible = self.screen.visibleFrame();
+            let (x, y) = crate::caret::panel_origin(
+                self.caret,
+                self.main_height,
+                panel,
+                crate::caret::Rect {
+                    x: visible.origin.x,
+                    y: visible.origin.y,
+                    width: visible.size.width,
+                    height: visible.size.height,
+                },
+            );
+            NSPoint::new(x, y)
+        }
+    }
+
+    const INDICATOR_WIDTH: f64 = 94.0;
+    const INDICATOR_HEIGHT: f64 = 42.0;
+    const LABEL: crate::caret::Panel = crate::caret::Panel {
+        width: INDICATOR_WIDTH,
+        height: INDICATOR_HEIGHT,
+        margin_x: 0.0,
+        margin_y: 0.0,
+        place: crate::caret::Place::Below,
+    };
 
     pub fn hide_indicator() {
         if MainThreadMarker::new().is_none() {
@@ -214,7 +278,7 @@ mod platform {
     }
 
     fn make_indicator(main_thread: MainThreadMarker) -> Indicator {
-        let size = NSSize::new(94.0, 42.0);
+        let size = NSSize::new(INDICATOR_WIDTH, INDICATOR_HEIGHT);
         let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
             NSPanel::alloc(main_thread),
             NSRect::new(NSPoint::new(0.0, 0.0), size),

@@ -42,5 +42,5 @@ jobs:
           severity: "CRITICAL,HIGH"
           ignore-unfixed: true
           exit-code: "1"
-          # Vendored crates and generated corpora are not our attack surface.
-          skip-dirs: "target,vendor,crates/upyr-core/fixtures"
+          # Build output and generated corpora are not our attack surface.
+          skip-dirs: "target,crates/upyr-core/fixtures"

@@ -29,6 +29,9 @@ use std::{
 
 const SLOT: f64 = 78.0;
 const HEIGHT: f64 = 100.0;
+/// Next to the caret the row shrinks to its active flag at this size, so it
+/// covers as little text as possible.
+const CARET_SIZE: f64 = 0.5;
 
 define_class!(
     #[unsafe(super = NSPanel)]
@@ -58,6 +61,8 @@ struct Indicator {
     active: Option<String>,
     generation: Rc<Cell<u64>>,
     backing_scale: f64,
+    /// Scale of the row: 1, or `CARET_SIZE` next to the caret.
+    size: f64,
 }
 
 thread_local! {
@@ -76,43 +81,79 @@ pub(super) fn show(active: Option<&str>, previous: Option<&str>, config: &Config
     else {
         return false;
     };
-    let items = items(active, previous, config);
-    let Some(target) = items.iter().position(|item| item.id == active) else {
+    let mut items = items(active, previous, config);
+    let Some(mut target) = items.iter().position(|item| item.id == active) else {
         return false;
     };
-    let pointer = NSEvent::mouseLocation();
-    let screens = NSScreen::screens(mtm);
-    let screen = screens
-        .to_vec()
-        .into_iter()
-        .find(|screen| {
-            let frame = screen.frame();
-            pointer.x >= frame.origin.x
-                && pointer.y >= frame.origin.y
-                && pointer.x < frame.origin.x + frame.size.width
-                && pointer.y < frame.origin.y + frame.size.height
-        })
-        .or_else(|| NSScreen::mainScreen(mtm));
-    let Some(screen) = screen else { return false };
+    // Next to the caret, when the app exposes it, only the active flag shows,
+    // small: the others would cover the text before the caret. Otherwise the
+    // whole row shows near the bottom of the pointer's screen.
+    let caret = super::platform::CaretOnScreen::find(mtm);
+    let size = if caret.is_some() {
+        items = vec![items.swap_remove(target)];
+        target = 0;
+        CARET_SIZE
+    } else {
+        1.0
+    };
+    let width = SLOT * size * (2 * items.len() - 1) as f64;
+    let height = HEIGHT * size;
+    let screen = match &caret {
+        Some(caret) => caret.screen.clone(),
+        None => {
+            let pointer = NSEvent::mouseLocation();
+            let screen = NSScreen::screens(mtm)
+                .to_vec()
+                .into_iter()
+                .find(|screen| {
+                    let frame = screen.frame();
+                    pointer.x >= frame.origin.x
+                        && pointer.y >= frame.origin.y
+                        && pointer.x < frame.origin.x + frame.size.width
+                        && pointer.y < frame.origin.y + frame.size.height
+                })
+                .or_else(|| NSScreen::mainScreen(mtm));
+            let Some(screen) = screen else { return false };
+            screen
+        }
+    };
     INDICATOR.with_borrow_mut(|stored| {
         let indicator = stored.get_or_insert_with(|| Indicator::new(mtm));
         let was_showing = indicator.panel.isVisible();
-        let width = SLOT * (2 * items.len() - 1) as f64;
-        let visible = screen.visibleFrame();
-        indicator.panel.setFrame_display(
-            NSRect::new(
+        let rebuilt = indicator.items != items
+            || indicator.backing_scale != screen.backingScaleFactor()
+            || indicator.size != size;
+        if rebuilt {
+            indicator.rebuild(items, screen.backingScaleFactor(), size);
+        }
+        let origin = match &caret {
+            Some(caret) => {
+                // The flag is drawn in the middle of the panel.
+                let drawn = indicator
+                    .layers
+                    .get(target)
+                    .map_or(NSSize::new(width, height), |layer| layer.bounds().size);
+                caret.origin(crate::caret::Panel {
+                    width,
+                    height,
+                    margin_x: ((width - drawn.width) / 2.0).max(0.0),
+                    margin_y: ((height - drawn.height) / 2.0).max(0.0),
+                    place: crate::caret::Place::Superscript,
+                })
+            }
+            None => {
+                let visible = screen.visibleFrame();
                 NSPoint::new(
                     visible.origin.x + (visible.size.width - width) / 2.0,
                     visible.origin.y + visible.size.height * 0.16,
-                ),
-                NSSize::new(width, HEIGHT),
-            ),
-            false,
-        );
-        if indicator.items != items || indicator.backing_scale != screen.backingScaleFactor() {
-            indicator.rebuild(items, screen.backingScaleFactor());
-        }
-        if !was_showing {
+                )
+            }
+        };
+        indicator
+            .panel
+            .setFrame_display(NSRect::new(origin, NSSize::new(width, height)), false);
+        // New layers start in place rather than flying in from the corner.
+        if !was_showing || rebuilt {
             let previous = previous.or(indicator.active.as_deref());
             let start = previous
                 .and_then(|id| indicator.items.iter().position(|item| item.id == id))
@@ -198,23 +239,26 @@ impl Indicator {
             active: None,
             generation: Rc::new(Cell::new(0)),
             backing_scale: 0.0,
+            size: 1.0,
         }
     }
 
-    fn rebuild(&mut self, items: Vec<Item>, scale: f64) {
+    fn rebuild(&mut self, items: Vec<Item>, scale: f64, size: f64) {
         for layer in &self.layers {
             layer.removeFromSuperlayer();
         }
-        self.layers = layers(&self.root, &items, scale);
+        self.layers = layers(&self.root, &items, scale, size);
         self.items = items;
         self.backing_scale = scale;
+        self.size = size;
     }
 
     fn arrange(&self, selected: usize, animated: bool) {
         arrange_layers(
             &self.layers,
             selected,
-            SLOT * (2 * self.layers.len() - 1) as f64 / 2.0,
+            SLOT * self.size * (2 * self.layers.len() - 1) as f64 / 2.0,
+            self.size,
             animated,
         );
     }
@@ -239,12 +283,12 @@ fn animate(layer: &CALayer, key: &str, value: &AnyObject, animated: bool) {
     }
 }
 
-fn picture(item: &Item) -> Retained<NSImage> {
-    let (text, size) = match &item.flag {
+fn picture(item: &Item, size: f64) -> Retained<NSImage> {
+    let (text, points) = match &item.flag {
         Some(Flag::Text(text)) => (text.as_str(), 56.0),
         _ => (item.name.as_str(), 26.0),
     };
-    let font = NSFont::boldSystemFontOfSize(size);
+    let font = NSFont::boldSystemFontOfSize(points * size);
     let color = NSColor::whiteColor();
     let values: [&AnyObject; 2] = [&font, &color];
     let attributes = NSDictionary::from_slices(
@@ -301,7 +345,7 @@ fn items(active: &str, previous: Option<&str>, config: &Config) -> Vec<Item> {
         .collect()
 }
 
-fn layers(root: &CALayer, items: &[Item], scale: f64) -> Vec<Retained<CALayer>> {
+fn layers(root: &CALayer, items: &[Item], scale: f64, size: f64) -> Vec<Retained<CALayer>> {
     items
         .iter()
         .map(|item| {
@@ -309,9 +353,16 @@ fn layers(root: &CALayer, items: &[Item], scale: f64) -> Vec<Retained<CALayer>> 
                 Some(Flag::Region(region)) => globe_flags::png(region).and_then(pixel_flag_layer),
                 _ => None,
             };
+            if let Some(layer) = &bitmap {
+                let bounds = layer.bounds();
+                layer.setBounds(NSRect::new(
+                    bounds.origin,
+                    NSSize::new(bounds.size.width * size, bounds.size.height * size),
+                ));
+            }
             let layer = bitmap.unwrap_or_else(|| {
                 let layer = CALayer::new();
-                let image = picture(item);
+                let image = picture(item, size);
                 layer.setBounds(NSRect::new(NSPoint::new(0.0, 0.0), image.size()));
                 layer.setContentsScale(scale);
                 unsafe { layer.setContents(Some(&image.layerContentsForContentsScale(scale))) };
@@ -324,7 +375,13 @@ fn layers(root: &CALayer, items: &[Item], scale: f64) -> Vec<Retained<CALayer>> 
         .collect()
 }
 
-fn arrange_layers(layers: &[Retained<CALayer>], selected: usize, centre: f64, animated: bool) {
+fn arrange_layers(
+    layers: &[Retained<CALayer>],
+    selected: usize,
+    centre: f64,
+    size: f64,
+    animated: bool,
+) {
     let glow = NSColor::controlAccentColor().CGColor();
     let shade = NSColor::blackColor().CGColor();
     CATransaction::begin();
@@ -333,8 +390,8 @@ fn arrange_layers(layers: &[Retained<CALayer>], selected: usize, centre: f64, an
         let active = index == selected;
         let position = unsafe {
             NSValue::valueWithPoint(NSPoint::new(
-                centre + (index as f64 - selected as f64) * SLOT,
-                HEIGHT / 2.0,
+                centre + (index as f64 - selected as f64) * SLOT * size,
+                HEIGHT * size / 2.0,
             ))
         };
         animate(layer, "position", &position, animated);
@@ -360,7 +417,7 @@ fn arrange_layers(layers: &[Retained<CALayer>], selected: usize, centre: f64, an
         animate(
             layer,
             "shadowRadius",
-            &NSNumber::new_f64(if active { 10.0 } else { 3.0 }),
+            &NSNumber::new_f64(if active { 10.0 } else { 3.0 } * size),
             animated,
         );
     }
@@ -390,8 +447,8 @@ pub(crate) fn preview(
             let scale = view
                 .window()
                 .map_or(2.0, |window| window.backingScaleFactor());
-            let layers = layers(&root, &items, scale);
-            arrange_layers(&layers, target, frame.size.width / 2.0, false);
+            let layers = layers(&root, &items, scale, 1.0);
+            arrange_layers(&layers, target, frame.size.width / 2.0, 1.0, false);
         }
     }
     view

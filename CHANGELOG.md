@@ -6,68 +6,50 @@ change between minor releases while the version is below 1.0.
 
 ## [Unreleased]
 
-### Fixed
+### Security
 
-- Stop automatic correction from rewriting a correctly typed word that collides
-  with a dictionary word on the other layout (`руку` is no longer turned into
-  `here`).
-- Rewrite only the confident word, not earlier words that clearly belong to the
-  typed language: `ok ghbdsn` becomes `ok привіт`, not `щл привіт`. Ambiguous
-  earlier words are still corrected together (`nfr f xb ,elt` → `так а чи буде`).
-- Keep a final `ю` or `б` as a letter when the whole word reads better than the
-  punctuated stem (`hj,k.` → `роблю`, not `робл.`).
-- Let words on the Exceptions list override the built-in correction rules, and
-  let a `keep` rule win over a broader `correct` rule regardless of order.
-- Convert the Ukrainian shifted number row (`"`, `№`, `;`, `:`, `?`) in the
-  built-in layout table used by the CLI and as the fallback for conversion.
-- Keep typing through an automatic correction on macOS: keys pressed while
-  Upyr selects, copies and pastes the corrected word now wait in the target
-  app and follow the paste in order, instead of replacing the selected word.
-  A click during the edit cancels it and the held keys follow the click.
-- Stamp the input counters before the slower focus queries, so a key typed
-  during them cancels a terminal edit instead of being backspaced.
-- Collapse a selection whose copy arrived late with one arrow instead of
-  moving the caret past the word, and release the selection when the selected
-  text has nothing to convert.
-  built-in layout table used by the CLI and as the fallback for conversion.
-- Correct words with number-row punctuation and hyphens while typing. The live
-  tracker used to drop every digit-row key and `-`, so `ghbdsn!`, `ghbdsn?`
-  (Shift+7), `"ghbdsn"`, `(ghbdsn)` and `,elm-zrbq` were never corrected even
-  though the engine handled them. Bare digits still end tracking (`h264`,
-  `mp3`), and `@handle` and `user@host` stay technical while a quoted `@word@`
-  does not. Applies to the desktop app, terminal typing and the web demo.
-- Score words with the macOS Ukrainian apostrophe `ʼ` (typed on the backslash
-  key of the default Ukrainian layout) and the typographic `’` like ASCII `'`.
-  `пʼять` and `мʼясо` typed on the English layout were never corrected.
-- Prefer the current macOS default Ukrainian layout (Ukrainian-PC, shown as
-  "Ukrainian") over "Ukrainian – Legacy" when switching after a correction.
-- Treat a layout as English only when English is its primary language and its
-  letters are in QWERTY order. German, Hebrew, Polish and similar layouts that
-  merely list English, and Dvorak, Colemak, QWERTZ and AZERTY, used to be read
-  as US QWERTY, which could rewrite the wrong text; they are now unsupported.
-- Keep the selection aligned with the screen after a double space, which used
-  to make a multi-word correction fail its copy check.
-- Replay clicks, Enter, Tab and arrows that happen during a correction, so the
-  next word is not joined to the previous one (`ok`, click, `ckjdj` → `okckjdj`).
-- Unchecking "/commands in Superset" now also removes Superset from terminal
-  typing, which checking it had silently enabled.
-- An exception typed as "two words" is saved as two exceptions instead of
-  blocking every other change in Settings.
-- `upyr run --hotkey` survives configuration reloads and Settings saves.
-- The modifier gesture no longer converts text while Settings is open.
-- Windows and Linux: a conversion shortcut equal to the macOS-only undo
-  shortcut no longer blocks saving, and Settings search no longer lists
-  controls those platforms do not have.
-- The tray item is "Pause Upyr", since pausing stops every action.
-- Web demo: on-screen Shift and Caps Lock reach the engine, a real keyboard's
-  layout is read from the typed character, and "Corrected" appears only when
-  the text was actually replaced.
-- Site and README: the Anime pack's six event cues are pre-rendered clips;
-  automatic correction happens after Space; the browser adapter and live demo
-  already ship; maintainer tools that download data are listed.
+- Build `wayland-scanner` 0.31.11 from crates.io, which ships the
+  `quick-xml` 0.41 fix for RUSTSEC-2026-0194 / RUSTSEC-2026-0195, and drop the
+  vendored 0.31.10 backport and its `[patch]`. `cargo install upyr` no longer
+  builds against the unpatched scanner, since a `[patch]` never applied to
+  installs from crates.io.
 
 ### Added
 
+- macOS: the layout indicator appears next to the caret of the text being
+  typed, in apps that expose the caret through Accessibility. The letters sit
+  just below the caret line. The flag shrinks to the active layout's flag at
+  half size, just after the caret and raised off the line like a superscript,
+  so it covers neither the text before the caret nor the next line.
+  Elsewhere the whole flag row stays near the bottom of the screen and the
+  letters follow the pointer. `upyr doctor` reports what the focused app
+  exposes.
+- `upyr shell-init zsh|bash|fish`: prompt widgets that convert the command
+  line (Ctrl+X Ctrl+L) or the word before the cursor (Ctrl+X L; the active
+  region in zsh) through `upyr convert`, preferring the installed layouts.
+  The script calls the Upyr that printed it. Tested in real interactive
+  zsh, bash 4.4–5.2 and fish through a pseudo-terminal
+  (`tools/test_shell_widgets.py`), now also in CI.
+- macOS: Backspace as the first key after an automatic correction reverts it
+  (`backspace_undo`, on by default); the word comes back as typed, without
+  the space or punctuation the Backspace deleted. This works in the
+  `terminal_typing_apps` too.
+- macOS: Upyr learns from your own fixes (`auto_correct_learning`, on by
+  default). A correction you revert twice with the undo shortcut becomes an
+  exception for that word; a word you convert by hand twice becomes a
+  `correct` rule. A Backspace revert teaches nothing, since that Backspace
+  is often meant for the space. A revert followed by converting the same
+  word back counts as a slip, not a lesson,
+  and a learned rule never overrides your own exception or rule.
+- Transliterate the selection to Latin by the 2010 national system (`Київ` →
+  `Kyiv`, `Згорани` → `Zghorany`) and cycle its case (lower → UPPER → Title),
+  with optional `transliterate_hotkey` / `case_hotkey` shortcuts (off by
+  default) and `upyr transliterate` / `upyr case` for scripts. Neither
+  switches the layout. The system is not reversible, so there is no Latin →
+  Ukrainian direction.
+- Pause automatic correction in one app from the menu bar (macOS): "Pause
+  automatic correction in <app>" names the app you were typing in and keeps it
+  in `auto_correct_disabled_apps`; `upyr doctor` lists them.
 - Correct the last word before Enter on macOS. While a word that would be
   corrected is being typed, the target app's input tap is armed; Enter is held
   there until the corrected word is pasted, then follows it, so a chat message
@@ -106,6 +88,76 @@ change between minor releases while the version is below 1.0.
   Dvorak, Colemak or Workman variants are unsupported rather than misread as
   QWERTY. The layout notification now follows the configured indicator
   duration and replaces the previous one instead of stacking.
+
+### Fixed
+
+- `ок` typed on the English layout (`jr`) and `ok` typed on the Ukrainian one
+  (`щл`) are corrected; the model abstained on `jr` (it reads half-English),
+  so both are built-in rules now.
+- An unreadable configuration file no longer stops Upyr from starting with no
+  message. The background app runs with defaults (on macOS it explains why and
+  offers to open Settings), and Settings opens on the defaults, names the
+  problem, and replaces the file on Save.
+- Linux: key and event sounds no longer leave a finished `canberra-gtk-play`
+  process behind per sound (a zombie per keystroke with key clicks on), and at
+  most eight players run at once. Opening Settings or a link from Settings no
+  longer leaves a zombie either.
+- Stop automatic correction from rewriting a correctly typed word that collides
+  with a dictionary word on the other layout (`руку` is no longer turned into
+  `here`).
+- Rewrite only the confident word, not earlier words that clearly belong to the
+  typed language: `ok ghbdsn` becomes `ok привіт`, not `щл привіт`. Ambiguous
+  earlier words are still corrected together (`nfr f xb ,elt` → `так а чи буде`).
+- Keep a final `ю` or `б` as a letter when the whole word reads better than the
+  punctuated stem (`hj,k.` → `роблю`, not `робл.`).
+- Let words on the Exceptions list override the built-in correction rules, and
+  let a `keep` rule win over a broader `correct` rule regardless of order.
+- Convert the Ukrainian shifted number row (`"`, `№`, `;`, `:`, `?`) in the
+  built-in layout table used by the CLI and as the fallback for conversion.
+- Keep typing through an automatic correction on macOS: keys pressed while
+  Upyr selects, copies and pastes the corrected word now wait in the target
+  app and follow the paste in order, instead of replacing the selected word.
+  A click during the edit cancels it and the held keys follow the click.
+- Stamp the input counters before the slower focus queries, so a key typed
+  during them cancels a terminal edit instead of being backspaced.
+- Collapse a selection whose copy arrived late with one arrow instead of
+  moving the caret past the word, and release the selection when the selected
+  text has nothing to convert.
+- Correct words with number-row punctuation and hyphens while typing. The live
+  tracker used to drop every digit-row key and `-`, so `ghbdsn!`, `ghbdsn?`
+  (Shift+7), `"ghbdsn"`, `(ghbdsn)` and `,elm-zrbq` were never corrected even
+  though the engine handled them. Bare digits still end tracking (`h264`,
+  `mp3`), and `@handle` and `user@host` stay technical while a quoted `@word@`
+  does not. Applies to the desktop app, terminal typing and the web demo.
+- Score words with the macOS Ukrainian apostrophe `ʼ` (typed on the backslash
+  key of the default Ukrainian layout) and the typographic `’` like ASCII `'`.
+  `пʼять` and `мʼясо` typed on the English layout were never corrected.
+- Prefer the current macOS default Ukrainian layout (Ukrainian-PC, shown as
+  "Ukrainian") over "Ukrainian – Legacy" when switching after a correction.
+- Treat a layout as English only when English is its primary language and its
+  letters are in QWERTY order. German, Hebrew, Polish and similar layouts that
+  merely list English, and Dvorak, Colemak, QWERTZ and AZERTY, used to be read
+  as US QWERTY, which could rewrite the wrong text; they are now unsupported.
+- Keep the selection aligned with the screen after a double space, which used
+  to make a multi-word correction fail its copy check.
+- Replay clicks, Enter, Tab and arrows that happen during a correction, so the
+  next word is not joined to the previous one (`ok`, click, `ckjdj` → `okckjdj`).
+- Unchecking "/commands in Superset" now also removes Superset from terminal
+  typing, which checking it had silently enabled.
+- An exception typed as "two words" is saved as two exceptions instead of
+  blocking every other change in Settings.
+- `upyr run --hotkey` survives configuration reloads and Settings saves.
+- The modifier gesture no longer converts text while Settings is open.
+- Windows and Linux: a conversion shortcut equal to the macOS-only undo
+  shortcut no longer blocks saving, and Settings search no longer lists
+  controls those platforms do not have.
+- The tray item is "Pause Upyr", since pausing stops every action.
+- Web demo: on-screen Shift and Caps Lock reach the engine, a real keyboard's
+  layout is read from the typed character, and "Corrected" appears only when
+  the text was actually replaced.
+- Site and README: the Anime pack's six event cues are pre-rendered clips;
+  automatic correction happens after Space; the browser adapter and live demo
+  already ship; maintainer tools that download data are listed.
 
 ### Known limitations
 

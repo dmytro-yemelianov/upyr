@@ -89,11 +89,16 @@ struct App {
     conversion: Option<PendingConversion>,
     #[cfg(target_os = "macos")]
     line_break: LineBreak,
+    /// Bundle identifier of the app last typed in, named by the tray item.
+    #[cfg(target_os = "macos")]
+    typing_app: Option<String>,
     #[cfg(target_os = "macos")]
     queued_conversion: Option<PendingConversion>,
     manager: GlobalHotKeyManager,
     hotkey: HotKey,
     last_word_hotkey: HotKey,
+    /// Optional transliterate / change-case shortcuts.
+    transform_hotkeys: Vec<(upyr_core::TextTransform, HotKey)>,
     /// `upyr run --hotkey`, reapplied on top of every reloaded configuration.
     hotkey_override: Option<String>,
     #[cfg(target_os = "macos")]
@@ -102,6 +107,9 @@ struct App {
     undo_record: Option<UndoRecord>,
     #[cfg(target_os = "macos")]
     pending_undo: Option<PendingUndo>,
+    /// Counts the user's own fixes until one repeats (see `learning`).
+    #[cfg(target_os = "macos")]
+    learner: crate::learning::Learner,
     config: Config,
     event_proxy: EventLoopProxy<AppEvent>,
     gesture: Option<ModifierGestureMonitor>,
@@ -139,6 +147,9 @@ struct PendingConversion {
     task: ConversionTask,
     automatic_generation: Option<u64>,
     undo_candidate: Option<UndoRecord>,
+    /// For an undo: the text as typed that it restores, and how the user
+    /// asked for it.
+    reverted: Option<(String, crate::learning::Revert)>,
 }
 
 #[cfg(target_os = "macos")]
@@ -150,9 +161,34 @@ struct UndoRecord {
     target: FocusTarget,
     expires: std::time::Instant,
 }
+
+#[cfg(target_os = "macos")]
+impl UndoRecord {
+    /// The same undo after a Backspace removed the correction's last
+    /// character (the space or punctuation that ended the word): the word is
+    /// restored without it. None when nothing of the word would be left.
+    fn after_backspace(mut self) -> Option<Self> {
+        (self.corrected, self.original) = after_backspace(&self.corrected, &self.original)?;
+        Some(self)
+    }
+}
+
+/// `corrected` and `original` without their last character, unless nothing
+/// of the word would be left.
+#[cfg(target_os = "macos")]
+fn after_backspace(corrected: &str, original: &str) -> Option<(String, String)> {
+    let drop_last = |text: &str| {
+        let mut text = text.to_owned();
+        text.pop()?;
+        (!text.trim().is_empty()).then_some(text)
+    };
+    Some((drop_last(corrected)?, drop_last(original)?))
+}
+
 #[cfg(target_os = "macos")]
 struct PendingUndo {
     record: UndoRecord,
+    how: crate::learning::Revert,
     ready_at: std::time::Instant,
     expires: std::time::Instant,
 }
@@ -173,10 +209,12 @@ pub fn run(config: Config, hotkey_override: Option<String>) -> Result<()> {
         .undo_hotkey
         .parse()
         .context("invalid undo shortcut")?;
+    let transform_hotkeys = config.transform_hotkeys()?;
     #[allow(unused_mut)]
     let mut startup_keys = vec![hotkey, last_word_hotkey];
     #[cfg(target_os = "macos")]
     startup_keys.push(undo_hotkey);
+    startup_keys.extend(transform_hotkeys.iter().map(|(_, key)| *key));
     let manager = GlobalHotKeyManager::new().context("failed to initialize global hotkeys")?;
     manager.register_all(&startup_keys).with_context(|| {
         format!(
@@ -231,6 +269,7 @@ pub fn run(config: Config, hotkey_override: Option<String>) -> Result<()> {
         manager,
         hotkey,
         last_word_hotkey,
+        transform_hotkeys,
         hotkey_override,
         #[cfg(target_os = "macos")]
         undo_hotkey,
@@ -239,7 +278,11 @@ pub fn run(config: Config, hotkey_override: Option<String>) -> Result<()> {
         #[cfg(target_os = "macos")]
         line_break: LineBreak::default(),
         #[cfg(target_os = "macos")]
+        typing_app: None,
+        #[cfg(target_os = "macos")]
         pending_undo: None,
+        #[cfg(target_os = "macos")]
+        learner: crate::learning::Learner::default(),
         config,
         event_proxy,
         gesture,
@@ -509,6 +552,44 @@ impl App {
         self.set_auto_suspended(false);
     }
 
+    /// Transliterates or re-cases the selection; the layout never changes.
+    #[cfg(target_os = "macos")]
+    fn perform_transform(&mut self, transform: upyr_core::TextTransform) {
+        self.clear_undo();
+        let mut config = self.config.clone();
+        config.switch_layout = false;
+        self.start_conversion(
+            ConversionRequest::Transform(transform),
+            config,
+            None,
+            None,
+            None,
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn perform_transform(&mut self, transform: upyr_core::TextTransform) {
+        if self.processing {
+            return;
+        }
+        self.processing = true;
+        self.set_auto_suspended(true);
+        self.reset_auto_context();
+        match crate::automation::transform_selection(&self.config, transform) {
+            Ok(SelectionOutcome::Converted { .. }) => info!(?transform, "transformed selection"),
+            Ok(outcome) => {
+                debug!(?transform, ?outcome, "selection was not transformed");
+                self.play_error_sound();
+            }
+            Err(error) => {
+                error!(%error, "selection transform failed");
+                self.play_error_sound();
+            }
+        }
+        self.processing = false;
+        self.set_auto_suspended(false);
+    }
+
     #[cfg(target_os = "macos")]
     fn perform_conversion(&mut self, previous_word: bool) {
         #[cfg(target_os = "macos")]
@@ -518,7 +599,7 @@ impl App {
         } else {
             ConversionRequest::Selection
         };
-        self.start_conversion(request, self.config.clone(), None, None);
+        self.start_conversion(request, self.config.clone(), None, None, None);
     }
 
     #[cfg(target_os = "macos")]
@@ -528,6 +609,7 @@ impl App {
         config: Config,
         generation: Option<u64>,
         held: Option<(i32, std::sync::Arc<crate::automation::HoldSignal>)>,
+        revert: Option<crate::learning::Revert>,
     ) {
         if self.processing {
             if let Some((pid, _)) = held {
@@ -540,6 +622,12 @@ impl App {
                 expected,
                 replacement,
             } => Some((expected.clone(), replacement.clone())),
+            _ => None,
+        };
+        let reverted = match (&request, revert) {
+            (ConversionRequest::Undo { replacement, .. }, Some(how)) => {
+                Some((replacement.clone(), how))
+            }
             _ => None,
         };
         let direction = config.direction;
@@ -573,6 +661,7 @@ impl App {
             task,
             automatic_generation: generation,
             undo_candidate,
+            reverted,
         };
         if self.conversion.is_some() {
             // The previous paste has committed and only clipboard cleanup is
@@ -624,6 +713,7 @@ impl App {
                 self.finish_editing();
                 if matches!(outcome, SelectionOutcome::Converted { .. }) {
                     self.undo_record = pending.undo_candidate.take();
+                    self.learn_from(&pending);
                 }
                 self.report_conversion(outcome, automatic);
                 self.conversion = Some(pending);
@@ -634,6 +724,7 @@ impl App {
                     if let Some(outcome) = outcome {
                         if matches!(outcome, SelectionOutcome::Converted { .. }) {
                             self.undo_record = pending.undo_candidate.take();
+                            self.learn_from(&pending);
                         }
                         self.report_conversion(outcome, automatic);
                     }
@@ -736,11 +827,20 @@ impl App {
                 if record.expires > now && record.target.is_current() {
                     self.pending_undo = Some(PendingUndo {
                         record,
+                        how: crate::learning::Revert::Shortcut,
                         ready_at: now,
                         expires: now + std::time::Duration::from_secs(2),
                     });
                 }
             }
+            return;
+        }
+        if let Some(&(transform, _)) = self
+            .transform_hotkeys
+            .iter()
+            .find(|(_, key)| key.id() == event.id)
+        {
+            self.perform_transform(transform);
             return;
         }
         if event.id == self.hotkey.id() {
@@ -765,6 +865,7 @@ impl App {
         let mut keys = vec![self.hotkey, self.last_word_hotkey];
         #[cfg(target_os = "macos")]
         keys.push(self.undo_hotkey);
+        keys.extend(self.transform_hotkeys.iter().map(|(_, key)| *key));
         keys
     }
 
@@ -787,15 +888,90 @@ impl App {
 
     #[cfg(target_os = "macos")]
     fn handle_activity(&mut self, activity: crate::auto_correct_monitor::ActivityEvent) {
-        let undo_chord = match activity {
-            crate::auto_correct_monitor::ActivityEvent::Key { code, flags } => {
-                crate::hotkey_bindings::matches_mac(self.undo_hotkey, code, flags)
-            }
-            crate::auto_correct_monitor::ActivityEvent::Pointer => false,
+        /// kVK_Delete, the Backspace key.
+        const BACKSPACE: u16 = 51;
+        /// Shift, Control, Option and Command.
+        const MODIFIERS: usize = 0b1111 << 17;
+        let (undo_chord, backspace) = match activity {
+            crate::auto_correct_monitor::ActivityEvent::Key { code, flags } => (
+                crate::hotkey_bindings::matches_mac(self.undo_hotkey, code, flags),
+                code == BACKSPACE && flags & MODIFIERS == 0,
+            ),
+            crate::auto_correct_monitor::ActivityEvent::Pointer => (false, false),
         };
+        if backspace && self.revert_on_backspace() {
+            return;
+        }
         if !undo_chord {
             self.clear_undo();
         }
+    }
+
+    /// Backspace as the first key after an automatic correction reverts it.
+    /// The Backspace itself goes through and deletes the character that ended
+    /// the word, so the word comes back as typed with the caret after it. A
+    /// second key before the revert starts (holding Backspace, say) cancels
+    /// it as any other key does.
+    #[cfg(target_os = "macos")]
+    fn revert_on_backspace(&mut self) -> bool {
+        if !self.config.backspace_undo
+            || self.pending_undo.is_some()
+            || self.processing
+            || self.paused
+        {
+            return false;
+        }
+        let Some(record) = self.undo_record.take() else {
+            return false;
+        };
+        let now = std::time::Instant::now();
+        if record.expires <= now || !record.target.is_current() {
+            return false;
+        }
+        let Some(record) = record.after_backspace() else {
+            return false;
+        };
+        debug!("Backspace after an automatic correction: reverting it");
+        self.pending_undo = Some(PendingUndo {
+            record,
+            how: crate::learning::Revert::Backspace,
+            // Let the editor apply the Backspace before the word is selected.
+            ready_at: now + std::time::Duration::from_millis(40),
+            expires: now + std::time::Duration::from_secs(2),
+        });
+        true
+    }
+
+    /// Counts a successful undo or manual conversion toward a lesson, and
+    /// saves the lesson once the same fix has repeated.
+    #[cfg(target_os = "macos")]
+    fn learn_from(&mut self, pending: &PendingConversion) {
+        if !self.config.auto_correct || !self.config.auto_correct_learning {
+            return;
+        }
+        let lesson = match (&pending.reverted, pending.task.manual_source()) {
+            (Some((original, how)), _) => self.learner.reverted(original, *how),
+            (None, Some(source)) => self.learner.converted(source),
+            (None, None) => None,
+        };
+        if let Some(lesson) = lesson {
+            if let Err(error) = self.remember(&lesson) {
+                warn!(%error, "could not save what was learned from a fix");
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn remember(&mut self, lesson: &crate::learning::Lesson) -> Result<()> {
+        let mut config = Config::load()?;
+        if !config.learn(lesson) {
+            return Ok(());
+        }
+        config.write(true)?;
+        info!(?lesson, "learned from a repeated fix");
+        self.config.auto_correct_exceptions = config.auto_correct_exceptions;
+        self.config.auto_correct_rules = config.auto_correct_rules;
+        Ok(())
     }
 
     #[cfg(target_os = "macos")]
@@ -850,6 +1026,7 @@ impl App {
             config,
             None,
             None,
+            Some(pending.how),
         );
     }
 
@@ -858,6 +1035,12 @@ impl App {
         if self.paused || self.processing || !self.config.auto_correct {
             #[cfg(target_os = "macos")]
             self.slash_tracker.invalidate();
+            return;
+        }
+        #[cfg(target_os = "macos")]
+        if self.auto_correct_paused_here() {
+            self.auto_tracker.clear();
+            crate::automation::disarm_line_break();
             return;
         }
         #[cfg(target_os = "macos")]
@@ -1106,6 +1289,7 @@ impl App {
             config,
             Some(generation),
             None,
+            None,
         );
     }
 
@@ -1230,6 +1414,7 @@ impl App {
             config,
             None,
             Some((held.pid, held.signal)),
+            None,
         );
     }
 
@@ -1354,10 +1539,12 @@ impl App {
             .undo_hotkey
             .parse()
             .context("invalid undo shortcut")?;
+        let new_transforms = new_config.transform_hotkeys()?;
         #[allow(unused_mut)]
         let mut new_keys = vec![new_hotkey, new_last_word_hotkey];
         #[cfg(target_os = "macos")]
         new_keys.push(new_undo);
+        new_keys.extend(new_transforms.iter().map(|(_, key)| *key));
         #[cfg(target_os = "macos")]
         let new_accessibility_blocked = !self.paused && !accessibility::is_trusted();
         if !self.paused && new_keys != self.active_hotkeys() {
@@ -1390,6 +1577,7 @@ impl App {
         self.config = new_config;
         self.hotkey = new_hotkey;
         self.last_word_hotkey = new_last_word_hotkey;
+        self.transform_hotkeys = new_transforms;
         self.gesture = new_gesture;
         self.auto_monitor = new_auto_monitor;
         self.reset_auto_context();
@@ -1428,6 +1616,7 @@ impl App {
                 Ok(())
             }
             Some(TrayAction::TogglePaused) => self.toggle_paused(),
+            Some(TrayAction::ToggleCurrentApp) => self.toggle_current_app(),
             Some(TrayAction::OpenSettings) => settings::spawn(),
             Some(TrayAction::OpenAbout) => settings::spawn_about(),
             Some(TrayAction::ReloadConfiguration) => self.reload_configuration(),
@@ -1455,6 +1644,48 @@ impl App {
     fn handle_menu(&mut self, event_loop: &ActiveEventLoop, event: &MenuEvent) {
         let action = self.tray.as_ref().and_then(|tray| tray.action(event));
         self.handle_tray_action(event_loop, action);
+    }
+
+    /// Keeps the tray's per-app item naming the app being typed in, and says
+    /// whether automatic correction is switched off there.
+    #[cfg(target_os = "macos")]
+    fn auto_correct_paused_here(&mut self) -> bool {
+        let app = crate::input_context::frontmost_app();
+        if app.as_ref().map(|(id, _)| id) != self.typing_app.as_ref() {
+            self.typing_app = app.as_ref().map(|(id, _)| id.clone());
+            if let Some(tray) = &self.tray {
+                tray.set_current_app(
+                    app.as_ref().map(|(_, name)| name.as_str()),
+                    crate::input_context::auto_correct_disabled(&self.config),
+                );
+            }
+        }
+        crate::input_context::auto_correct_disabled(&self.config)
+    }
+
+    /// Switches automatic correction off or back on for the frontmost app.
+    /// A menu-bar click leaves that app frontmost on macOS.
+    fn toggle_current_app(&mut self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            let Some((id, name)) = crate::input_context::frontmost_app() else {
+                return Ok(());
+            };
+            let mut config = Config::load()?;
+            let disabled = config.toggle_auto_correct_app(&id);
+            config.write(true)?;
+            info!(app = %id, disabled, "toggled automatic correction for an app");
+            self.config.auto_correct_disabled_apps = config.auto_correct_disabled_apps;
+            self.typing_app = Some(id);
+            if let Some(tray) = &self.tray {
+                tray.set_current_app(Some(&name), disabled);
+            }
+            if disabled {
+                self.reset_auto_context();
+                crate::automation::disarm_line_break();
+            }
+        }
+        Ok(())
     }
 
     fn toggle_autostart(&self) -> Result<()> {
@@ -1660,4 +1891,30 @@ fn parse_hotkeys(config: &Config) -> Result<(HotKey, HotKey)> {
         bail!("hotkey and last_word_hotkey resolve to the same shortcut");
     }
     Ok((hotkey, last_word_hotkey))
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backspace_reverts_the_word_without_the_character_it_deleted() {
+        assert_eq!(
+            after_backspace("привіт ", "ghbdsn "),
+            Some(("привіт".to_owned(), "ghbdsn".to_owned()))
+        );
+        assert_eq!(
+            after_backspace("ок,", "jr,"),
+            Some(("ок".to_owned(), "jr".to_owned()))
+        );
+        // Several rewritten words keep the earlier ones.
+        assert_eq!(
+            after_backspace("ти дивись ", "nb lbdbcm "),
+            Some(("ти дивись".to_owned(), "nb lbdbcm".to_owned()))
+        );
+        // Nothing of the word would be left to restore.
+        assert_eq!(after_backspace("я", "z"), None);
+        assert_eq!(after_backspace(" ", " "), None);
+        assert_eq!(after_backspace("", ""), None);
+    }
 }

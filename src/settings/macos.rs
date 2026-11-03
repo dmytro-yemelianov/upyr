@@ -527,7 +527,10 @@ define_class!(
 impl NativeController {
     fn open_external_url(&self, url: &str) {
         match Command::new("open").arg(url).spawn() {
-            Ok(_) => self.set_status(true, "Opened in your default browser."),
+            Ok(child) => {
+                crate::child_processes::track(child);
+                self.set_status(true, "Opened in your default browser.");
+            }
             Err(error) => self.set_status(false, &format!("Could not open the link: {error}")),
         }
     }
@@ -1433,6 +1436,7 @@ pub(super) fn run(
     autostart_status: autostart::AutostartStatus,
     initial_tab: SettingsTab,
     activation: ActivationInbox,
+    problem: Option<String>,
 ) -> Result<()> {
     let mtm =
         MainThreadMarker::new().context("Upyr Settings must start on the macOS main thread")?;
@@ -1444,6 +1448,9 @@ pub(super) fn run(
         .controls()
         .tabs
         .selectTabViewItemAtIndex(tab_index(initial_tab));
+    if let Some(problem) = problem {
+        controller.set_status(false, &problem);
+    }
     window.makeKeyAndOrderFront(None);
     #[allow(deprecated)]
     app.activateIgnoringOtherApps(true);

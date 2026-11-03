@@ -88,6 +88,21 @@ jobs:
             target/terminal-edge-report.log
           if-no-files-found: warn
           retention-days: 14
+      - name: Install shells for the widget tests
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y zsh fish
+      - name: Test the shell widgets in real shells
+        if: runner.os != 'Windows'
+        env:
+          # macOS ships bash 3.2, which the widgets do not support.
+          SHELLS: ${{ runner.os == 'Linux' && 'zsh bash fish' || 'zsh' }}
+          UPYR_TEST_LOCALE: ${{ runner.os == 'Linux' && 'C.UTF-8' || 'en_US.UTF-8' }}
+        run: |
+          cargo build --locked --quiet --bin upyr
+          for shell in $SHELLS; do
+            target/debug/upyr shell-init "$shell" > "target/upyr.$shell"
+            python tools/test_shell_widgets.py "$shell" "target/upyr.$shell"
+          done
       - name: Compile the native Globe-key probe
         if: runner.os == 'macOS'
         run: swiftc -O -warnings-as-errors -o target/globe-probe tools/globe-probe.swift
@@ -162,6 +177,6 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Check packaging shell scripts
-        run: shellcheck packaging/version.sh packaging/macos/*.sh packaging/linux/*.sh tools/*.sh
+        run: shellcheck packaging/version.sh packaging/macos/*.sh packaging/linux/*.sh tools/*.sh src/shell/upyr.bash
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings

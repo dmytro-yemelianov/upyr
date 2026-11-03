@@ -44,6 +44,26 @@ enum Command {
         #[arg(allow_hyphen_values = true)]
         text: Vec<String>,
     },
+    /// Transliterate Ukrainian text to Latin (2010 national system), from the
+    /// arguments or stdin.
+    Transliterate {
+        #[arg(allow_hyphen_values = true)]
+        text: Vec<String>,
+    },
+    /// Cycle the case of the text (lower → UPPER → Title), from the arguments
+    /// or stdin.
+    Case {
+        #[arg(allow_hyphen_values = true)]
+        text: Vec<String>,
+    },
+    /// Print prompt widgets that convert the command line (Ctrl+X Ctrl+L)
+    /// or the word before the cursor (Ctrl+X L). Load them with
+    /// `eval "$(upyr shell-init zsh)"`, the same for bash, or
+    /// `upyr shell-init fish | source`.
+    ShellInit {
+        #[arg(value_enum)]
+        shell: CliShell,
+    },
     /// Write the default configuration file.
     Init {
         #[arg(long)]
@@ -87,6 +107,13 @@ enum AutostartAction {
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
+enum CliShell {
+    Zsh,
+    Bash,
+    Fish,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
 enum CliDirection {
     Smart,
     EnglishToUkrainian,
@@ -111,6 +138,14 @@ fn main() -> Result<()> {
         #[cfg(target_os = "macos")]
         Command::Globe { action } => manage_globe(action),
         Command::Run { hotkey } => app::run(Config::load()?, hotkey),
+        Command::Transliterate { text } => {
+            println!("{}", upyr_core::transliterate(&read_input(text)?));
+            Ok(())
+        }
+        Command::Case { text } => {
+            println!("{}", upyr_core::cycle_case(&read_input(text)?));
+            Ok(())
+        }
         Command::Convert {
             direction,
             installed,
@@ -129,6 +164,20 @@ fn main() -> Result<()> {
             if io::stdin().is_terminal() {
                 println!();
             }
+            Ok(())
+        }
+        Command::ShellInit { shell } => {
+            let program = std::env::current_exe()
+                .context("could not find the Upyr executable for the widgets")?;
+            let shell = match shell {
+                CliShell::Zsh => upyr::shell_init::Shell::Zsh,
+                CliShell::Bash => upyr::shell_init::Shell::Bash,
+                CliShell::Fish => upyr::shell_init::Shell::Fish,
+            };
+            print!(
+                "{}",
+                upyr::shell_init::script(shell, &program.to_string_lossy())
+            );
             Ok(())
         }
         Command::Init { force } => {
@@ -195,6 +244,14 @@ fn doctor() -> Result<()> {
         config.auto_correct_min_word_length
     );
     println!(
+        "Automatic correction off in: {}",
+        if config.auto_correct_disabled_apps.is_empty() {
+            "no apps".to_owned()
+        } else {
+            config.auto_correct_disabled_apps.join(", ")
+        }
+    );
+    println!(
         "Correction rules: {} of yours, {} built in",
         config.auto_correct_rules.len(),
         upyr_core::builtin_triggers().len()
@@ -219,7 +276,30 @@ fn doctor() -> Result<()> {
             }
         );
         let output = upyr::audio_output::current();
-        println!("Undo correction shortcut: {}", config.undo_hotkey);
+        println!(
+            "Undo correction: {}{}",
+            config.undo_hotkey,
+            if config.backspace_undo {
+                ", or Backspace right after it"
+            } else {
+                ""
+            }
+        );
+        println!(
+            "Caret position: {}",
+            upyr::caret::caret().map_or_else(
+                || "not exposed by the focused app; the indicator follows the pointer".to_owned(),
+                |caret| format!("{:.0}, {:.0} ({:.0} high)", caret.x, caret.y, caret.height)
+            )
+        );
+        println!(
+            "Learning from your fixes: {}",
+            if config.auto_correct_learning {
+                "on"
+            } else {
+                "off"
+            }
+        );
         println!(
             "Audio output: {} — {}; Upyr volume {}% (headphone limit {}%)",
             output.name,

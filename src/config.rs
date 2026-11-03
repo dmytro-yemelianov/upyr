@@ -242,6 +242,28 @@ pub struct Config {
     /// so older versions keep reading the file.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub auto_correct_rules: Vec<String>,
+    /// Applications (bundle identifiers on macOS) where automatic correction
+    /// stays off, toggled from the menu bar. Omitted when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub auto_correct_disabled_apps: Vec<String>,
+    /// macOS: Backspace as the first key after an automatic correction
+    /// reverts it. Omitted while on.
+    #[serde(skip_serializing_if = "is_true")]
+    pub backspace_undo: bool,
+    /// Remember the user's own fixes: a correction reverted twice with the
+    /// undo shortcut adds an exception, a word converted by hand twice adds a
+    /// `correct` rule. Backspace reverts teach nothing.
+    /// Omitted while on.
+    #[serde(skip_serializing_if = "is_true")]
+    pub auto_correct_learning: bool,
+    /// Optional shortcut transliterating the selection (Ukrainian → Latin by
+    /// the 2010 national system). Empty means off; omitted when empty.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub transliterate_hotkey: String,
+    /// Optional shortcut cycling the selection's case (lower → UPPER →
+    /// Title). Empty means off; omitted when empty.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub case_hotkey: String,
     /// Optional modifier-only gesture. Disabled means no keyboard-state polling occurs.
     pub modifier_gesture: ModifierGesture,
     pub modifier_gesture_action: GestureAction,
@@ -274,6 +296,11 @@ impl Default for Config {
             slash_command_apps: Vec::new(),
             auto_correct_exceptions: Vec::new(),
             auto_correct_rules: Vec::new(),
+            auto_correct_disabled_apps: Vec::new(),
+            backspace_undo: true,
+            auto_correct_learning: true,
+            transliterate_hotkey: String::new(),
+            case_hotkey: String::new(),
             modifier_gesture: ModifierGesture::Disabled,
             modifier_gesture_action: GestureAction::PreviousWord,
             modifier_gesture_timeout_ms: 500,
@@ -285,16 +312,36 @@ impl Default for Config {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        let path = config_path()?;
+        Self::load_from(&config_path()?)
+    }
+
+    fn load_from(path: &Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
         }
 
-        let source = fs::read_to_string(&path)
+        let source = fs::read_to_string(path)
             .with_context(|| format!("failed to read config at {}", path.display()))?;
         let config = Self::decode(&source)
             .with_context(|| format!("failed to parse config at {}", path.display()))?;
         Ok(config)
+    }
+
+    /// For starting the app and Settings: an unreadable file must not leave
+    /// the user with no running app and no way to fix it from the UI. Returns
+    /// the defaults together with a description of the problem.
+    pub fn load_or_default() -> (Self, Option<String>) {
+        match config_path() {
+            Ok(path) => Self::load_or_default_from(&path),
+            Err(error) => (Self::default(), Some(format!("{error:#}"))),
+        }
+    }
+
+    fn load_or_default_from(path: &Path) -> (Self, Option<String>) {
+        match Self::load_from(path) {
+            Ok(config) => (config, None),
+            Err(error) => (Self::default(), Some(format!("{error:#}"))),
+        }
     }
 
     /// Three-way merge for a Settings save. `base` is what the window loaded,
@@ -349,6 +396,87 @@ impl Config {
         match Self::load() {
             Ok(current) => Self::merge_edits(base, &edited, &current).unwrap_or(edited),
             Err(_) => edited,
+        }
+    }
+
+    /// The enabled text-transform shortcuts.
+    pub fn transform_hotkeys(&self) -> Result<Vec<(upyr_core::TextTransform, HotKey)>> {
+        [
+            (
+                upyr_core::TextTransform::Transliterate,
+                "transliterate_hotkey",
+                &self.transliterate_hotkey,
+            ),
+            (
+                upyr_core::TextTransform::CycleCase,
+                "case_hotkey",
+                &self.case_hotkey,
+            ),
+        ]
+        .into_iter()
+        .filter(|(_, _, value)| !value.trim().is_empty())
+        .map(|(transform, name, value)| {
+            let shortcut: HotKey = value
+                .parse()
+                .with_context(|| format!("invalid {name} {value:?}"))?;
+            Ok((transform, shortcut))
+        })
+        .collect()
+    }
+
+    /// Switches automatic correction off or back on for one application.
+    /// Returns true when it is now off there.
+    pub fn toggle_auto_correct_app(&mut self, app: &str) -> bool {
+        let before = self.auto_correct_disabled_apps.len();
+        self.auto_correct_disabled_apps
+            .retain(|listed| !listed.eq_ignore_ascii_case(app));
+        if self.auto_correct_disabled_apps.len() == before {
+            self.auto_correct_disabled_apps.push(app.to_owned());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Applies what Upyr learned from the user's fixes. Returns false when it
+    /// changes nothing. A learned rule never overrides the user's own
+    /// exception or rule for the same word.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) fn learn(&mut self, lesson: &crate::learning::Lesson) -> bool {
+        use crate::learning::Lesson;
+        let same_word =
+            |listed: &str, word: &str| listed.trim().to_lowercase() == word.to_lowercase();
+        let rule_pattern = |rule: &str| rule.split_whitespace().next().unwrap_or("").to_owned();
+        match lesson {
+            Lesson::Exception(word) => {
+                if self
+                    .auto_correct_exceptions
+                    .iter()
+                    .any(|listed| same_word(listed, word))
+                {
+                    return false;
+                }
+                let learned_rule = format!("{word} correct");
+                self.auto_correct_rules
+                    .retain(|rule| !same_word(rule, &learned_rule));
+                self.auto_correct_exceptions.push(word.clone());
+                true
+            }
+            Lesson::Rule(word) => {
+                if self
+                    .auto_correct_exceptions
+                    .iter()
+                    .any(|listed| same_word(listed, word))
+                    || self
+                        .auto_correct_rules
+                        .iter()
+                        .any(|rule| same_word(&rule_pattern(rule), word))
+                {
+                    return false;
+                }
+                self.auto_correct_rules.push(format!("{word} correct"));
+                true
+            }
         }
     }
 
@@ -419,6 +547,16 @@ impl Config {
         if cfg!(target_os = "macos") && [hotkey, last_word_hotkey].contains(&undo) {
             bail!("undo_hotkey must differ from the conversion shortcuts");
         }
+        let mut taken = vec![hotkey, last_word_hotkey];
+        if cfg!(target_os = "macos") {
+            taken.push(undo);
+        }
+        for (_, shortcut) in self.transform_hotkeys()? {
+            if taken.contains(&shortcut) {
+                bail!("transliterate_hotkey and case_hotkey must differ from every other shortcut");
+            }
+            taken.push(shortcut);
+        }
         if !(10..=2_000).contains(&self.copy_delay_ms) {
             bail!("copy_delay_ms must be between 10 and 2000");
         }
@@ -479,6 +617,11 @@ impl Config {
         config.validate()?;
         Ok(config)
     }
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde passes a reference.
+const fn is_true(value: &bool) -> bool {
+    *value
 }
 
 fn write_config_file(path: &Path, source: &[u8], overwrite: bool) -> Result<()> {
@@ -1097,6 +1240,122 @@ mod tests {
         let error = config.validate().unwrap_err().to_string();
 
         assert!(error.contains("resolve to the same shortcut"));
+    }
+
+    #[test]
+    fn backspace_undo_and_learning_are_on_and_only_written_when_off() {
+        let config = Config::default();
+        assert!(config.backspace_undo && config.auto_correct_learning);
+        let saved = toml::to_string(&config).unwrap();
+        assert!(!saved.contains("backspace_undo") && !saved.contains("auto_correct_learning"));
+        let off = Config {
+            backspace_undo: false,
+            auto_correct_learning: false,
+            ..Config::default()
+        };
+        let saved = toml::to_string(&off).unwrap();
+        assert!(saved.contains("backspace_undo = false"));
+        let read: Config = toml::from_str(&saved).unwrap();
+        assert!(!read.backspace_undo && !read.auto_correct_learning);
+    }
+
+    #[test]
+    fn a_learned_exception_replaces_the_learned_rule_for_its_word() {
+        use crate::learning::Lesson;
+        let mut config = Config {
+            auto_correct_rules: vec!["jr correct".to_owned(), "*zzz* keep".to_owned()],
+            ..Config::default()
+        };
+        assert!(config.learn(&Lesson::Exception("jr".to_owned())));
+        assert_eq!(config.auto_correct_exceptions, ["jr"]);
+        assert_eq!(config.auto_correct_rules, ["*zzz* keep"]);
+        // Already known.
+        assert!(!config.learn(&Lesson::Exception("JR".to_owned())));
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn a_learned_rule_never_overrides_the_users_own_choice() {
+        use crate::learning::Lesson;
+        let mut config = Config {
+            auto_correct_exceptions: vec!["Ghbdsn".to_owned()],
+            auto_correct_rules: vec!["руку keep".to_owned()],
+            ..Config::default()
+        };
+        assert!(!config.learn(&Lesson::Rule("ghbdsn".to_owned())));
+        assert!(!config.learn(&Lesson::Rule("руку".to_owned())));
+        assert!(config.learn(&Lesson::Rule("щл".to_owned())));
+        assert!(!config.learn(&Lesson::Rule("щл".to_owned())));
+        assert_eq!(config.auto_correct_rules, ["руку keep", "щл correct"]);
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn transform_shortcuts_are_optional_validated_and_distinct() {
+        let saved = toml::to_string_pretty(&Config::default()).unwrap();
+        assert!(!saved.contains("transliterate_hotkey") && !saved.contains("case_hotkey"));
+        assert!(Config::default().transform_hotkeys().unwrap().is_empty());
+
+        let config = Config {
+            transliterate_hotkey: "CmdOrCtrl+Alt+T".to_owned(),
+            case_hotkey: "CmdOrCtrl+Alt+U".to_owned(),
+            ..Config::default()
+        };
+        config.validate().unwrap();
+        assert_eq!(config.transform_hotkeys().unwrap().len(), 2);
+
+        for clash in [Config::default().hotkey, "CmdOrCtrl+Alt+U".to_owned()] {
+            let config = Config {
+                transliterate_hotkey: clash.clone(),
+                case_hotkey: "CmdOrCtrl+Alt+U".to_owned(),
+                ..Config::default()
+            };
+            assert!(config.validate().is_err(), "{clash} must be rejected");
+        }
+        let invalid = Config {
+            case_hotkey: "Ctrl+".to_owned(),
+            ..Config::default()
+        };
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn switching_correction_off_per_app_toggles_one_entry() {
+        let mut config = Config::default();
+        assert!(config.toggle_auto_correct_app("com.tinyspeck.slackmacgap"));
+        assert_eq!(
+            config.auto_correct_disabled_apps,
+            ["com.tinyspeck.slackmacgap"]
+        );
+        // Bundle identifiers compare case-insensitively, as matching does.
+        assert!(!config.toggle_auto_correct_app("COM.tinyspeck.SlackMacGap"));
+        assert!(config.auto_correct_disabled_apps.is_empty());
+        let saved = toml::to_string_pretty(&config).unwrap();
+        assert!(
+            !saved.contains("auto_correct_disabled_apps"),
+            "an empty list must not make older versions reject the file"
+        );
+    }
+
+    #[test]
+    fn a_broken_file_falls_back_to_defaults_and_names_the_problem() {
+        let path =
+            std::env::temp_dir().join(format!("upyr-broken-config-{}.toml", std::process::id()));
+        fs::write(&path, "hotkey = [unterminated").unwrap();
+        let defaults = toml::to_string(&Config::default()).unwrap();
+        let (config, problem) = Config::load_or_default_from(&path);
+        let _ = fs::remove_file(&path);
+        assert_eq!(toml::to_string(&config).unwrap(), defaults);
+        let problem = problem.expect("the problem is reported");
+        assert!(problem.contains(&path.display().to_string()), "{problem}");
+
+        let (config, problem) = Config::load_or_default_from(&path);
+        assert_eq!(
+            toml::to_string(&config).unwrap(),
+            defaults,
+            "a missing file means defaults"
+        );
+        assert_eq!(problem, None);
     }
 
     #[test]

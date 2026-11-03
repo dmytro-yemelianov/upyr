@@ -19,6 +19,8 @@ Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in
 - Fixes the word before the caret with `CmdOrCtrl+Alt+Backspace`.
 - Optionally corrects a confidently mistyped word after Space; automatic correction is off by default.
 - On macOS, `Cmd+Alt+Z` undoes the last automatic correction and restores its original input source, before further typing or navigation (up to 30 seconds).
+- On macOS, Backspace as the first key after an automatic correction also reverts it: the word comes back as typed, without the space or punctuation the Backspace deleted. Set `backspace_undo = false` to keep Backspace as a plain delete.
+- On macOS, Upyr learns from your fixes: a correction you revert twice with the undo shortcut becomes an `auto_correct_exceptions` entry (a Backspace revert teaches nothing, since that Backspace is often meant for the space), and a word you convert by hand twice becomes an `auto_correct_rules` entry (`jr correct`). Both are written to your configuration file, where you can see and remove them; reverting and then converting the same word back counts as a slip. Set `auto_correct_learning = false` to turn this off.
 - Detects and switches between installed English and Ukrainian input sources.
 - Includes GlobeSwitch on macOS: a clean 🌐 tap cycles enabled layouts instantly,
   without macOS's picker or a second background application.
@@ -27,7 +29,7 @@ Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in
 - Provides searchable, tabbed settings, press-to-record shortcuts, an optional pointer-side language flag, and three local sound packs with event/key controls and master volume (every cue is synthesized on-device except the Anime Reactions pack's six bundled, pre-rendered event cues).
 - By default, snapshots supported clipboard formats and attempts to restore them after conversion; temporary conversion content is concealed from supported clipboard-history systems.
 
-The menu-bar or system-tray app can convert text, pause or resume correction, open Settings, reload configuration, manage launch at login, and quit.
+The menu-bar or system-tray app can convert text, pause or resume correction, open Settings, reload configuration, manage launch at login, and quit. On macOS it can also pause automatic correction in the app you are typing in; those apps are kept in `auto_correct_disabled_apps`.
 
 ## Install on macOS
 
@@ -246,6 +248,27 @@ upyr settings
 ```
 
 The settings app exposes General, Automatic, Exceptions, Shortcuts, Feedback, and Advanced tabs. Automatic sensitivity can be conservative, balanced, or aggressive; deliberate strings can be added on the Exceptions tab. Feedback includes three local sound packs: Upyr Original, Pocket Arcade, and the opt-in Anime Reactions pack. Every key cue and most event cues are synthesized locally (the Anime pack's six application-event cues are the one exception; see below); keyboard feedback crosses into the app as physical key categories only and never stores typed characters. Use `UPYR_CONFIG` to select a different config file.
+
+Two optional shortcuts act on the selection without switching layouts:
+`transliterate_hotkey` writes Ukrainian in Latin by the 2010 national system
+(`Київ` → `Kyiv`; the system is not reversible), and `case_hotkey` cycles
+lower → UPPER → Title. Both are off until set, for example
+`transliterate_hotkey = "CmdOrCtrl+Alt+T"`. The same transforms are available
+as `upyr transliterate` and `upyr case`.
+
+At a shell prompt, where the app cannot select and paste, widgets fix the
+command line in place: Ctrl+X Ctrl+L converts the whole line and Ctrl+X L the
+word before the cursor (in zsh, the active region instead when there is one).
+Load them from your shell's startup file:
+
+```sh
+eval "$(upyr shell-init zsh)"     # ~/.zshrc
+eval "$(upyr shell-init bash)"    # ~/.bashrc, bash 4 or newer
+upyr shell-init fish | source     # ~/.config/fish/config.fish
+```
+
+Set `UPYR_NO_BINDINGS=1` before loading to bind `upyr-convert-line` and
+`upyr-convert-word` to other keys yourself.
 
 Exceptions only stop a correction. For anything more specific, add rules to the
 configuration file; they apply before the built-in ones, and a matching `keep`
