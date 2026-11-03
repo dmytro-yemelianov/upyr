@@ -250,8 +250,9 @@ pub struct Config {
     /// reverts it. Omitted while on.
     #[serde(skip_serializing_if = "is_true")]
     pub backspace_undo: bool,
-    /// Remember the user's own fixes: a correction reverted twice adds an
-    /// exception, a word converted by hand twice adds a `correct` rule.
+    /// Remember the user's own fixes: a correction reverted twice with the
+    /// undo shortcut adds an exception, a word converted by hand twice adds a
+    /// `correct` rule. Backspace reverts teach nothing.
     /// Omitted while on.
     #[serde(skip_serializing_if = "is_true")]
     pub auto_correct_learning: bool,

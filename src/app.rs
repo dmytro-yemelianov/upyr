@@ -147,8 +147,9 @@ struct PendingConversion {
     task: ConversionTask,
     automatic_generation: Option<u64>,
     undo_candidate: Option<UndoRecord>,
-    /// For an undo: the text as typed that it restores.
-    reverted: Option<String>,
+    /// For an undo: the text as typed that it restores, and how the user
+    /// asked for it.
+    reverted: Option<(String, crate::learning::Revert)>,
 }
 
 #[cfg(target_os = "macos")]
@@ -187,6 +188,7 @@ fn after_backspace(corrected: &str, original: &str) -> Option<(String, String)> 
 #[cfg(target_os = "macos")]
 struct PendingUndo {
     record: UndoRecord,
+    how: crate::learning::Revert,
     ready_at: std::time::Instant,
     expires: std::time::Instant,
 }
@@ -556,7 +558,13 @@ impl App {
         self.clear_undo();
         let mut config = self.config.clone();
         config.switch_layout = false;
-        self.start_conversion(ConversionRequest::Transform(transform), config, None, None);
+        self.start_conversion(
+            ConversionRequest::Transform(transform),
+            config,
+            None,
+            None,
+            None,
+        );
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -591,7 +599,7 @@ impl App {
         } else {
             ConversionRequest::Selection
         };
-        self.start_conversion(request, self.config.clone(), None, None);
+        self.start_conversion(request, self.config.clone(), None, None, None);
     }
 
     #[cfg(target_os = "macos")]
@@ -601,6 +609,7 @@ impl App {
         config: Config,
         generation: Option<u64>,
         held: Option<(i32, std::sync::Arc<crate::automation::HoldSignal>)>,
+        revert: Option<crate::learning::Revert>,
     ) {
         if self.processing {
             if let Some((pid, _)) = held {
@@ -615,8 +624,10 @@ impl App {
             } => Some((expected.clone(), replacement.clone())),
             _ => None,
         };
-        let reverted = match &request {
-            ConversionRequest::Undo { replacement, .. } => Some(replacement.clone()),
+        let reverted = match (&request, revert) {
+            (ConversionRequest::Undo { replacement, .. }, Some(how)) => {
+                Some((replacement.clone(), how))
+            }
             _ => None,
         };
         let direction = config.direction;
@@ -816,6 +827,7 @@ impl App {
                 if record.expires > now && record.target.is_current() {
                     self.pending_undo = Some(PendingUndo {
                         record,
+                        how: crate::learning::Revert::Shortcut,
                         ready_at: now,
                         expires: now + std::time::Duration::from_secs(2),
                     });
@@ -922,6 +934,7 @@ impl App {
         debug!("Backspace after an automatic correction: reverting it");
         self.pending_undo = Some(PendingUndo {
             record,
+            how: crate::learning::Revert::Backspace,
             // Let the editor apply the Backspace before the word is selected.
             ready_at: now + std::time::Duration::from_millis(40),
             expires: now + std::time::Duration::from_secs(2),
@@ -937,7 +950,7 @@ impl App {
             return;
         }
         let lesson = match (&pending.reverted, pending.task.manual_source()) {
-            (Some(original), _) => self.learner.reverted(original),
+            (Some((original, how)), _) => self.learner.reverted(original, *how),
             (None, Some(source)) => self.learner.converted(source),
             (None, None) => None,
         };
@@ -1013,6 +1026,7 @@ impl App {
             config,
             None,
             None,
+            Some(pending.how),
         );
     }
 
@@ -1275,6 +1289,7 @@ impl App {
             config,
             Some(generation),
             None,
+            None,
         );
     }
 
@@ -1399,6 +1414,7 @@ impl App {
             config,
             None,
             Some((held.pid, held.signal)),
+            None,
         );
     }
 

@@ -1,10 +1,12 @@
 //! Learning from the user's own fixes. A correction the user reverts twice
-//! becomes an exception for the word as typed; a word the user converts by
-//! hand twice becomes a `correct` rule. Counts last for the session only.
+//! with the undo shortcut becomes an exception for the word as typed; a word
+//! the user converts by hand twice becomes a `correct` rule. Counts last for
+//! the session only.
 //!
-//! A revert followed by a manual conversion of the same word cancels out:
-//! together they say the revert was a slip (a Backspace meant for the space,
-//! say), not that the correction was wrong.
+//! A Backspace revert teaches nothing: that Backspace was often meant for
+//! the space after the word. A revert followed by a manual conversion of the
+//! same word cancels out: together they say the revert was a slip, not that
+//! the correction was wrong.
 
 use std::collections::HashMap;
 
@@ -19,6 +21,15 @@ pub(crate) enum Lesson {
     Rule(String),
 }
 
+/// How the user reverted a correction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Revert {
+    /// The undo shortcut: a deliberate choice.
+    Shortcut,
+    /// Backspace right after the correction.
+    Backspace,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct Learner {
     reverted: HashMap<String, u8>,
@@ -27,7 +38,10 @@ pub(crate) struct Learner {
 
 impl Learner {
     /// A correction was reverted; `original` is the text the revert restored.
-    pub fn reverted(&mut self, original: &str) -> Option<Lesson> {
+    pub fn reverted(&mut self, original: &str, how: Revert) -> Option<Lesson> {
+        if how == Revert::Backspace {
+            return None;
+        }
         let word = learnable_word(original)?;
         repeated(&mut self.reverted, word).map(Lesson::Exception)
     }
@@ -75,13 +89,23 @@ mod tests {
     #[test]
     fn two_reverts_of_the_same_word_teach_an_exception() {
         let mut learner = Learner::default();
-        assert_eq!(learner.reverted("api "), None);
+        assert_eq!(learner.reverted("api ", Revert::Shortcut), None);
         assert_eq!(
-            learner.reverted("API "),
+            learner.reverted("API ", Revert::Shortcut),
             Some(Lesson::Exception("api".to_owned()))
         );
         // Learned once; the count starts over.
-        assert_eq!(learner.reverted("api "), None);
+        assert_eq!(learner.reverted("api ", Revert::Shortcut), None);
+    }
+
+    #[test]
+    fn reverts_with_backspace_teach_nothing() {
+        // That Backspace may have been meant for the space after the word.
+        let mut learner = Learner::default();
+        for _ in 0..3 {
+            assert_eq!(learner.reverted("ghbdsn ", Revert::Backspace), None);
+        }
+        assert_eq!(learner.reverted("ghbdsn ", Revert::Shortcut), None);
     }
 
     #[test]
@@ -105,12 +129,12 @@ mod tests {
     #[test]
     fn a_manual_conversion_after_a_revert_cancels_it() {
         let mut learner = Learner::default();
-        assert_eq!(learner.reverted("ghbdsn "), None);
+        assert_eq!(learner.reverted("ghbdsn ", Revert::Shortcut), None);
         // The revert was a slip: the user converted the word back by hand.
         assert_eq!(learner.converted("ghbdsn"), None);
-        assert_eq!(learner.reverted("ghbdsn "), None);
+        assert_eq!(learner.reverted("ghbdsn ", Revert::Shortcut), None);
         assert_eq!(
-            learner.reverted("ghbdsn "),
+            learner.reverted("ghbdsn ", Revert::Shortcut),
             Some(Lesson::Exception("ghbdsn".to_owned()))
         );
     }
@@ -119,8 +143,8 @@ mod tests {
     fn only_single_words_are_learned() {
         let mut learner = Learner::default();
         for text in ["", "a", "two words", "*x*", "#tag", "123", "hi!", "x2"] {
-            assert_eq!(learner.reverted(text), None, "{text:?}");
-            assert_eq!(learner.reverted(text), None, "{text:?}");
+            assert_eq!(learner.reverted(text, Revert::Shortcut), None, "{text:?}");
+            assert_eq!(learner.reverted(text, Revert::Shortcut), None, "{text:?}");
             assert_eq!(learner.converted(text), None, "{text:?}");
             assert_eq!(learner.converted(text), None, "{text:?}");
         }

@@ -20,7 +20,7 @@ Upyr is a private, native English ↔ Ukrainian keyboard-layout fixer written in
 - Optionally corrects a confidently mistyped word after Space; automatic correction is off by default.
 - On macOS, `Cmd+Alt+Z` undoes the last automatic correction and restores its original input source, before further typing or navigation (up to 30 seconds).
 - On macOS, Backspace as the first key after an automatic correction also reverts it: the word comes back as typed, without the space or punctuation the Backspace deleted. Set `backspace_undo = false` to keep Backspace as a plain delete.
-- On macOS, Upyr learns from your fixes: a correction you revert twice becomes an `auto_correct_exceptions` entry, and a word you convert by hand twice becomes an `auto_correct_rules` entry (`jr correct`). Both are written to your configuration file, where you can see and remove them; reverting and then converting the same word back counts as a slip. Set `auto_correct_learning = false` to turn this off.
+- On macOS, Upyr learns from your fixes: a correction you revert twice with the undo shortcut becomes an `auto_correct_exceptions` entry (a Backspace revert teaches nothing, since that Backspace is often meant for the space), and a word you convert by hand twice becomes an `auto_correct_rules` entry (`jr correct`). Both are written to your configuration file, where you can see and remove them; reverting and then converting the same word back counts as a slip. Set `auto_correct_learning = false` to turn this off.
 - Detects and switches between installed English and Ukrainian input sources.
 - Includes GlobeSwitch on macOS: a clean 🌐 tap cycles enabled layouts instantly,
   without macOS's picker or a second background application.
