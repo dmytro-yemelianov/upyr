@@ -66,12 +66,12 @@ impl ReleaseHeld for enigo::Enigo {
         let (keys, keycodes) = self.held();
         for key in keys {
             if let Err(error) = self.key(key, Direction::Release) {
-                tracing::debug!(%error, ?key, "could not release a held key");
+                tracing::debug!(%error, "could not release a held key");
             }
         }
         for keycode in keycodes {
             if let Err(error) = self.raw(keycode, Direction::Release) {
-                tracing::debug!(%error, keycode, "could not release a held key");
+                tracing::debug!(%error, "could not release a held key");
             }
         }
     }
