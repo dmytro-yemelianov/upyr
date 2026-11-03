@@ -60,28 +60,52 @@ pub fn installed_mapping() -> Result<Option<Vec<(char, char)>>> {
     platform::installed_mapping()
 }
 
+/// XKB groups from `setxkbmap -query`, each as `layout` or `layout(variant)`.
+/// Variants are positional; a missing `variant:` line means defaults.
 #[cfg(any(target_os = "linux", test))]
 fn parse_xkb_layouts(query: &str) -> Vec<String> {
-    query
-        .lines()
-        .find_map(|line| {
-            line.split_once(':')
-                .filter(|(key, _)| key.trim() == "layout")
-        })
-        .map_or_else(Vec::new, |(_, layouts)| {
-            layouts
-                .split(',')
-                .map(str::trim)
-                .filter(|layout| !layout.is_empty())
-                .map(str::to_owned)
-                .collect()
-        })
+    let field = |name: &str| -> Vec<String> {
+        query
+            .lines()
+            .find_map(|line| line.split_once(':').filter(|(key, _)| key.trim() == name))
+            .map_or_else(Vec::new, |(_, values)| {
+                values
+                    .split(',')
+                    .map(|value| value.trim().to_owned())
+                    .collect()
+            })
+    };
+    let variants = field("variant");
+    field("layout")
+        .into_iter()
+        .enumerate()
+        .filter(|(_, layout)| !layout.is_empty())
+        .map(
+            |(index, layout)| match variants.get(index).map(String::as_str) {
+                Some(variant) if !variant.is_empty() => format!("{layout}({variant})"),
+                _ => layout,
+            },
+        )
+        .collect()
 }
 
 #[cfg(any(target_os = "linux", test))]
 fn classify_xkb_layout(layout: &str) -> Option<SystemLayout> {
-    match layout.trim().to_ascii_lowercase().as_str() {
-        "us" => Some(SystemLayout::English),
+    let layout = layout.trim().to_ascii_lowercase();
+    let (name, variant) = layout
+        .strip_suffix(')')
+        .and_then(|rest| rest.split_once('('))
+        .unwrap_or((layout.as_str(), ""));
+    match name {
+        // QWERTY English layouts. Physical keys are read as US QWERTY, so a
+        // variant that moves the letters is unsupported rather than misread.
+        "us" | "gb" | "ie" | "au"
+            if !["dvorak", "colemak", "workman"]
+                .iter()
+                .any(|moved| variant.contains(moved)) =>
+        {
+            Some(SystemLayout::English)
+        }
         "ua" => Some(SystemLayout::Ukrainian),
         _ => None,
     }
@@ -1206,9 +1230,33 @@ mod cross_platform_tests {
     fn parses_xkb_layout_groups() {
         let query = "rules: evdev\nmodel: pc105\nlayout: us,ua\nvariant: ,winkeys\n";
 
-        assert_eq!(parse_xkb_layouts(query), ["us", "ua"]);
+        assert_eq!(parse_xkb_layouts(query), ["us", "ua(winkeys)"]);
+        assert_eq!(
+            parse_xkb_layouts("layout: gb,ua\n"),
+            ["gb", "ua"],
+            "a missing variant line means default variants"
+        );
         assert_eq!(classify_xkb_layout("us"), Some(SystemLayout::English));
         assert_eq!(classify_xkb_layout("ua"), Some(SystemLayout::Ukrainian));
+        assert_eq!(
+            classify_xkb_layout("ua(winkeys)"),
+            Some(SystemLayout::Ukrainian)
+        );
         assert_eq!(classify_xkb_layout("de"), None);
+    }
+
+    #[test]
+    fn xkb_english_means_a_qwerty_english_layout() {
+        for layout in ["us", "gb", "ie", "au", "us(intl)", "gb(extd)"] {
+            assert_eq!(
+                classify_xkb_layout(layout),
+                Some(SystemLayout::English),
+                "{layout}"
+            );
+        }
+        // Physical keys are read as US QWERTY; these move the letters.
+        for layout in ["us(dvorak)", "us(colemak)", "gb(dvorak)", "us(workman)"] {
+            assert_eq!(classify_xkb_layout(layout), None, "{layout}");
+        }
     }
 }

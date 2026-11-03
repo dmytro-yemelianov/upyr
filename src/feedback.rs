@@ -355,36 +355,59 @@ mod platform {
 
     use super::{IndicatorStyle, SystemLayout, indicator_text};
 
+    /// The notification on screen, replaced by the next one and closed when
+    /// the app's configured indicator duration ends.
+    static SHOWN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
     pub fn show_indicator(layout: SystemLayout, style: IndicatorStyle) -> bool {
-        if let Err(error) = show_notification(indicator_text(layout, style)) {
-            tracing::debug!(%error, "could not show layout notification");
-            false
-        } else {
-            true
+        match show_notification(indicator_text(layout, style)) {
+            Ok(id) => {
+                SHOWN.store(id, std::sync::atomic::Ordering::SeqCst);
+                true
+            }
+            Err(error) => {
+                tracing::debug!(%error, "could not show layout notification");
+                false
+            }
         }
     }
 
-    pub fn hide_indicator() {}
+    pub fn hide_indicator() {
+        let id = SHOWN.swap(0, std::sync::atomic::Ordering::SeqCst);
+        if id != 0 {
+            if let Err(error) = notifications()
+                .and_then(|proxy| proxy.call::<_, _, ()>("CloseNotification", &(id,)))
+            {
+                tracing::debug!(%error, "could not close layout notification");
+            }
+        }
+    }
 
-    fn show_notification(summary: &str) -> zbus::Result<u32> {
+    fn notifications() -> zbus::Result<Proxy<'static>> {
         let connection = Connection::session()?;
-        let proxy = Proxy::new(
+        Proxy::new(
             &connection,
             "org.freedesktop.Notifications",
             "/org/freedesktop/Notifications",
             "org.freedesktop.Notifications",
-        )?;
-        proxy.call(
+        )
+    }
+
+    fn show_notification(summary: &str) -> zbus::Result<u32> {
+        notifications()?.call(
             "Notify",
             &(
                 "Upyr",
-                0_u32,
+                // Replace the previous indicator instead of stacking another.
+                SHOWN.load(std::sync::atomic::Ordering::SeqCst),
                 "",
                 summary,
                 "",
                 Vec::<String>::new(),
                 HashMap::<String, OwnedValue>::new(),
-                1500_i32,
+                // A ceiling only: the app closes it after the configured
+                // indicator duration.
+                10_000_i32,
             ),
         )
     }

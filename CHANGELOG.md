@@ -102,6 +102,17 @@ change between minor releases while the version is below 1.0.
   in the middle of a word no longer drops the word: `g`, switch, `hbdsn` is
   repaired to `привіт`. A bare modifier no longer ends the word either; a
   shortcut key (Cmd+A, Ctrl+K, …) does, as it may edit text or move the caret.
+- Linux: British, Irish and Australian XKB layouts count as English, and
+  Dvorak, Colemak or Workman variants are unsupported rather than misread as
+  QWERTY. The layout notification now follows the configured indicator
+  duration and replaces the previous one instead of stacking.
+
+### Known limitations
+
+- Windows still treats any English input locale as English, including Dvorak
+  and other layouts that move the letters; use a QWERTY English layout there.
+- The "Layout switch" sound on Windows and Linux plays only when the
+  conversion's own sound is turned off, since there is no Globe-key switcher.
 
 ### Planned
 
