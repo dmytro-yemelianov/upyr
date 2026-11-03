@@ -2026,16 +2026,22 @@ mod tests {
             if trigger.action != TriggerAction::Correct {
                 continue;
             }
+            // The intended text must read better than what the keys typed
+            // on the rule's own layout.
             let ukrainian = to_ukrainian(&trigger.physical, None);
             let as_english = language_likelihood(Language::English, &trigger.physical);
             let as_ukrainian = language_likelihood(Language::Ukrainian, &ukrainian);
+            let (typed, intended) = match trigger.source_layout {
+                InputLayout::English => (as_english, as_ukrainian),
+                InputLayout::Ukrainian => (as_ukrainian, as_english),
+            };
             assert!(
-                as_ukrainian.coverage > as_english.coverage,
-                "built-in trigger {:?} -> {:?} is not clearly Ukrainian (uk={:.3} en={:.3})",
+                intended.coverage > typed.coverage,
+                "built-in trigger {:?} ({:?}) is not clearly a wrong-layout word (typed={:.3} intended={:.3})",
                 trigger.physical,
-                ukrainian,
-                as_ukrainian.coverage,
-                as_english.coverage
+                trigger.source_layout,
+                typed.coverage,
+                intended.coverage
             );
         }
     }

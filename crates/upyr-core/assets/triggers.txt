@@ -31,6 +31,8 @@ vskmqjy  correct   # мільйон
 gbnfyyz  correct   # питання
 xfcnj    correct   # часто
 levrf    correct   # думка
+jr       correct   # ок (the model abstains: `jr` reads half-English)
+ok       correct   ukrainian   # щл -> ok
 
 # `keep` example (English words already covered by the dictionary/heuristics;
 # use this section for sequences the model wrongly corrects in your workflow):

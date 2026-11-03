@@ -478,6 +478,7 @@ fn evaluate_single_word(
         && matches!(
             intended_word.as_str(),
             "am" | "an"
+                | "ok"
                 | "and"
                 | "are"
                 | "as"
@@ -546,6 +547,7 @@ fn evaluate_single_word(
                 | "наш"
                 | "не"
                 | "ні"
+                | "ок"
                 | "про"
                 | "раз"
                 | "так"
@@ -1188,6 +1190,67 @@ mod tests {
                 };
                 assert_eq!(correction.replacement, replacement, "{path}");
             }
+        }
+    }
+
+    #[test]
+    fn ok_is_a_short_word_in_both_layouts() {
+        let config = Config::default();
+        // `jr` is `ок` typed on English; `щл` is `ok` typed on Ukrainian.
+        for (physical, layout, replacement) in [
+            ("jr", SystemLayout::English, "ок"),
+            ("ok", SystemLayout::Ukrainian, "ok"),
+        ] {
+            let terminal = evaluate_terminal_with_mapping(
+                &terminal_sample(physical, &format!("{physical} "), layout),
+                &config,
+                None,
+            );
+            let AutoDecision::Correct(correction) = terminal else {
+                panic!("terminal: {physical:?} on {layout:?} was not corrected: {terminal:?}");
+            };
+            assert_eq!(correction.replacement, format!("{replacement} "));
+
+            let sample = WordSample {
+                inner: upyr_core::WordSample::new(physical, physical, layout),
+                physical_word: physical.to_owned(),
+                source_layout: layout,
+                visible_runs: vec![LayoutRun {
+                    layout,
+                    physical: physical.to_owned(),
+                }],
+            };
+            let desktop = evaluate_with_mapping(
+                &terminal_sample(physical, &format!("{physical} "), layout),
+                &config,
+                None,
+            );
+            let AutoDecision::Correct(correction) = desktop else {
+                panic!("desktop: {physical:?} on {layout:?} was not corrected: {desktop:?}");
+            };
+            assert_eq!(correction.replacement, format!("{replacement} "));
+
+            let line_break = evaluate_line_break_with_mapping(&sample, &config, None, false);
+            let AutoDecision::Correct(correction) = line_break else {
+                panic!(
+                    "before Enter: {physical:?} on {layout:?} was not corrected: {line_break:?}"
+                );
+            };
+            assert_eq!(correction.replacement, replacement);
+        }
+        // Typed on the right layout, both stay as they are.
+        for (physical, layout) in [
+            ("ok", SystemLayout::English),
+            ("jr", SystemLayout::Ukrainian),
+        ] {
+            assert!(!matches!(
+                evaluate_terminal_with_mapping(
+                    &terminal_sample(physical, &format!("{physical} "), layout),
+                    &config,
+                    None
+                ),
+                AutoDecision::Correct(_)
+            ));
         }
     }
 
