@@ -11,5 +11,5 @@ fn main() -> Result<()> {
         )
         .with_target(false)
         .init();
-    app::run(Config::load()?)
+    app::run(Config::load()?, None)
 }

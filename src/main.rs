@@ -44,7 +44,7 @@ enum Command {
         #[arg(allow_hyphen_values = true)]
         text: Vec<String>,
     },
-    /// Write a documented default configuration file.
+    /// Write the default configuration file.
     Init {
         #[arg(long)]
         force: bool,
@@ -110,13 +110,7 @@ fn main() -> Result<()> {
     match cli.command.unwrap_or(Command::Run { hotkey: None }) {
         #[cfg(target_os = "macos")]
         Command::Globe { action } => manage_globe(action),
-        Command::Run { hotkey } => {
-            let mut config = Config::load()?;
-            if let Some(hotkey) = hotkey {
-                config.hotkey = hotkey;
-            }
-            app::run(config)
-        }
+        Command::Run { hotkey } => app::run(Config::load()?, hotkey),
         Command::Convert {
             direction,
             installed,
@@ -200,24 +194,25 @@ fn doctor() -> Result<()> {
         config.auto_correct_sensitivity,
         config.auto_correct_min_word_length
     );
-    println!(
-        "Terminal typing apps: {}",
-        if config.terminal_typing_apps.is_empty() {
-            "disabled".to_owned()
-        } else {
-            config.terminal_typing_apps.join(", ")
-        }
-    );
-    println!(
-        "Slash-command apps: {}",
-        if config.slash_command_apps.is_empty() {
-            "disabled".to_owned()
-        } else {
-            config.slash_command_apps.join(", ")
-        }
-    );
+    // Terminal typing and slash commands are only implemented on macOS.
     #[cfg(target_os = "macos")]
     {
+        println!(
+            "Terminal typing apps: {}",
+            if config.terminal_typing_apps.is_empty() {
+                "disabled".to_owned()
+            } else {
+                config.terminal_typing_apps.join(", ")
+            }
+        );
+        println!(
+            "Slash-command apps: {}",
+            if config.slash_command_apps.is_empty() {
+                "disabled".to_owned()
+            } else {
+                config.slash_command_apps.join(", ")
+            }
+        );
         let output = upyr::audio_output::current();
         println!("Undo correction shortcut: {}", config.undo_hotkey);
         println!(

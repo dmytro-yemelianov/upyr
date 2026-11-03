@@ -19,7 +19,7 @@ change between minor releases while the version is below 1.0.
 - Let words on the Exceptions list override the built-in correction rules, and
   let a `keep` rule win over a broader `correct` rule regardless of order.
 - Convert the Ukrainian shifted number row (`"`, `№`, `;`, `:`, `?`) in the
-  built-in layout table used by the CLI, the web demo and as a fallback.
+  built-in layout table used by the CLI and as the fallback for conversion.
 - Keep typing through an automatic correction on macOS: keys pressed while
   Upyr selects, copies and pastes the corrected word now wait in the target
   app and follow the paste in order, instead of replacing the selected word.
@@ -49,6 +49,22 @@ change between minor releases while the version is below 1.0.
   to make a multi-word correction fail its copy check.
 - Replay clicks, Enter, Tab and arrows that happen during a correction, so the
   next word is not joined to the previous one (`ok`, click, `ckjdj` → `okckjdj`).
+- Unchecking "/commands in Superset" now also removes Superset from terminal
+  typing, which checking it had silently enabled.
+- An exception typed as "two words" is saved as two exceptions instead of
+  blocking every other change in Settings.
+- `upyr run --hotkey` survives configuration reloads and Settings saves.
+- The modifier gesture no longer converts text while Settings is open.
+- Windows and Linux: a conversion shortcut equal to the macOS-only undo
+  shortcut no longer blocks saving, and Settings search no longer lists
+  controls those platforms do not have.
+- The tray item is "Pause Upyr", since pausing stops every action.
+- Web demo: on-screen Shift and Caps Lock reach the engine, a real keyboard's
+  layout is read from the typed character, and "Corrected" appears only when
+  the text was actually replaced.
+- Site and README: the Anime pack's six event cues are pre-rendered clips;
+  automatic correction happens after Space; the browser adapter and live demo
+  already ship; maintainer tools that download data are listed.
 
 ### Planned
 

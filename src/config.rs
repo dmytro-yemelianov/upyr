@@ -308,6 +308,19 @@ impl Config {
         Ok(path)
     }
 
+    /// Applies an `upyr run --hotkey` override to a freshly loaded
+    /// configuration. The running app reapplies it after every reload, and the
+    /// result passes the same validation and shortcut conflict checks as a
+    /// hotkey saved in the configuration file.
+    pub fn with_hotkey_override(mut self, hotkey: Option<&str>) -> Result<Self> {
+        if let Some(hotkey) = hotkey {
+            self.hotkey = hotkey.to_owned();
+            self.validate()
+                .with_context(|| format!("invalid --hotkey override {hotkey:?}"))?;
+        }
+        Ok(self)
+    }
+
     pub fn validate(&self) -> Result<()> {
         if self.config_version != CURRENT_CONFIG_VERSION {
             bail!(
@@ -337,7 +350,9 @@ impl Config {
             bail!("hotkey and last_word_hotkey resolve to the same shortcut");
         }
         let undo: HotKey = self.undo_hotkey.parse().context("invalid undo_hotkey")?;
-        if [hotkey, last_word_hotkey].contains(&undo) {
+        // The undo shortcut is registered only on macOS, and only the macOS
+        // Settings window can record it, so it can conflict only there.
+        if cfg!(target_os = "macos") && [hotkey, last_word_hotkey].contains(&undo) {
             bail!("undo_hotkey must differ from the conversion shortcuts");
         }
         if !(10..=2_000).contains(&self.copy_delay_ms) {
@@ -1013,6 +1028,54 @@ mod tests {
         let error = config.validate().unwrap_err().to_string();
 
         assert!(error.contains("resolve to the same shortcut"));
+    }
+
+    #[test]
+    fn hotkey_override_replaces_a_freshly_loaded_hotkey_and_is_validated() {
+        let loaded = Config {
+            hotkey: "Ctrl+Alt+K".to_owned(),
+            ..Config::default()
+        };
+
+        assert_eq!(
+            loaded.clone().with_hotkey_override(None).unwrap().hotkey,
+            "Ctrl+Alt+K"
+        );
+        assert_eq!(
+            loaded
+                .clone()
+                .with_hotkey_override(Some("Ctrl+Alt+J"))
+                .unwrap()
+                .hotkey,
+            "Ctrl+Alt+J"
+        );
+        let conflict = loaded
+            .clone()
+            .with_hotkey_override(Some(&loaded.last_word_hotkey))
+            .unwrap_err();
+        assert!(format!("{conflict:#}").contains("must be different"));
+        let invalid = loaded.with_hotkey_override(Some("Ctrl+")).unwrap_err();
+        assert!(format!("{invalid:#}").contains("--hotkey"));
+    }
+
+    #[test]
+    fn undo_shortcut_conflicts_only_matter_where_undo_is_registered() {
+        let config = Config {
+            hotkey: "CmdOrCtrl+Alt+Z".to_owned(),
+            undo_hotkey: "CmdOrCtrl+Alt+Z".to_owned(),
+            ..Config::default()
+        };
+
+        #[cfg(target_os = "macos")]
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("undo_hotkey must differ")
+        );
+        #[cfg(not(target_os = "macos"))]
+        config.validate().unwrap();
     }
 
     #[test]
