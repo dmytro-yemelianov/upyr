@@ -166,7 +166,7 @@ mod platform {
 
     use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained};
     use objc2_app_kit::{
-        NSBackingStoreType, NSColor, NSEvent, NSFont, NSPanel, NSStatusWindowLevel,
+        NSBackingStoreType, NSColor, NSEvent, NSFont, NSPanel, NSScreen, NSStatusWindowLevel,
         NSTextAlignment, NSTextField, NSWindowCollectionBehavior, NSWindowStyleMask,
     };
     use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
@@ -193,14 +193,50 @@ mod platform {
         INDICATOR.with_borrow_mut(|indicator| {
             let indicator = indicator.get_or_insert_with(|| make_indicator(main_thread));
             indicator.label.setStringValue(&NSString::from_str(text));
-            let pointer = NSEvent::mouseLocation();
-            indicator
-                .panel
-                .setFrameOrigin(NSPoint::new(pointer.x + 16.0, pointer.y + 18.0));
+            let origin = near_caret(main_thread).unwrap_or_else(|| {
+                let pointer = NSEvent::mouseLocation();
+                NSPoint::new(pointer.x + 16.0, pointer.y + 18.0)
+            });
+            indicator.panel.setFrameOrigin(origin);
             indicator.panel.orderFrontRegardless();
         });
         true
     }
+
+    /// Just below the caret of the focused text, on the screen that holds
+    /// it, when the app exposes the caret through Accessibility.
+    fn near_caret(main_thread: MainThreadMarker) -> Option<NSPoint> {
+        let caret = crate::caret::caret()?;
+        let screens = NSScreen::screens(main_thread);
+        // The first screen is the main display, whose top left is the origin
+        // of the caret's coordinates.
+        let main_height = screens.firstObject()?.frame().size.height;
+        let caret_middle = NSPoint::new(caret.x, main_height - caret.y - caret.height / 2.0);
+        let screen = screens.to_vec().into_iter().find(|screen| {
+            let frame = screen.frame();
+            caret_middle.x >= frame.origin.x
+                && caret_middle.y >= frame.origin.y
+                && caret_middle.x < frame.origin.x + frame.size.width
+                && caret_middle.y < frame.origin.y + frame.size.height
+        })?;
+        let visible = screen.visibleFrame();
+        let (x, y) = crate::caret::panel_origin(
+            caret,
+            main_height,
+            INDICATOR_WIDTH,
+            INDICATOR_HEIGHT,
+            crate::caret::Rect {
+                x: visible.origin.x,
+                y: visible.origin.y,
+                width: visible.size.width,
+                height: visible.size.height,
+            },
+        );
+        Some(NSPoint::new(x, y))
+    }
+
+    const INDICATOR_WIDTH: f64 = 94.0;
+    const INDICATOR_HEIGHT: f64 = 42.0;
 
     pub fn hide_indicator() {
         if MainThreadMarker::new().is_none() {
@@ -214,7 +250,7 @@ mod platform {
     }
 
     fn make_indicator(main_thread: MainThreadMarker) -> Indicator {
-        let size = NSSize::new(94.0, 42.0);
+        let size = NSSize::new(INDICATOR_WIDTH, INDICATOR_HEIGHT);
         let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
             NSPanel::alloc(main_thread),
             NSRect::new(NSPoint::new(0.0, 0.0), size),

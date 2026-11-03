@@ -286,6 +286,13 @@ fn doctor() -> Result<()> {
             }
         );
         println!(
+            "Caret position: {}",
+            upyr::caret::caret().map_or_else(
+                || "not exposed by the focused app; the indicator follows the pointer".to_owned(),
+                |caret| format!("{:.0}, {:.0} ({:.0} high)", caret.x, caret.y, caret.height)
+            )
+        );
+        println!(
             "Learning from your fixes: {}",
             if config.auto_correct_learning {
                 "on"
