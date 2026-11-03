@@ -28,7 +28,7 @@ impl Request {
     pub fn automatic(&self) -> bool {
         matches!(self, Self::Automatic { .. })
     }
-    #[cfg(target_os = "macos")]
+    /// Upyr tracked the text itself, so it knows what the selection must hold.
     fn tracked(&self) -> bool {
         matches!(self, Self::Automatic { .. } | Self::Undo { .. })
     }
@@ -68,6 +68,11 @@ pub(crate) trait Effects {
         Ok(None)
     }
     fn select(&mut self, selection: Selection) -> Result<()>;
+    /// The selected text as the app reports it through Accessibility, read
+    /// without a copy. `None` when the app does not expose it.
+    fn selected_text(&mut self) -> Option<String> {
+        None
+    }
     fn copy(&mut self) -> Result<()>;
     fn read_copy(&mut self) -> Option<String>;
     fn convert(&self, selected: &str, request: &Request) -> Conversion;
@@ -175,6 +180,40 @@ impl<E: Effects> Pipeline<E> {
         result
     }
 
+    /// Whether `selected` holds the text a tracked request expects. The other
+    /// requests convert whatever is selected.
+    fn expected(&self, selected: &str) -> bool {
+        match &self.request {
+            Request::Automatic { expected, .. } | Request::Undo { expected, .. } => {
+                selected == expected || selected.trim() == expected.trim()
+            }
+            _ => true,
+        }
+    }
+
+    /// Converts the selected text and puts the result on the clipboard.
+    fn selected(&mut self, now: Instant, selected: String) -> Result<Progress> {
+        let conversion = self.effects.convert(&selected, &self.request);
+        if !conversion.changed {
+            // A selection left behind would be replaced by the next key.
+            self.effects.recover_selection(self.selection, false)?;
+            return self.finish(SelectionOutcome::NoConvertibleText);
+        }
+        let characters = selected.chars().count();
+        let manual_source = matches!(self.request, Request::Selection | Request::PreviousWord)
+            .then(|| selected.clone());
+        self.effects.write(&conversion.text)?;
+        Ok(self.wait(
+            now,
+            self.config.paste_delay_ms,
+            Phase::Paste {
+                conversion,
+                characters,
+                manual_source,
+            },
+        ))
+    }
+
     fn advance(&mut self, now: Instant) -> Result<Progress> {
         if !self.committed() && !self.effects.valid() {
             if self.effects.defer_cancellation() {
@@ -223,6 +262,18 @@ impl<E: Effects> Pipeline<E> {
                 Ok(self.wait(now, self.config.copy_delay_ms, Phase::Read))
             }
             Phase::Copy => {
+                // A copy puts the text on the pasteboard unmarked, where
+                // clipboard-history apps can record it. Text Upyr tracked can
+                // be checked without one when the app exposes its selection.
+                if self.request.tracked() {
+                    if let Some(selected) = self
+                        .effects
+                        .selected_text()
+                        .filter(|selected| self.expected(selected))
+                    {
+                        return self.selected(now, selected);
+                    }
+                }
                 self.effects.copy()?;
                 Ok(self.wait(now, self.config.copy_delay_ms, Phase::Read))
             }
@@ -231,34 +282,11 @@ impl<E: Effects> Pipeline<E> {
                     self.effects.recover_selection(self.selection, true)?;
                     return self.finish(SelectionOutcome::NoSelection);
                 };
-                if let Request::Automatic { expected, .. } | Request::Undo { expected, .. } =
-                    &self.request
-                {
-                    if selected != *expected && selected.trim() != expected.trim() {
-                        self.effects.recover_selection(self.selection, false)?;
-                        return self.finish(SelectionOutcome::TextMismatch);
-                    }
-                }
-                let conversion = self.effects.convert(&selected, &self.request);
-                if !conversion.changed {
-                    // A selection left behind would be replaced by the next key.
+                if !self.expected(&selected) {
                     self.effects.recover_selection(self.selection, false)?;
-                    return self.finish(SelectionOutcome::NoConvertibleText);
+                    return self.finish(SelectionOutcome::TextMismatch);
                 }
-                let characters = selected.chars().count();
-                let manual_source =
-                    matches!(self.request, Request::Selection | Request::PreviousWord)
-                        .then(|| selected.clone());
-                self.effects.write(&conversion.text)?;
-                Ok(self.wait(
-                    now,
-                    self.config.paste_delay_ms,
-                    Phase::Paste {
-                        conversion,
-                        characters,
-                        manual_source,
-                    },
-                ))
+                self.selected(now, selected)
             }
             Phase::Paste {
                 conversion,
@@ -551,6 +579,14 @@ impl Effects for Desktop {
             }
         }
     }
+    fn selected_text(&mut self) -> Option<String> {
+        let selected = crate::caret::selected_text();
+        tracing::debug!(
+            readable = selected.is_some(),
+            "selection read through Accessibility"
+        );
+        selected
+    }
     fn copy(&mut self) -> Result<()> {
         self.saved = Some(super::snapshot(&mut self.clipboard));
         self.probe = Some(super::arm_copy_probe(&mut self.clipboard)?);
@@ -576,6 +612,10 @@ impl Effects for Desktop {
         super::selection_conversion(selected, self.config.direction, replacement)
     }
     fn write(&mut self, replacement: &str) -> Result<()> {
+        if self.saved.is_none() {
+            // No copy saved the user's clipboard first.
+            self.saved = Some(super::snapshot(&mut self.clipboard));
+        }
         crate::clipboard_guard::set_temporary_text(&mut self.clipboard, replacement)?;
         self.ownership = Some(crate::clipboard_guard::ClipboardOwnership::after_write(
             replacement,
@@ -727,6 +767,8 @@ mod tests {
         fail_restore: bool,
         fn_held: bool,
         terminal: bool,
+        /// What Accessibility reports as selected, if the app exposes it.
+        accessible: Option<String>,
     }
 
     struct Fake(Rc<RefCell<State>>);
@@ -774,6 +816,9 @@ mod tests {
             }
             Ok(())
         }
+        fn selected_text(&mut self) -> Option<String> {
+            self.0.borrow().accessible.clone()
+        }
         fn read_copy(&mut self) -> Option<String> {
             let mut state = self.0.borrow_mut();
             let selected = state.copied.clone()?;
@@ -797,6 +842,9 @@ mod tests {
         }
         fn write(&mut self, replacement: &str) -> Result<()> {
             let mut state = self.0.borrow_mut();
+            if state.saved.is_none() {
+                state.saved = Some(state.clipboard.clone());
+            }
             state.clipboard = replacement.to_owned();
             state.owned = Some(replacement.to_owned());
             Ok(())
@@ -864,6 +912,7 @@ mod tests {
             fail_restore: false,
             fn_held: false,
             terminal: false,
+            accessible: None,
         }));
         let now = Instant::now();
         let config = Config {
@@ -1195,5 +1244,51 @@ mod tests {
         drop(task);
         assert!(state.borrow().pasted.is_none());
         assert_eq!(state.borrow().recoveries, 1);
+    }
+
+    fn automatic() -> Request {
+        Request::Automatic {
+            expected: "ghbdsn".to_owned(),
+            replacement: "привіт".to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_correction_read_through_accessibility_never_copies() {
+        // A copy puts the typed word on the pasteboard unmarked, where
+        // clipboard-history apps can record it.
+        let (mut task, state, now) = task(automatic(), true);
+        state.borrow_mut().accessible = Some("ghbdsn".to_owned());
+        state.borrow_mut().copied = None;
+        assert!(matches!(task.poll(now).unwrap(), Progress::Waiting));
+        assert!(matches!(next(&mut task).unwrap(), Progress::Waiting));
+        assert!(matches!(
+            next(&mut task).unwrap(),
+            Progress::Committed(SelectionOutcome::Converted { characters: 6, .. })
+        ));
+        next(&mut task).unwrap();
+        assert_eq!(state.borrow().copies, 0);
+        assert_eq!(state.borrow().pasted.as_deref(), Some("привіт"));
+        assert_eq!(state.borrow().clipboard, "original clipboard");
+    }
+
+    #[test]
+    fn other_accessible_text_falls_back_to_copying() {
+        // The app may not have applied the whole selection yet.
+        let (mut task, state, now) = task(automatic(), true);
+        state.borrow_mut().accessible = Some("hbdsn".to_owned());
+        ready_to_paste(&mut task, now);
+        assert!(matches!(next(&mut task).unwrap(), Progress::Committed(_)));
+        assert_eq!(state.borrow().copies, 1);
+        assert_eq!(state.borrow().pasted.as_deref(), Some("привіт"));
+    }
+
+    #[test]
+    fn a_manual_conversion_still_copies() {
+        // Nothing to check the accessible text against.
+        let (mut task, state, now) = task(Request::PreviousWord, true);
+        state.borrow_mut().accessible = Some("ghbdsn".to_owned());
+        ready_to_paste(&mut task, now);
+        assert_eq!(state.borrow().copies, 1);
     }
 }
