@@ -82,6 +82,13 @@ change between minor releases while the version is below 1.0.
   written either as the keys typed (`ghbdsn`) or as the text seen (`руку`).
   The engine supported these rules since 0.4, but only its tests could use
   them. They apply to normal and terminal correction; a matching `keep` wins.
+- Caps Lock no longer turns automatic correction off. It inverts the case of
+  letters as Shift does (`GHBDSN` → `ПРИВІТ`); a Ukrainian letter on a
+  punctuation key (`[ ; , .`) ends the word, since its intended case depends on
+  the layout.
+- Fix an accidental Caps Lock on macOS: a word typed as `пРИВІТ` or `hELLO`
+  while Caps Lock is on becomes `Привіт` / `Hello` (and `gHBDSN` becomes
+  `Привіт`), and Caps Lock is turned off for the next words.
 
 ### Planned
 

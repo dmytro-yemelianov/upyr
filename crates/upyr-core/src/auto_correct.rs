@@ -188,6 +188,15 @@ impl WordSample {
             source_layout,
         }
     }
+
+    /// The tracked context as US-QWERTY key characters, ending at the word.
+    pub fn physical_context(&self) -> &str {
+        &self.physical_context
+    }
+
+    pub fn source_layout(&self) -> InputLayout {
+        self.source_layout
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

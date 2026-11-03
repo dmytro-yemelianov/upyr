@@ -26,7 +26,7 @@ use crate::automation::{
     convert_previous_input_if_matches, convert_previous_word, convert_selection,
 };
 use crate::{
-    auto_correct::{AutoCorrection, AutoDecision, AutoKeyEvent, AutoWordTracker, evaluate},
+    auto_correct::{AutoCorrection, AutoDecision, AutoKeyEvent, AutoWordTracker},
     auto_correct_monitor::AutoCorrectMonitor,
     automation::SelectionOutcome,
     autostart,
@@ -921,13 +921,14 @@ impl App {
         #[cfg(target_os = "macos")]
         self.refresh_line_break(event.key);
         #[cfg(target_os = "macos")]
-        let decision = if crate::input_context::terminal_typing_enabled(&self.config) {
-            crate::auto_correct::evaluate_terminal(&sample, &self.config)
-        } else {
-            evaluate(&sample, &self.config)
-        };
+        let decision = crate::auto_correct::evaluate_with_caps_lock(
+            &sample,
+            &self.config,
+            crate::automation::caps_lock_on(),
+            crate::input_context::terminal_typing_enabled(&self.config),
+        );
         #[cfg(not(target_os = "macos"))]
-        let decision = evaluate(&sample, &self.config);
+        let decision = crate::auto_correct::evaluate(&sample, &self.config);
         match decision {
             AutoDecision::Correct(correction) => {
                 debug!(direction = ?correction.direction, "automatic word accepted for correction");
@@ -1096,8 +1097,7 @@ impl App {
             self.reset_auto_context();
             return;
         }
-        let mut config = self.config.clone();
-        config.direction = correction.direction;
+        let config = self.correction_config(&correction);
         self.start_conversion(
             ConversionRequest::Automatic {
                 expected: correction.expected_source,
@@ -1107,6 +1107,32 @@ impl App {
             Some(generation),
             None,
         );
+    }
+
+    /// The configuration one automatic correction runs with. A case-only
+    /// accidental-Caps-Lock fix (`Direction::Smart`) keeps the layout, and
+    /// any accidental-Caps-Lock fix releases Caps Lock for the next words.
+    #[cfg(target_os = "macos")]
+    fn correction_config(&self, correction: &AutoCorrection) -> Config {
+        let mut config = self.config.clone();
+        config.direction = correction.direction;
+        if correction.direction == upyr_core::Direction::Smart {
+            config.switch_layout = false;
+        }
+        let typed_word = correction
+            .expected_source
+            .trim_end()
+            .rsplit(' ')
+            .next()
+            .unwrap_or("");
+        if crate::automation::caps_lock_on()
+            && crate::auto_correct::accidental_caps_fix(typed_word).is_some()
+        {
+            if let Err(error) = crate::automation::turn_off_caps_lock() {
+                debug!(%error, "could not turn Caps Lock off after fixing its word");
+            }
+        }
+        config
     }
 
     /// Arms the target's tap to hold Enter while the word being typed would be
@@ -1138,9 +1164,16 @@ impl App {
         let correction = (!crate::input_context::terminal_typing_enabled(&self.config))
             .then(|| self.auto_tracker.line_break_sample())
             .flatten()
-            .and_then(|sample| match evaluate(&sample, &self.config) {
-                AutoDecision::Correct(correction) => Some(correction),
-                _ => None,
+            .and_then(|sample| {
+                match crate::auto_correct::evaluate_with_caps_lock(
+                    &sample,
+                    &self.config,
+                    crate::automation::caps_lock_on(),
+                    false,
+                ) {
+                    AutoDecision::Correct(correction) => Some(correction),
+                    _ => None,
+                }
             });
         let armed = correction.and_then(|correction| {
             let pid = crate::automation::frontmost_pid()?;
@@ -1189,8 +1222,7 @@ impl App {
             return;
         };
         debug!(direction = ?correction.direction, "correcting the word before Enter");
-        let mut config = self.config.clone();
-        config.direction = correction.direction;
+        let config = self.correction_config(&correction);
         self.start_conversion(
             ConversionRequest::Automatic {
                 expected: correction.expected_source,

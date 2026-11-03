@@ -60,6 +60,17 @@ unsafe extern "C" {
     fn CFStringCreateWithCString(allocator: Ref, string: *const i8, encoding: u32) -> Ref;
 }
 
+#[link(name = "IOKit", kind = "framework")]
+unsafe extern "C" {
+    fn IOServiceMatching(name: *const std::ffi::c_char) -> Ref;
+    fn IOServiceGetMatchingService(main_port: u32, matching: Ref) -> u32;
+    fn IOServiceOpen(service: u32, owning_task: u32, kind: u32, connect: *mut u32) -> i32;
+    fn IOServiceClose(connect: u32) -> i32;
+    fn IOObjectRelease(object: u32) -> i32;
+    fn IOHIDSetModifierLockState(handle: u32, selector: i32, state: bool) -> i32;
+    static mach_task_self_: u32;
+}
+
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
     fn AXUIElementCreateSystemWide() -> Ref;
@@ -120,6 +131,47 @@ pub(crate) fn frontmost_pid() -> Option<i32> {
     MainThreadMarker::new()?;
     let application = front_application()?;
     Some(unsafe { objc2::msg_send![&*application, processIdentifier] })
+}
+
+/// Whether Caps Lock is currently on (the logical lock, not the key).
+pub(crate) fn caps_lock_on() -> bool {
+    (unsafe { CGEventSourceFlagsState(0) }) & (1 << 16) != 0
+}
+
+/// Turns Caps Lock off after an accidental-Caps-Lock word was fixed, so the
+/// next words are typed in the case the user meant.
+pub(crate) fn turn_off_caps_lock() -> Result<()> {
+    const MAIN_PORT_DEFAULT: u32 = 0;
+    const HID_PARAM_CONNECT_TYPE: u32 = 1;
+    const CAPS_LOCK_STATE: i32 = 1;
+    unsafe {
+        let matching = IOServiceMatching(c"IOHIDSystem".as_ptr());
+        if matching.is_null() {
+            bail!("could not describe the HID system service");
+        }
+        // Consumes `matching`.
+        let service = IOServiceGetMatchingService(MAIN_PORT_DEFAULT, matching);
+        if service == 0 {
+            bail!("the HID system service is unavailable");
+        }
+        let mut connect = 0;
+        let opened = IOServiceOpen(
+            service,
+            mach_task_self_,
+            HID_PARAM_CONNECT_TYPE,
+            &mut connect,
+        );
+        IOObjectRelease(service);
+        if opened != 0 {
+            bail!("could not open the HID system service ({opened:#x})");
+        }
+        let result = IOHIDSetModifierLockState(connect, CAPS_LOCK_STATE, false);
+        IOServiceClose(connect);
+        if result != 0 {
+            bail!("could not release Caps Lock ({result:#x})");
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn modifiers_released() -> bool {

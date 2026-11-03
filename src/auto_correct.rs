@@ -254,6 +254,9 @@ impl AutoWordTracker {
     }
 }
 
+/// macOS evaluates through [`evaluate_with_caps_lock`], which also handles
+/// terminals and an accidental Caps Lock.
+#[cfg(not(target_os = "macos"))]
 pub fn evaluate(sample: &WordSample, config: &Config) -> AutoDecision {
     let mapping = system_layout::installed_mapping().ok().flatten();
     evaluate_with_mapping(sample, config, mapping.as_deref())
@@ -283,10 +286,110 @@ fn evaluate_with_mapping(
 
 /// Terminal edits are bounded to the current word, even when the language
 /// engine has accumulated an ambiguous phrase before it.
+/// `пРИВІТ`, `hELLO`: typed with Caps Lock on while Shift was held for the
+/// first letter. Returns the intended case (`Привіт`, `Hello`).
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn accidental_caps_fix(word: &str) -> Option<String> {
+    let cased = |c: &char| c.is_lowercase() || c.is_uppercase();
+    if !word
+        .chars()
+        .all(|c| cased(&c) || matches!(c, '\'' | '’' | 'ʼ'))
+    {
+        return None;
+    }
+    let mut letters = word.chars().filter(cased);
+    if !letters.next()?.is_lowercase() {
+        return None;
+    }
+    let rest: Vec<char> = letters.collect();
+    if rest.len() < 2 || !rest.iter().all(|c| c.is_uppercase()) {
+        return None;
+    }
+    let mut first = true;
+    Some(
+        word.chars()
+            .flat_map(|c| -> Vec<char> {
+                if !cased(&c) {
+                    vec![c]
+                } else if std::mem::take(&mut first) {
+                    c.to_uppercase().collect()
+                } else {
+                    c.to_lowercase().collect()
+                }
+            })
+            .collect(),
+    )
+}
+
+/// Evaluates a finished word, fixing an accidental Caps Lock first when it is
+/// on: `gHBDSN` becomes `Привіт` (layout and case), `пРИВІТ` becomes `Привіт`
+/// (case only, `Direction::Smart`, which must not switch layouts).
 #[cfg(target_os = "macos")]
-pub fn evaluate_terminal(sample: &WordSample, config: &Config) -> AutoDecision {
+pub fn evaluate_with_caps_lock(
+    sample: &WordSample,
+    config: &Config,
+    caps_lock: bool,
+    terminal: bool,
+) -> AutoDecision {
     let mapping = system_layout::installed_mapping().ok().flatten();
-    evaluate_terminal_with_mapping(sample, config, mapping.as_deref())
+    evaluate_caps_with_mapping(sample, config, mapping.as_deref(), caps_lock, terminal)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn evaluate_caps_with_mapping(
+    sample: &WordSample,
+    config: &Config,
+    mapping: Option<&[(char, char)]>,
+    caps_lock: bool,
+    terminal: bool,
+) -> AutoDecision {
+    let evaluate = |sample: &WordSample| {
+        if terminal {
+            evaluate_terminal_with_mapping(sample, config, mapping)
+        } else {
+            evaluate_with_mapping(sample, config, mapping)
+        }
+    };
+    if !caps_lock {
+        return evaluate(sample);
+    }
+    let visible = render_visible_context(&sample.visible_runs, mapping);
+    let boundary = if visible.ends_with(' ') { " " } else { "" };
+    let visible_word = visible
+        .strip_suffix(' ')
+        .unwrap_or(&visible)
+        .rsplit(' ')
+        .next()
+        .unwrap_or("");
+    let fixes = accidental_caps_fix(visible_word).zip(accidental_caps_fix(&sample.physical_word));
+    let context = sample.inner.physical_context();
+    let prefix = context
+        .strip_suffix(' ')
+        .unwrap_or(context)
+        .strip_suffix(sample.physical_word.as_str());
+    let (Some((fixed_visible, fixed_physical)), Some(prefix)) = (fixes, prefix) else {
+        return evaluate(sample);
+    };
+    // Judge the word as it was meant to be typed. Selection still targets the
+    // text on screen, which every path renders from the original key runs.
+    let intended = WordSample {
+        inner: upyr_core::WordSample::new(
+            fixed_physical.clone(),
+            format!("{prefix}{fixed_physical}{boundary}"),
+            sample.inner.source_layout(),
+        ),
+        visible_runs: sample.visible_runs.clone(),
+        physical_word: fixed_physical,
+        source_layout: sample.source_layout,
+    };
+    match evaluate(&intended) {
+        AutoDecision::Correct(correction) => AutoDecision::Correct(correction),
+        _ => AutoDecision::Correct(AutoCorrection {
+            expected_source: format!("{visible_word}{boundary}"),
+            replacement: format!("{fixed_visible}{boundary}"),
+            direction: upyr_core::Direction::Smart,
+        }),
+    }
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -733,6 +836,77 @@ mod tests {
             Some(upyr_core::PhysicalKey::Quote)
         );
         assert_eq!(physical_key(Keycode::Left), None);
+    }
+
+    #[test]
+    fn accidental_caps_lock_words_are_recognized_by_their_inverted_case() {
+        for (typed, fixed) in [
+            ("пРИВІТ", "Привіт"),
+            ("hELLO", "Hello"),
+            ("gHBDSN", "Ghbdsn"),
+        ] {
+            assert_eq!(
+                accidental_caps_fix(typed).as_deref(),
+                Some(fixed),
+                "{typed}"
+            );
+        }
+        for typed in ["ПРИВІТ", "привіт", "Привіт", "пРИвіт", "hE", "a1B"] {
+            assert_eq!(accidental_caps_fix(typed), None, "{typed}");
+        }
+    }
+
+    #[test]
+    fn caps_lock_accidents_are_fixed_with_or_without_a_layout_change() {
+        let config = Config::default();
+        for (word, layout, expected, replacement, direction) in [
+            // Wrong layout as well: convert and fix the case.
+            (
+                "gHBDSN",
+                SystemLayout::English,
+                "gHBDSN ",
+                "Привіт ",
+                upyr_core::Direction::EnglishToUkrainian,
+            ),
+            // Right layout: only the case changes, and no layout switch.
+            (
+                "gHBDSN",
+                SystemLayout::Ukrainian,
+                "пРИВІТ ",
+                "Привіт ",
+                upyr_core::Direction::Smart,
+            ),
+            (
+                "hELLO",
+                SystemLayout::English,
+                "hELLO ",
+                "Hello ",
+                upyr_core::Direction::Smart,
+            ),
+        ] {
+            let sample = terminal_sample(word, &format!("{word} "), layout);
+            for terminal in [false, true] {
+                let decision = evaluate_caps_with_mapping(&sample, &config, None, true, terminal);
+                let AutoDecision::Correct(correction) = decision else {
+                    panic!("{expected:?} (terminal: {terminal}) was not fixed: {decision:?}");
+                };
+                assert_eq!(
+                    (
+                        correction.expected_source.as_str(),
+                        correction.replacement.as_str(),
+                        correction.direction
+                    ),
+                    (expected, replacement, direction),
+                    "terminal: {terminal}"
+                );
+            }
+        }
+        // Without Caps Lock the same shape is left alone (`iPHONE`-like text).
+        let sample = terminal_sample("hELLO", "hELLO ", SystemLayout::English);
+        assert!(!matches!(
+            evaluate_caps_with_mapping(&sample, &config, None, false, false),
+            AutoDecision::Correct(correction) if correction.replacement == "Hello "
+        ));
     }
 
     #[test]

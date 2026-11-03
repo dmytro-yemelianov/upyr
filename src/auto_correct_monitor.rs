@@ -308,11 +308,29 @@ impl CaptureState {
                 return Some(reset_event(Keycode::CapsLock));
             }
         }
+        let key = map_key(key)?;
         if self.caps_lock {
-            return None;
+            if is_layout_dependent_letter(key) {
+                // A Ukrainian letter on a punctuation key: Caps Lock changes its
+                // case on one layout only, so the intended case is unknowable.
+                return Some(reset_event(Keycode::CapsLock));
+            }
+            // Caps Lock inverts the case of letters only, as Shift does.
+            let letter = crate::auto_correct::physical_key(key)
+                .and_then(|physical| {
+                    upyr_core::physical_character(upyr_core::PhysicalKeyEvent {
+                        key: physical,
+                        shifted: false,
+                    })
+                })
+                .is_some_and(|character| character.is_ascii_alphabetic());
+            return Some(AutoKeyEvent {
+                key,
+                shifted: shifted ^ letter,
+            });
         }
 
-        map_key(key).map(|key| AutoKeyEvent { key, shifted })
+        Some(AutoKeyEvent { key, shifted })
     }
 
     fn chord_modifier_active(&self) -> bool {
@@ -360,6 +378,22 @@ fn reset_event(key: Keycode) -> AutoKeyEvent {
         key,
         shifted: false,
     }
+}
+
+/// Punctuation keys of a US keyboard that type letters on the Ukrainian layout
+/// (`[];',.` and backquote/backslash for `хїжєбюʼґ`).
+fn is_layout_dependent_letter(key: Keycode) -> bool {
+    matches!(
+        key,
+        Keycode::LeftBracket
+            | Keycode::RightBracket
+            | Keycode::Semicolon
+            | Keycode::Apostrophe
+            | Keycode::Comma
+            | Keycode::Dot
+            | Keycode::Grave
+            | Keycode::BackSlash
+    )
 }
 
 fn infer_caps_lock(name: Option<&str>, shifted: bool) -> Option<bool> {
@@ -1468,13 +1502,28 @@ mod tests {
     }
 
     #[test]
-    fn already_active_caps_lock_is_suppressed_and_recovers_when_off() {
+    fn caps_lock_folds_into_letter_case_instead_of_disabling_correction() {
         let mut state = CaptureState::from_pressed_keys(&[Keycode::CapsLock]);
 
+        // Caps Lock on, no Shift: the letter is an upper-case key press.
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("A")),
-            None
+            Some(AutoKeyEvent {
+                key: Keycode::A,
+                shifted: true,
+            })
         );
+        // Shift with Caps Lock types a lower-case letter.
+        state.observe(EventType::KeyPress(Key::ShiftLeft), None);
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
+            Some(AutoKeyEvent {
+                key: Keycode::A,
+                shifted: false,
+            })
+        );
+        state.observe(EventType::KeyRelease(Key::ShiftLeft), None);
+        // Caps Lock off again: ordinary lower case.
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
             Some(AutoKeyEvent {
@@ -1494,12 +1543,41 @@ mod tests {
         );
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("Ф")),
-            None
+            Some(AutoKeyEvent {
+                key: Keycode::A,
+                shifted: true,
+            })
         );
         assert_eq!(
             state.observe(EventType::KeyPress(Key::LeftBracket), Some("х")),
             Some(AutoKeyEvent {
                 key: Keycode::LeftBracket,
+                shifted: false,
+            })
+        );
+    }
+
+    #[test]
+    fn caps_lock_on_a_ukrainian_letter_punctuation_key_ends_the_word() {
+        // `[` is `х` on Ukrainian: Caps Lock changes its case on one layout
+        // but not the other, so the word's intended case is unknowable.
+        let mut state = CaptureState::from_pressed_keys(&[Keycode::CapsLock]);
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::KeyA), Some("A")),
+            Some(AutoKeyEvent {
+                key: Keycode::A,
+                shifted: true,
+            })
+        );
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::Comma), Some(",")),
+            Some(reset_event(Keycode::CapsLock))
+        );
+        // `/` is punctuation on both layouts and keeps the word.
+        assert_eq!(
+            state.observe(EventType::KeyPress(Key::Slash), Some("/")),
+            Some(AutoKeyEvent {
+                key: Keycode::Slash,
                 shifted: false,
             })
         );

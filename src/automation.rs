@@ -27,7 +27,7 @@ mod terminal_typing;
 #[cfg(target_os = "macos")]
 pub(crate) use input_guard::FocusTarget;
 #[cfg(target_os = "macos")]
-pub(crate) use input_guard::{frontmost_pid, modifiers_released};
+pub(crate) use input_guard::{caps_lock_on, frontmost_pid, modifiers_released, turn_off_caps_lock};
 #[cfg(target_os = "macos")]
 pub(crate) use pipeline::{ConversionTask, Progress, Request};
 #[cfg(target_os = "macos")]
