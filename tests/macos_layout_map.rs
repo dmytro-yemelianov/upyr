@@ -33,7 +33,9 @@ fn main() {
     // conversion (`«` -> `±`, `…` -> `Ú`, `’` -> `∏`).
     for typography in ['«', '»', '…', '’', '—', '±', 'Ú', '∏'] {
         assert!(
-            !pairs.iter().any(|&(en, uk)| en == typography || uk == typography),
+            !pairs
+                .iter()
+                .any(|&(en, uk)| en == typography || uk == typography),
             "{typography:?} must not be remapped by layout conversion"
         );
     }
