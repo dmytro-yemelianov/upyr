@@ -285,16 +285,36 @@ impl Default for Config {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        let path = config_path()?;
+        Self::load_from(&config_path()?)
+    }
+
+    fn load_from(path: &Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
         }
 
-        let source = fs::read_to_string(&path)
+        let source = fs::read_to_string(path)
             .with_context(|| format!("failed to read config at {}", path.display()))?;
         let config = Self::decode(&source)
             .with_context(|| format!("failed to parse config at {}", path.display()))?;
         Ok(config)
+    }
+
+    /// For starting the app and Settings: an unreadable file must not leave
+    /// the user with no running app and no way to fix it from the UI. Returns
+    /// the defaults together with a description of the problem.
+    pub fn load_or_default() -> (Self, Option<String>) {
+        match config_path() {
+            Ok(path) => Self::load_or_default_from(&path),
+            Err(error) => (Self::default(), Some(format!("{error:#}"))),
+        }
+    }
+
+    fn load_or_default_from(path: &Path) -> (Self, Option<String>) {
+        match Self::load_from(path) {
+            Ok(config) => (config, None),
+            Err(error) => (Self::default(), Some(format!("{error:#}"))),
+        }
     }
 
     /// Three-way merge for a Settings save. `base` is what the window loaded,
@@ -1097,6 +1117,27 @@ mod tests {
         let error = config.validate().unwrap_err().to_string();
 
         assert!(error.contains("resolve to the same shortcut"));
+    }
+
+    #[test]
+    fn a_broken_file_falls_back_to_defaults_and_names_the_problem() {
+        let path =
+            std::env::temp_dir().join(format!("upyr-broken-config-{}.toml", std::process::id()));
+        fs::write(&path, "hotkey = [unterminated").unwrap();
+        let defaults = toml::to_string(&Config::default()).unwrap();
+        let (config, problem) = Config::load_or_default_from(&path);
+        let _ = fs::remove_file(&path);
+        assert_eq!(toml::to_string(&config).unwrap(), defaults);
+        let problem = problem.expect("the problem is reported");
+        assert!(problem.contains(&path.display().to_string()), "{problem}");
+
+        let (config, problem) = Config::load_or_default_from(&path);
+        assert_eq!(
+            toml::to_string(&config).unwrap(),
+            defaults,
+            "a missing file means defaults"
+        );
+        assert_eq!(problem, None);
     }
 
     #[test]

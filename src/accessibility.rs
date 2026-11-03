@@ -117,6 +117,27 @@ pub fn prompt_for_restart() -> bool {
     alert.runModal() == NSAlertFirstButtonReturn
 }
 
+/// Explains that the configuration file could not be read and Upyr is running
+/// with defaults. Returns true when the user chose to open Settings.
+pub fn alert_invalid_config(problem: &str) -> bool {
+    let Some(main_thread) = MainThreadMarker::new() else {
+        return false;
+    };
+    let application = NSApplication::sharedApplication(main_thread);
+    application.activate();
+
+    let alert = NSAlert::new(main_thread);
+    alert.setAlertStyle(NSAlertStyle::Warning);
+    alert.setMessageText(&NSString::from_str("Upyr could not read its settings"));
+    alert.setInformativeText(&NSString::from_str(&format!(
+        "{problem}\n\nUpyr is running with default settings. Fix the file, or open Settings and save to replace it."
+    )));
+    alert.addButtonWithTitle(&NSString::from_str("Open Settings"));
+    alert.addButtonWithTitle(&NSString::from_str("Continue"));
+
+    alert.runModal() == NSAlertFirstButtonReturn
+}
+
 /// Starts a detached helper that waits for this process to release the
 /// single-instance lock, then reopens the same app bundle (or executable when
 /// running an unpackaged development build).

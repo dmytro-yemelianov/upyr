@@ -8,6 +8,7 @@ mod auto_correct;
 mod auto_correct_monitor;
 pub mod automation;
 pub mod autostart;
+mod child_processes;
 mod clipboard_guard;
 pub mod config;
 mod config_watcher;

@@ -11,5 +11,17 @@ fn main() -> Result<()> {
         )
         .with_target(false)
         .init();
-    app::run(Config::load()?, None)
+    // An unreadable configuration must not leave the user with no running app
+    // and no way to fix it: start with defaults and say so.
+    let (config, problem) = Config::load_or_default();
+    if let Some(problem) = &problem {
+        tracing::error!(%problem, "configuration could not be read; running with defaults");
+        #[cfg(target_os = "macos")]
+        if upyr::accessibility::alert_invalid_config(problem) {
+            if let Err(error) = upyr::settings::spawn() {
+                tracing::error!(%error, "could not open Upyr Settings");
+            }
+        }
+    }
+    app::run(config, None)
 }

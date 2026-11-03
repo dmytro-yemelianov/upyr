@@ -179,11 +179,15 @@ pub fn run() -> Result<()> {
     }
 
     let activation = ActivationInbox::open()?;
-    let config = Config::load()?;
+    // Settings is how a broken file gets fixed, so it opens on defaults.
+    let (config, problem) = Config::load_or_default();
+    let problem = problem.map(|problem| {
+        format!("Could not read the settings file ({problem}). These are the defaults; saving replaces the file.")
+    });
     let autostart_status = autostart::status()?;
     let initial_tab = activation.drain()?.unwrap_or(requested_tab);
     #[cfg(target_os = "macos")]
-    return macos::run(config, autostart_status, initial_tab, activation);
+    return macos::run(config, autostart_status, initial_tab, activation, problem);
 
     #[cfg(not(target_os = "macos"))]
     {
@@ -198,12 +202,9 @@ pub fn run() -> Result<()> {
             "Upyr Settings",
             options,
             Box::new(move |_context| {
-                Ok(Box::new(SettingsApp::new(
-                    config,
-                    autostart_status,
-                    initial_tab,
-                    activation,
-                )))
+                let mut app = SettingsApp::new(config, autostart_status, initial_tab, activation);
+                app.status = problem.map(|problem| (false, problem));
+                Ok(Box::new(app))
             }),
         )
         .map_err(|error| anyhow!(error.to_string()))
@@ -320,6 +321,7 @@ fn spawn_tab(tab: SettingsTab) -> Result<()> {
         if child.id() == 0 {
             bail!("macOS did not start Upyr Settings");
         }
+        crate::child_processes::track(child);
         return Ok(());
     }
 
@@ -334,6 +336,7 @@ fn spawn_tab(tab: SettingsTab) -> Result<()> {
     if child.id() == 0 {
         bail!("the operating system did not start Upyr Settings");
     }
+    crate::child_processes::track(child);
     Ok(())
 }
 

@@ -597,13 +597,19 @@ mod platform {
 
     use super::{SoundAsset, scale_pcm16_wav};
 
+    const MAX_CONCURRENT_SOUNDS: usize = 8;
+
     pub fn play(
         asset: SoundAsset,
         volume_percent: u8,
         _headphone_volume_percent: u8,
     ) -> Result<()> {
         let path = cached_sound(&asset, volume_percent)?;
-        Command::new("canberra-gtk-play")
+        // Fast typing must not pile up player processes; every one is reaped.
+        if crate::child_processes::running() >= MAX_CONCURRENT_SOUNDS {
+            return Ok(());
+        }
+        let player = Command::new("canberra-gtk-play")
             .arg("--file")
             .arg(&path)
             .arg("--description")
@@ -613,6 +619,7 @@ mod platform {
             .stderr(Stdio::null())
             .spawn()
             .with_context(|| format!("could not play embedded sound {}", path.display()))?;
+        crate::child_processes::track(player);
         Ok(())
     }
 

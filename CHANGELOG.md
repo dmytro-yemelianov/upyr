@@ -8,6 +8,15 @@ change between minor releases while the version is below 1.0.
 
 ### Fixed
 
+- An unreadable configuration file no longer stops Upyr from starting with no
+  message. The background app runs with defaults (on macOS it explains why and
+  offers to open Settings), and Settings opens on the defaults, names the
+  problem, and replaces the file on Save.
+- Linux: key and event sounds no longer leave a finished `canberra-gtk-play`
+  process behind per sound (a zombie per keystroke with key clicks on), and at
+  most eight players run at once. Opening Settings or a link from Settings no
+  longer leaves a zombie either.
+
 - Stop automatic correction from rewriting a correctly typed word that collides
   with a dictionary word on the other layout (`руку` is no longer turned into
   `here`).
