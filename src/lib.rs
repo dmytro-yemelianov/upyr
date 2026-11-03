@@ -22,6 +22,7 @@ pub mod layout;
 mod learning;
 mod modifier_gesture;
 pub mod settings;
+pub mod shell_init;
 #[cfg(any(target_os = "macos", test))]
 mod slash_commands;
 pub mod system_layout;

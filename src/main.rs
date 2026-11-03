@@ -56,6 +56,14 @@ enum Command {
         #[arg(allow_hyphen_values = true)]
         text: Vec<String>,
     },
+    /// Print prompt widgets that convert the command line (Ctrl+X Ctrl+L)
+    /// or the word before the cursor (Ctrl+X L). Load them with
+    /// `eval "$(upyr shell-init zsh)"`, the same for bash, or
+    /// `upyr shell-init fish | source`.
+    ShellInit {
+        #[arg(value_enum)]
+        shell: CliShell,
+    },
     /// Write the default configuration file.
     Init {
         #[arg(long)]
@@ -96,6 +104,13 @@ enum AutostartAction {
     Enable,
     Disable,
     Status,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CliShell {
+    Zsh,
+    Bash,
+    Fish,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -149,6 +164,20 @@ fn main() -> Result<()> {
             if io::stdin().is_terminal() {
                 println!();
             }
+            Ok(())
+        }
+        Command::ShellInit { shell } => {
+            let program = std::env::current_exe()
+                .context("could not find the Upyr executable for the widgets")?;
+            let shell = match shell {
+                CliShell::Zsh => upyr::shell_init::Shell::Zsh,
+                CliShell::Bash => upyr::shell_init::Shell::Bash,
+                CliShell::Fish => upyr::shell_init::Shell::Fish,
+            };
+            print!(
+                "{}",
+                upyr::shell_init::script(shell, &program.to_string_lossy())
+            );
             Ok(())
         }
         Command::Init { force } => {

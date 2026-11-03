@@ -256,6 +256,20 @@ lower → UPPER → Title. Both are off until set, for example
 `transliterate_hotkey = "CmdOrCtrl+Alt+T"`. The same transforms are available
 as `upyr transliterate` and `upyr case`.
 
+At a shell prompt, where the app cannot select and paste, widgets fix the
+command line in place: Ctrl+X Ctrl+L converts the whole line and Ctrl+X L the
+word before the cursor (in zsh, the active region instead when there is one).
+Load them from your shell's startup file:
+
+```sh
+eval "$(upyr shell-init zsh)"     # ~/.zshrc
+eval "$(upyr shell-init bash)"    # ~/.bashrc, bash 4 or newer
+upyr shell-init fish | source     # ~/.config/fish/config.fish
+```
+
+Set `UPYR_NO_BINDINGS=1` before loading to bind `upyr-convert-line` and
+`upyr-convert-word` to other keys yourself.
+
 Exceptions only stop a correction. For anything more specific, add rules to the
 configuration file; they apply before the built-in ones, and a matching `keep`
 always wins:

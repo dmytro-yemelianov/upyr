@@ -16,6 +16,12 @@ change between minor releases while the version is below 1.0.
 
 ### Added
 
+- `upyr shell-init zsh|bash|fish`: prompt widgets that convert the command
+  line (Ctrl+X Ctrl+L) or the word before the cursor (Ctrl+X L; the active
+  region in zsh) through `upyr convert`, preferring the installed layouts.
+  The script calls the Upyr that printed it. Tested in real interactive
+  zsh, bash 4.4–5.2 and fish through a pseudo-terminal
+  (`tools/test_shell_widgets.py`), now also in CI.
 - macOS: Backspace as the first key after an automatic correction reverts it
   (`backspace_undo`, on by default); the word comes back as typed, without
   the space or punctuation the Backspace deleted.
