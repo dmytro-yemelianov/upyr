@@ -1,6 +1,7 @@
 # Multilingual core: design
 
-Status: draft for the owner's decision (2026-11-03). Nothing here is built yet.
+Status: draft for the owner's decision (2026-11-03), reviewed once by a
+builder. Nothing here is built yet.
 
 ## Intent
 
@@ -49,6 +50,9 @@ of enabled sources.
 
 - Input methods that are not one key → one character (CJK IMEs, Vietnamese
   Telex, dead-key composition sequences). They stay unsupported.
+- Letters reachable only through AltGr/Option layers. *My call:* the tracker
+  records plain and Shift positions today, and adding a third modifier layer
+  is a separate change worth its own design if a chosen language needs it.
 - Transliteration between scripts (a separate feature).
 - Automatic language detection of whole documents or spell checking.
 
@@ -64,9 +68,12 @@ of enabled sources.
 ### 1. Layouts are data
 
 - `LanguageId`: a BCP-47 primary subtag (`en`, `uk`, `de`, …).
-- `LayoutId`: a stable identifier (`us`, `uk-pc`, `de`, `pl-pro`, or the OS
-  source id) with its `LanguageId`.
-- `Layout`: for each physical key the plain and Shift characters. The built-in
+- `LayoutId`: a stable identifier (`us`, `uk-pc`, `de`, or the OS source id)
+  with its `LanguageId`.
+- `Layout`: for each physical key the plain and Shift characters, including
+  the digit row and the ISO key left of Z. AltGr and Option layers are out of
+  scope (see non-goals), so layouts that put letters only there (Polish
+  Programmer, Czech QWERTY diacritics) are not supported. The built-in
   set ships US-QWERTY and Ukrainian-PC (today's table); the OS-discovered
   layout replaces the built-in one whenever it is available, as now.
 - Conversion A → B goes through physical keys: character → key (A) → character
@@ -75,22 +82,40 @@ of enabled sources.
   not change shape.
 - `Direction` becomes a pair `(from: LayoutId, to: LayoutId)` or `Auto`.
 
-### 2. Model format v2: one-vs-rest scores per language
+### 2. Model format v2: independent scores per language
 
-- Each n-gram stores a sparse row of signed strengths, one per language that
-  has evidence for it: positive = characteristic of that language against the
-  pooled others. EN/UK v1 is the two-language special case.
+*My call* (the reviewer pointed out that one-vs-rest scores would shift every
+time a language is added, which breaks the EN/UK regression gate):
+
+- Each language has its own slice: n-gram → quantised strength for that
+  language alone. Adding or removing a language never changes another
+  language's numbers.
+- A reading is scored under its own language's slice only. The comparison
+  between languages happens at runtime, and only among the enabled layouts,
+  so with EN and UK enabled the decision depends on the EN and UK slices and
+  nothing else.
 - `coverage(text, L)` keeps its current meaning: the weighted share of the
-  text's n-grams that favour L. Thresholds stay per-sensitivity and gain an
+  text's n-grams that support L. Thresholds stay per-sensitivity and gain an
   optional per-pair calibration override, measured, not guessed.
+- Phase 2 gate: the v2 EN and UK slices must reproduce today's benchmarks. If
+  independent scoring cannot match the current signed differential, the EN↔UK
+  pair keeps the v1 signed table as its pair slice and only new pairs use v2;
+  that fallback is decided by measurement, not in advance.
 - Languages are separate slices in one file, with a header listing them, so a
   build can include a subset (see size).
 - The generator grows a `--languages en,uk,…` option; the Leipzig source table
   already has the shape.
 
-Size: v1 is 2.8 MiB for two languages at the current budgets. A first estimate
-is 1.2–1.6 MiB per added language at the same budgets, to be measured in phase
-2 before committing to it.
+Size: v1 is 2,957,400 bytes for two languages at the current budgets. A first
+estimate is 1.2–1.6 MiB per added language at the same budgets, to be measured
+in phase 2 before committing to it.
+
+The web demo has a hard ceiling today: `tools/check_wasm_size.py` fails the
+build above 3,750,000 raw / 512,000 Brotli bytes, and the embedded model
+already takes 2,957,400 of the raw budget. Any added language breaks it, so
+the WASM build either embeds EN/UK only and loads other slices from the same
+origin on demand, or the limits are raised (owner's decision, below). The
+desktop app is unaffected by this limit.
 
 ### 3. Lexicons and heuristics per language
 
@@ -104,9 +129,20 @@ is 1.2–1.6 MiB per added language at the same budgets, to be measured in phase
 The active layout is the source. Each other enabled layout gives one candidate
 reading. Each candidate is judged exactly as today's single candidate
 (dictionary, triggers, model margin, prefix sweep). The candidate with the
-largest margin wins, and only if it clears the policy; a tie between two
-candidates means abstain. The layout switch after a correction follows the
-winner.
+largest margin wins, and only if it clears the policy. *My calls:*
+
+- Two layouts that produce the same string for the typed keys (for example
+  two Cyrillic layouts that agree on every letter typed) give one candidate,
+  not a tie; the switch goes to the layout of the same language that the user
+  used last.
+- A real tie between different readings means abstain.
+- The EN/UK targets must also hold with a third layout enabled: the replay
+  and recall suites run once with EN+UK and once with EN+UK+the new language,
+  and both runs must meet the EN/UK floors.
+- The layout switch after a correction follows the winner.
+- A third layout joins correction only when the user turns it on ("Correct
+  between" in Settings). Installing a source in the OS does not change
+  behaviour by itself; the default stays today's pair.
 
 ### 5. Surfaces
 
@@ -137,18 +173,37 @@ in phases 1 and 2.
 ## Decided
 
 - The physical-key model stays (it is already language-neutral).
-- No runtime downloads; models ship with the app.
+- No runtime downloads in the app; models ship with it.
 - EN/UK quality is the regression gate for every phase.
+
+## My calls (check these while reading)
+
+- Independent per-language model slices; comparison only among enabled
+  layouts; v1 kept for EN↔UK if v2 cannot match it (section 2).
+- Identical readings are agreement, real ties abstain, and EN/UK floors also
+  hold with a third layout on (section 4).
+- Extra layouts are opt-in (section 4).
+- AltGr/Option layers out of scope (non-goals).
 
 ## Open for the owner (changes what gets built)
 
-1. Which languages come first, and how many are targeted. This drives corpus
-   work, fixtures and binary size.
-2. Binary size policy: embed every supported language (+1.2–1.6 MiB each,
-   estimate), or ship language slices as separate files inside the app bundle
-   and load only the enabled ones.
-3. Whether Russian is in scope. It is a product decision, not a technical one;
-   the design treats it like any other language.
+1. Which languages come first, how many are targeted, and whether Russian is
+   in scope. This drives corpus work, fixtures, size, and whether AltGr
+   layers are needed after all.
+2. Same-script pairs (English ↔ German, Ukrainian ↔ Russian): in scope or
+   not. Different-script pairs (Latin ↔ Cyrillic, Latin ↔ Greek) are what the
+   engine does well today: almost every key changes. In a same-script pair
+   only a few keys differ (QWERTY/QWERTZ swaps Y and Z; UK/RU differ in
+   і/и/ї/є/ґ and a few more), so the wrong-layout signal is weak and false
+   corrections are the main risk.
+3. Size policy: embed every supported language in the app (+1.2–1.6 MiB each,
+   estimate) or ship slices as files in the bundle and load only enabled
+   ones; and for the web demo, load extra languages from the same origin on
+   demand or raise the 3,750,000-byte limit.
+4. Fixtures per language: the replay corpus (real typing sessions) and recall
+   targets need a native speaker to curate or at least review. Who does that,
+   or whether generated fixtures from held-out Leipzig sentences are enough
+   to ship a language as "preview".
 
 ## Left to the builder
 
