@@ -542,7 +542,8 @@ impl NativeController {
         settings.set_event_selected(event, true);
         settings.volume_percent = self.sound_volume_percent();
         settings.headphone_volume_percent = self.headphone_volume_percent();
-        match crate::feedback::preview_sound(event, &settings) {
+        let globe = self.ivars().config.borrow().globe_switch.clone();
+        match crate::feedback::preview_sound(event, &settings, &globe) {
             Ok(()) => self.set_status(true, &format!("Previewed {} sound.", event.label())),
             Err(error) => self.set_status(
                 false,

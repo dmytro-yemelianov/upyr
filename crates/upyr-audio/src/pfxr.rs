@@ -10,7 +10,7 @@ use crate::prng::Prng;
 use crate::{Cue, EventCue, KeyCue, SAMPLE_RATE, SoundPack};
 
 #[derive(Debug, Clone, Copy)]
-enum Waveform {
+pub(crate) enum Waveform {
     Sine,
     Saw,
     Square,
@@ -18,19 +18,19 @@ enum Waveform {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Params {
-    waveform: Waveform,
-    volume: f64,
-    attack: f64,
-    sustain: f64,
-    punch: f64,
-    decay: f64,
-    frequency: f64,
-    pitch_delta: f64,
-    vibrato_rate: f64,
-    vibrato_depth: f64,
-    high_pass: f64,
-    low_pass: f64,
+pub(crate) struct Params {
+    pub(crate) waveform: Waveform,
+    pub(crate) volume: f64,
+    pub(crate) attack: f64,
+    pub(crate) sustain: f64,
+    pub(crate) punch: f64,
+    pub(crate) decay: f64,
+    pub(crate) frequency: f64,
+    pub(crate) pitch_delta: f64,
+    pub(crate) vibrato_rate: f64,
+    pub(crate) vibrato_depth: f64,
+    pub(crate) high_pass: f64,
+    pub(crate) low_pass: f64,
 }
 
 impl Default for Params {
@@ -93,13 +93,16 @@ impl Biquad {
 
 pub(crate) fn render(pack: SoundPack, cue: Cue, seed: u32) -> Vec<f32> {
     let params = params_for(pack, cue, seed);
-    let samples = synthesize(params);
-    let peak = match pack {
+    normalize(synthesize(params), peak_for(pack))
+}
+
+/// The loudest sample a pack's cues are normalized to.
+pub(crate) const fn peak_for(pack: SoundPack) -> f32 {
+    match pack {
         SoundPack::Original => 0.32,
         SoundPack::Arcade => 0.38,
         SoundPack::Anime => 0.30,
-    };
-    normalize(samples, peak)
+    }
 }
 
 fn params_for(pack: SoundPack, cue: Cue, seed: u32) -> Params {
@@ -221,7 +224,7 @@ fn apply_pack(params: &mut Params, pack: SoundPack, cue: Cue, random: &mut Prng)
     }
 }
 
-fn synthesize(params: Params) -> Vec<f32> {
+pub(crate) fn synthesize(params: Params) -> Vec<f32> {
     let sample_rate = f64::from(SAMPLE_RATE);
     let duration = (params.attack + params.sustain + params.decay).min(0.30);
     let sample_count = (duration * sample_rate).ceil() as usize;
@@ -322,7 +325,7 @@ fn highpass(frequency: f64, resonance_db: f64, sample_rate: f64) -> Biquad {
     )
 }
 
-fn normalize(mut samples: Vec<f32>, target_peak: f32) -> Vec<f32> {
+pub(crate) fn normalize(mut samples: Vec<f32>, target_peak: f32) -> Vec<f32> {
     let peak = samples
         .iter()
         .fold(0.0_f32, |current, sample| current.max(sample.abs()));

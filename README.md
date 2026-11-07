@@ -129,7 +129,10 @@ cycle_order = "list"             # or "recent" for the previous used layout
 skipped_layouts = []             # input-source IDs from `upyr globe list`
 ```
 
-Globe switches share Upyr's optional indicator and layout-switch sound. On macOS,
+Globe switches share Upyr's optional indicator and layout-switch sound. The
+sound is a short tune that tells layouts apart by ear: the first layout in the
+cycle rises, the second falls, and further layouts get three-note shapes
+(skipped layouts are left out). On macOS,
 select **GlobeSwitch flags** (`indicator_style = "flag"`) to use the original
 pixel-flag row near the bottom of the screen under the pointer: the active flag
 is larger and glowing, the row slides with spring animation, then fades out.
@@ -300,7 +303,7 @@ old cues; sounds are bound to their observed device. Settings shows the current
 output and effective app gain. This changes only Upyr's gain, not macOS volume;
 the percentage is not a measurement of sound pressure at the ear.
 
-Sound-pack synthesis is offline and dependency-free in `upyr-audio`. Its pfxr-style engine creates short deterministic variations, while Anime Reactions uses a procedural glottal/formant synthesizer for non-character keys—there are no voice recordings, downloads, microphone access, or remote audio-service calls at runtime. Anime Reactions' six application-event cues (auto-correct, manual conversion, layout switch, pause, resume, error) are the one exception: they are bundled, pre-rendered assets, generated once offline with the ElevenLabs Sound Effects API by [`tools/generate_event_sound_pack.py`](tools/generate_event_sound_pack.py) and embedded in the binary (see [`assets/sounds/anime/README.md`](assets/sounds/anime/README.md)); like the n-gram corpus generator, this tool is a manual, developer-run step and is never invoked by the desktop app. Every other cue—every key click, and every other pack's event sounds—is synthesized on-device with no bundled audio file at all. Playback uses the operating system's native audio API. Audible feedback can reveal typing rhythm to people nearby, so keyboard sounds are always opt-in; headphones are recommended for the vocal-reaction pack.
+Sound-pack synthesis is offline and dependency-free in `upyr-audio`. Its pfxr-style engine creates short deterministic variations, while Anime Reactions uses a procedural glottal/formant synthesizer for non-character keys—there are no voice recordings, downloads, microphone access, or remote audio-service calls at runtime. Anime Reactions' six application-event cues (auto-correct, manual conversion, layout switch, pause, resume, error) are the one exception: they are bundled, pre-rendered assets (the layout-switch one now plays only for a layout outside the cycle, since per-layout tunes are synthesized), generated once offline with the ElevenLabs Sound Effects API by [`tools/generate_event_sound_pack.py`](tools/generate_event_sound_pack.py) and embedded in the binary (see [`assets/sounds/anime/README.md`](assets/sounds/anime/README.md)); like the n-gram corpus generator, this tool is a manual, developer-run step and is never invoked by the desktop app. Every other cue—every key click, and every other pack's event sounds—is synthesized on-device with no bundled audio file at all. Playback uses the operating system's native audio API. Audible feedback can reveal typing rhythm to people nearby, so keyboard sounds are always opt-in; headphones are recommended for the vocal-reaction pack.
 
 ## Platform status
 

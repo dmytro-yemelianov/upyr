@@ -70,6 +70,20 @@ pub(crate) fn next_layout<'a>(
         .map(String::as_str)
 }
 
+/// The position of `target` among the layouts the Globe key cycles, which
+/// picks its switch tune. Skipped and unknown sources have no position.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn tune_slot(
+    target: &str,
+    enabled: &[String],
+    settings: &GlobeSettings,
+) -> Option<usize> {
+    enabled
+        .iter()
+        .filter(|id| !settings.skipped_layouts.contains(id))
+        .position(|id| id == target)
+}
+
 #[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Default)]
 pub(crate) struct TapDetector {
@@ -151,6 +165,20 @@ mod tests {
         }
         assert_eq!(next_layout(None, &[], &[], &settings), None);
         assert_eq!(next_layout(Some("ABC"), &ids[..1], &[], &settings), None);
+    }
+
+    #[test]
+    fn layout_tune_slot_counts_only_cycled_layouts() {
+        let ids = ["ABC", "Russian", "Ukrainian", "German"].map(str::to_owned);
+        let settings = GlobeSettings {
+            skipped_layouts: vec!["Russian".to_owned()],
+            ..GlobeSettings::default()
+        };
+        assert_eq!(tune_slot("ABC", &ids, &settings), Some(0));
+        assert_eq!(tune_slot("Ukrainian", &ids, &settings), Some(1));
+        assert_eq!(tune_slot("German", &ids, &settings), Some(2));
+        assert_eq!(tune_slot("Russian", &ids, &settings), None);
+        assert_eq!(tune_slot("Missing", &ids, &settings), None);
     }
 
     #[test]

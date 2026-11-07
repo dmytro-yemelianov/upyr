@@ -488,7 +488,10 @@ impl App {
         if self.paused || !self.config.globe_switch.enabled {
             return;
         }
-        self.present_action_cue(selected.layout, SoundEvent::LayoutSwitch);
+        self.present_action_cue(
+            Some(crate::feedback::SwitchTarget::Source(&selected.source_id)),
+            SoundEvent::LayoutSwitch,
+        );
         if crate::feedback::globe_switched(previous.as_deref(), &selected, &self.config) {
             self.schedule_indicator_dismissal();
         }
@@ -1423,7 +1426,7 @@ impl App {
         layout: Option<system_layout::SystemLayout>,
         event: SoundEvent,
     ) {
-        self.present_action_cue(layout, event);
+        self.present_action_cue(layout.map(crate::feedback::SwitchTarget::Family), event);
         let Some(layout) = layout else { return };
         if crate::feedback::layout_switched(layout, &self.config) {
             self.schedule_indicator_dismissal();
@@ -1432,18 +1435,12 @@ impl App {
 
     fn present_action_cue(
         &mut self,
-        layout: Option<system_layout::SystemLayout>,
+        target: Option<crate::feedback::SwitchTarget<'_>>,
         event: SoundEvent,
     ) {
         self.start_tray_flip();
-
-        // One action produces at most one cue. The layout sound is a fallback
-        // for v4 users whose migration intentionally enables only that event.
-        if self.config.sounds.event_enabled(event) {
-            crate::feedback::play_sound_event(event, &self.config);
-        } else if layout.is_some() {
-            crate::feedback::play_sound_event(SoundEvent::LayoutSwitch, &self.config);
-        }
+        // One action produces at most one cue; see `feedback::action_cue`.
+        crate::feedback::play_action_sound(event, target, &self.config);
     }
 
     fn schedule_indicator_dismissal(&mut self) {
