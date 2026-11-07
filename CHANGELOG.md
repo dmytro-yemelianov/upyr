@@ -6,6 +6,18 @@ change between minor releases while the version is below 1.0.
 
 ## [Unreleased]
 
+### Planned
+
+- Notarized Developer ID distribution for macOS.
+- Broader Windows and Linux desktop validation.
+- Browser adapter and npm delivery for `upyr-wasm`.
+
+## [0.5.0] - 2026-11-08
+
+Per-layout switch tunes, a caret-side layout indicator, Backspace revert and
+learning from your fixes, shell widgets, transliteration, and fixes for keys
+typed twice in Gemini and Claude and for corrections reaching clipboard history.
+
 ### Security
 
 - Build `wayland-scanner` 0.31.11 from crates.io, which ships the
@@ -190,12 +202,6 @@ change between minor releases while the version is below 1.0.
   and other layouts that move the letters; use a QWERTY English layout there.
 - The "Layout switch" sound on Windows and Linux plays only when the
   conversion's own sound is turned off, since there is no Globe-key switcher.
-
-### Planned
-
-- Notarized Developer ID distribution for macOS.
-- Broader Windows and Linux desktop validation.
-- Browser adapter and npm delivery for `upyr-wasm`.
 
 ## [0.4.1] - 2026-10-27
 
@@ -386,7 +392,8 @@ Initial public preview.
 - Public preview artifacts may be explicitly marked unnotarized; users should
   check each release's signing status before installing.
 
-[Unreleased]: https://github.com/dmytro-yemelianov/upyr/compare/macos-preview-0.4.1...HEAD
+[Unreleased]: https://github.com/dmytro-yemelianov/upyr/compare/macos-preview-0.5.0...HEAD
+[0.5.0]: https://github.com/dmytro-yemelianov/upyr/releases/tag/macos-preview-0.5.0
 [0.4.1]: https://github.com/dmytro-yemelianov/upyr/releases/tag/macos-preview-0.4.1
 [0.4.0]: https://github.com/dmytro-yemelianov/upyr/releases/tag/macos-preview-0.4.0
 [0.3.0]: https://github.com/dmytro-yemelianov/upyr/releases/tag/macos-preview-0.3.0
