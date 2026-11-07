@@ -23,6 +23,7 @@ static GENERATED_SOUNDS: OnceLock<SoundCache> = OnceLock::new();
 enum SoundId {
     Event(SoundPack, SoundEvent),
     Key(SoundPack, KeyCue, u8),
+    Layout(SoundPack, u8),
 }
 
 #[derive(Clone)]
@@ -87,6 +88,22 @@ fn event_asset(event: SoundEvent, pack: SoundPack) -> SoundAsset {
     }
 }
 
+/// The switch tune for the layout at `slot`, synthesized in every pack. The
+/// Anime pack's single recorded switch cue cannot tell layouts apart, so it is
+/// only the fallback for a layout outside the cycle.
+fn layout_asset(slot: usize, pack: SoundPack) -> SoundAsset {
+    let slot = slot % upyr_audio::LAYOUT_TUNES;
+    let id = SoundId::Layout(pack, slot as u8);
+    SoundAsset {
+        id,
+        slug: format!("{}-layout-{slot}", pack_slug(pack)),
+        bytes: cached_sound(id, || {
+            upyr_audio::render_layout_switch_wav(audio_pack(pack), slot)
+        }),
+        keyboard: false,
+    }
+}
+
 fn key_asset(cue: KeyCue, pack: SoundPack) -> SoundAsset {
     let variant = (KEY_SEQUENCE.fetch_add(1, Ordering::Relaxed) % KEY_VARIANTS) as u8;
     let seed = key_seed(cue, variant);
@@ -104,14 +121,33 @@ pub(super) fn play_event(
     volume_percent: u8,
     headphone_volume_percent: u8,
 ) -> Result<()> {
-    if !(1..=100).contains(&volume_percent) {
-        bail!("sound volume must be between 1 and 100 percent");
-    }
+    check_volume(volume_percent)?;
     platform::play(
         event_asset(event, pack),
         volume_percent,
         headphone_volume_percent,
     )
+}
+
+pub(super) fn play_layout(
+    slot: usize,
+    pack: SoundPack,
+    volume_percent: u8,
+    headphone_volume_percent: u8,
+) -> Result<()> {
+    check_volume(volume_percent)?;
+    platform::play(
+        layout_asset(slot, pack),
+        volume_percent,
+        headphone_volume_percent,
+    )
+}
+
+fn check_volume(volume_percent: u8) -> Result<()> {
+    if !(1..=100).contains(&volume_percent) {
+        bail!("sound volume must be between 1 and 100 percent");
+    }
+    Ok(())
 }
 
 pub(super) fn play_key(
@@ -121,9 +157,7 @@ pub(super) fn play_key(
     headphone_volume_percent: u8,
     preview: bool,
 ) -> Result<()> {
-    if !(1..=100).contains(&volume_percent) {
-        bail!("sound volume must be between 1 and 100 percent");
-    }
+    check_volume(volume_percent)?;
     if !preview && !KEY_RATE_LIMITER.with_borrow_mut(|limiter| limiter.allow(pack, cue)) {
         return Ok(());
     }
@@ -148,6 +182,9 @@ pub(super) fn prewarm(pack: SoundPack) {
                     generated_sound(id, pack, Cue::Key(cue), key_seed(cue, variant));
                 }
             }
+            for slot in 0..upyr_audio::LAYOUT_TUNES {
+                layout_asset(slot, pack);
+            }
             if pack != SoundPack::Anime {
                 for event in SoundEvent::ALL {
                     let id = SoundId::Event(pack, event);
@@ -163,6 +200,10 @@ pub(super) fn prewarm(pack: SoundPack) {
 }
 
 fn generated_sound(id: SoundId, pack: SoundPack, cue: Cue, seed: u32) -> Arc<[u8]> {
+    cached_sound(id, || upyr_audio::render_wav(audio_pack(pack), cue, seed))
+}
+
+fn cached_sound(id: SoundId, render: impl FnOnce() -> Vec<u8>) -> Arc<[u8]> {
     let cache = GENERATED_SOUNDS.get_or_init(|| Mutex::new(Vec::new()));
     {
         let cached = cache
@@ -173,7 +214,7 @@ fn generated_sound(id: SoundId, pack: SoundPack, cue: Cue, seed: u32) -> Arc<[u8
         }
     }
 
-    let rendered: Arc<[u8]> = upyr_audio::render_wav(audio_pack(pack), cue, seed).into();
+    let rendered: Arc<[u8]> = render().into();
     let mut cached = cache
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -861,6 +902,40 @@ mod tests {
         ));
         assert!(key.slug.starts_with("anime-key-space-"));
         assert!(!pcm16_data_range(key.bytes.as_ref()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn layout_tunes_are_cached_per_pack_and_slot_and_wrap() {
+        for pack in SoundPack::ALL {
+            let mut tunes: Vec<Arc<[u8]>> = Vec::new();
+            for slot in 0..upyr_audio::LAYOUT_TUNES {
+                let asset = layout_asset(slot, pack);
+                assert_eq!(asset.id, SoundId::Layout(pack, slot as u8));
+                assert_eq!(asset.slug, format!("{}-layout-{slot}", pack_slug(pack)));
+                assert!(headphone_wav(&asset.bytes).is_ok());
+                assert!(
+                    tunes
+                        .iter()
+                        .all(|tune| tune.as_ref() != asset.bytes.as_ref()),
+                    "{pack:?} slot {slot} reuses another layout's tune"
+                );
+                tunes.push(asset.bytes);
+            }
+            let wrapped = layout_asset(upyr_audio::LAYOUT_TUNES + 1, pack);
+            assert_eq!(wrapped.id, SoundId::Layout(pack, 1));
+            assert!(Arc::ptr_eq(&wrapped.bytes, &tunes[1]));
+        }
+    }
+
+    #[test]
+    fn anime_layout_tunes_replace_the_single_recording() {
+        let recording = anime_event_asset(SoundEvent::LayoutSwitch).bytes;
+        for slot in 0..upyr_audio::LAYOUT_TUNES {
+            assert_ne!(
+                layout_asset(slot, SoundPack::Anime).bytes.as_ref(),
+                recording.as_ref()
+            );
+        }
     }
 
     #[test]

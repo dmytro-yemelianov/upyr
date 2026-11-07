@@ -16,6 +16,15 @@ change between minor releases while the version is below 1.0.
 
 ### Added
 
+- Each layout has its own switch tune, so you can tell by ear which layout
+  you landed on without looking. A tune follows the layout's place in the
+  Globe-key cycle, leaving out skipped layouts: the first rises, the second
+  falls, then up-up, up-down, down-down and down-up, repeating after six.
+  The pack changes only the voice (soft, bright or sparkle), never the tune.
+  Anime Reactions now synthesizes these tunes as well; its recorded switch
+  cue remains only for a layout outside the cycle. On Linux and Windows,
+  English gets the first tune and Ukrainian the second. Previewing the
+  layout-switch sound in Settings plays the active layout's tune.
 - macOS: the layout indicator appears next to the caret of the text being
   typed, in apps that expose the caret through Accessibility. The letters sit
   just below the caret line. The flag shrinks to the active layout's flag at

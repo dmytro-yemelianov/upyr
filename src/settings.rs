@@ -1221,7 +1221,11 @@ impl SettingsApp {
                         preview_settings.enabled = true;
                         preview_settings.set_event_selected(event, true);
                         self.status = Some(
-                            match crate::feedback::preview_sound(event, &preview_settings) {
+                            match crate::feedback::preview_sound(
+                                event,
+                                &preview_settings,
+                                &self.config.globe_switch,
+                            ) {
                                 Ok(()) => (true, format!("Previewed {} sound.", event.label())),
                                 Err(error) => (
                                     false,

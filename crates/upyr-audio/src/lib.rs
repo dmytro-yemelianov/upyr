@@ -17,6 +17,7 @@
 
 mod pfxr;
 mod prng;
+mod sequence;
 mod voice;
 mod wav;
 
@@ -132,6 +133,28 @@ pub fn render_samples(pack: SoundPack, cue: Cue, seed: u32) -> Vec<f32> {
 #[must_use]
 pub fn render_wav(pack: SoundPack, cue: Cue, seed: u32) -> Vec<u8> {
     wav::encode_pcm16(&render_samples(pack, cue, seed), SAMPLE_RATE)
+}
+
+/// Number of distinct layout-switch tunes before they repeat.
+pub const LAYOUT_TUNES: usize = sequence::TUNES.len();
+
+/// Render the switch tune for the layout at `slot` (its zero-based position in
+/// the user's layout cycle) as mono samples at [`SAMPLE_RATE`].
+///
+/// Each layout gets its own short melody (up, down, up-up, up-down, down-down,
+/// down-up) so a listener can tell which layout is now active without looking.
+/// Slots past [`LAYOUT_TUNES`] wrap around. The pack changes only the voice,
+/// never the melody. Output is deterministic and follows the same bounds as
+/// [`render_samples`].
+#[must_use]
+pub fn render_layout_switch_samples(pack: SoundPack, slot: usize) -> Vec<f32> {
+    sequence::render_layout_tune(pack, slot)
+}
+
+/// Render [`render_layout_switch_samples`] as a mono 44.1 kHz PCM16 WAV file.
+#[must_use]
+pub fn render_layout_switch_wav(pack: SoundPack, slot: usize) -> Vec<u8> {
+    wav::encode_pcm16(&render_layout_switch_samples(pack, slot), SAMPLE_RATE)
 }
 
 fn synthesis_for(pack: SoundPack, cue: Cue) -> Synthesis {
@@ -309,6 +332,106 @@ mod tests {
             render_samples(SoundPack::Arcade, cue, 1),
             render_samples(SoundPack::Arcade, Cue::Event(EventCue::AutoCorrect), 1)
         );
+    }
+
+    /// Zero crossings per second over a slice: a rough fundamental estimate
+    /// that is good enough to tell a rising pair of notes from a falling one.
+    fn crossing_rate(samples: &[f32]) -> f32 {
+        let crossings = samples
+            .windows(2)
+            .filter(|pair| (pair[0] < 0.0) != (pair[1] < 0.0))
+            .count();
+        crossings as f32 * SAMPLE_RATE as f32 / samples.len() as f32
+    }
+
+    fn opening_and_closing_pitch(samples: &[f32]) -> (f32, f32) {
+        let at = |fraction: f32| (samples.len() as f32 * fraction) as usize;
+        (
+            crossing_rate(&samples[..at(0.30)]),
+            crossing_rate(&samples[at(0.55)..at(0.85)]),
+        )
+    }
+
+    #[test]
+    fn layout_tunes_differ_for_every_layout_in_a_cycle() {
+        for pack in PACKS {
+            let tunes: Vec<_> = (0..LAYOUT_TUNES)
+                .map(|slot| render_layout_switch_samples(pack, slot))
+                .collect();
+            for (index, tune) in tunes.iter().enumerate() {
+                assert!(
+                    tunes[..index].iter().all(|earlier| earlier != tune),
+                    "{pack:?} slot {index} reuses an earlier tune"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn layout_tunes_repeat_after_the_last_one() {
+        for pack in PACKS {
+            assert_eq!(
+                render_layout_switch_samples(pack, LAYOUT_TUNES),
+                render_layout_switch_samples(pack, 0)
+            );
+            assert_eq!(
+                render_layout_switch_samples(pack, LAYOUT_TUNES + 1),
+                render_layout_switch_samples(pack, 1)
+            );
+        }
+    }
+
+    #[test]
+    fn first_layout_rises_and_second_falls_in_every_pack() {
+        for pack in PACKS {
+            let (start, end) = opening_and_closing_pitch(&render_layout_switch_samples(pack, 0));
+            assert!(
+                end > start * 1.2,
+                "{pack:?} first tune does not rise: {start} -> {end}"
+            );
+            let (start, end) = opening_and_closing_pitch(&render_layout_switch_samples(pack, 1));
+            assert!(
+                start > end * 1.1,
+                "{pack:?} second tune does not fall: {start} -> {end}"
+            );
+        }
+    }
+
+    #[test]
+    fn layout_tunes_are_deterministic_bounded_and_short() {
+        let longest = (SAMPLE_RATE as f32 * 0.32) as usize;
+        for pack in PACKS {
+            for slot in 0..LAYOUT_TUNES {
+                let samples = render_layout_switch_samples(pack, slot);
+                assert_eq!(samples, render_layout_switch_samples(pack, slot));
+                assert!(
+                    samples.len() <= longest,
+                    "too long {pack:?} slot {slot}: {} samples",
+                    samples.len()
+                );
+                assert!(
+                    samples
+                        .iter()
+                        .all(|sample| sample.is_finite() && sample.abs() <= 0.420_001),
+                    "invalid sample in {pack:?} slot {slot}"
+                );
+                let peak = samples
+                    .iter()
+                    .fold(0.0_f32, |current, sample| current.max(sample.abs()));
+                assert!(peak >= 0.02, "inaudibly quiet {pack:?} slot {slot}: {peak}");
+            }
+        }
+    }
+
+    #[test]
+    fn layout_tune_wav_holds_the_same_samples() {
+        for pack in PACKS {
+            let wav = render_layout_switch_wav(pack, 1);
+            assert_eq!(&wav[0..4], b"RIFF");
+            let data_len = u32::from_le_bytes([wav[40], wav[41], wav[42], wav[43]]) as usize;
+            assert_eq!(data_len + 44, wav.len());
+            assert_eq!(data_len, render_layout_switch_samples(pack, 1).len() * 2);
+        }
     }
 
     #[test]

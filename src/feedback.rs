@@ -10,6 +10,7 @@ use upyr_audio::KeyCue;
 
 use crate::{
     config::{Config, IndicatorStyle, SoundEvent, SoundSettings},
+    globe_switch::GlobeSettings,
     system_layout::SystemLayout,
 };
 
@@ -17,9 +18,24 @@ use crate::{
 ///
 /// Preview callers opt into the event on a temporary settings value, so this
 /// uses the same master switch, event switch, and volume rules as live events.
-pub fn preview_sound(event: SoundEvent, settings: &SoundSettings) -> Result<()> {
+pub fn preview_sound(
+    event: SoundEvent,
+    settings: &SoundSettings,
+    globe: &GlobeSettings,
+) -> Result<()> {
     if !settings.event_enabled(event) {
         bail!("{} sound is disabled or its volume is zero", event.label());
+    }
+    if event == SoundEvent::LayoutSwitch {
+        // Preview the tune of the layout that is active right now.
+        if let Some(slot) = current_layout_tune_slot(globe) {
+            return sound::play_layout(
+                slot,
+                settings.pack,
+                settings.volume_percent,
+                settings.headphone_volume_percent,
+            );
+        }
     }
     sound::play_event(
         event,
@@ -67,6 +83,153 @@ pub fn play_sound_event(event: SoundEvent, config: &Config) -> bool {
             debug!(?event, %error, "sound feedback unavailable");
             false
         }
+    }
+}
+
+/// The single cue an action plays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ActionCue {
+    Event(SoundEvent),
+    /// The tune of the layout the action landed on.
+    LayoutTune,
+}
+
+/// One action produces at most one cue. A layout switch plays the landed
+/// layout's tune; another action plays its own cue, or the layout tune when its
+/// own cue is off but it changed layout (v4 migrations enable only that one).
+pub(crate) fn action_cue(
+    event: SoundEvent,
+    settings: &SoundSettings,
+    layout_switched: bool,
+) -> Option<ActionCue> {
+    if event == SoundEvent::LayoutSwitch || (layout_switched && !settings.event_enabled(event)) {
+        settings
+            .event_enabled(SoundEvent::LayoutSwitch)
+            .then_some(ActionCue::LayoutTune)
+    } else {
+        settings
+            .event_enabled(event)
+            .then_some(ActionCue::Event(event))
+    }
+}
+
+/// The layout an action landed on, as precisely as the caller knows it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SwitchTarget<'a> {
+    /// An exact OS input source, such as a Globe-key selection. Only macOS
+    /// exposes the ordered source list that places one in the cycle.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    Source(&'a str),
+    /// A layout family, such as the target of a correction.
+    Family(SystemLayout),
+}
+
+/// Plays the single cue for an action. `target` is the layout the action
+/// switched to, if it switched. Returns `true` only when playback started.
+pub(crate) fn play_action_sound(
+    event: SoundEvent,
+    target: Option<SwitchTarget<'_>>,
+    config: &Config,
+) -> bool {
+    match action_cue(event, &config.sounds, target.is_some()) {
+        None => false,
+        Some(ActionCue::Event(event)) => play_sound_event(event, config),
+        Some(ActionCue::LayoutTune) => play_layout_tune(
+            target.and_then(|target| layout_tune_slot(target, &config.globe_switch)),
+            &config.sounds,
+        ),
+    }
+}
+
+/// Plays the tune at `slot`, or the pack's single switch cue for a layout
+/// that has no place in the cycle.
+fn play_layout_tune(slot: Option<usize>, settings: &SoundSettings) -> bool {
+    let result = match slot {
+        Some(slot) => sound::play_layout(
+            slot,
+            settings.pack,
+            settings.volume_percent,
+            settings.headphone_volume_percent,
+        ),
+        None => sound::play_event(
+            SoundEvent::LayoutSwitch,
+            settings.pack,
+            settings.volume_percent,
+            settings.headphone_volume_percent,
+        ),
+    };
+    match result {
+        Ok(()) => {
+            debug!(?slot, "layout tune queued");
+            true
+        }
+        Err(error) => {
+            debug!(?slot, %error, "layout tune unavailable");
+            false
+        }
+    }
+}
+
+/// The tune slot of the currently active layout, for previews.
+fn current_layout_tune_slot(globe: &GlobeSettings) -> Option<usize> {
+    let source = crate::system_layout::current().ok().flatten()?;
+    layout_tune_slot(SwitchTarget::Source(&source.source_id), globe).or_else(|| {
+        source
+            .layout
+            .and_then(|layout| layout_tune_slot(SwitchTarget::Family(layout), globe))
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn layout_tune_slot(target: SwitchTarget<'_>, globe: &GlobeSettings) -> Option<usize> {
+    let sources = crate::system_layout::enabled_sources()
+        .map_err(|error| debug!(%error, "input sources unavailable for the layout tune"))
+        .ok()?;
+    let current = match target {
+        SwitchTarget::Family(_) => crate::system_layout::current().ok().flatten(),
+        SwitchTarget::Source(_) => None,
+    };
+    tune_slot_in(target, current.as_ref(), &sources, globe)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn layout_tune_slot(target: SwitchTarget<'_>, _globe: &GlobeSettings) -> Option<usize> {
+    match target {
+        SwitchTarget::Family(layout) => Some(family_tune_slot(layout)),
+        SwitchTarget::Source(_) => None,
+    }
+}
+
+/// The tune slot of `target` within the cycled `sources`. A family resolves
+/// to the source the OS actually selected when that is known.
+#[cfg(any(target_os = "macos", test))]
+fn tune_slot_in(
+    target: SwitchTarget<'_>,
+    current: Option<&crate::system_layout::ActiveInputSource>,
+    sources: &[crate::system_layout::ActiveInputSource],
+    globe: &GlobeSettings,
+) -> Option<usize> {
+    let id = match target {
+        SwitchTarget::Source(id) => id,
+        SwitchTarget::Family(family) => current
+            .filter(|source| source.layout == Some(family))
+            .or_else(|| sources.iter().find(|source| source.layout == Some(family)))?
+            .source_id
+            .as_str(),
+    };
+    let ids: Vec<String> = sources
+        .iter()
+        .map(|source| source.source_id.clone())
+        .collect();
+    crate::globe_switch::tune_slot(id, &ids, globe)
+}
+
+/// Platforms without an ordered source list give each family a fixed tune.
+#[cfg(any(not(target_os = "macos"), test))]
+const fn family_tune_slot(layout: SystemLayout) -> usize {
+    match layout {
+        SystemLayout::English => 0,
+        SystemLayout::Ukrainian => 1,
     }
 }
 
@@ -495,6 +658,7 @@ pub(crate) fn stop_rerouted_audio(generation: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::system_layout::ActiveInputSource;
 
     #[test]
     fn indicator_style_selects_letters_flag_or_both() {
@@ -522,6 +686,90 @@ mod tests {
             indicator_text(SystemLayout::Ukrainian, IndicatorStyle::Both),
             "UK  🇺🇦"
         );
+    }
+
+    fn source(id: &str, layout: Option<SystemLayout>) -> ActiveInputSource {
+        ActiveInputSource {
+            layout,
+            source_id: id.to_owned(),
+            source_name: id.to_owned(),
+        }
+    }
+
+    #[test]
+    fn an_action_plays_its_own_cue_or_falls_back_to_the_layout_tune() {
+        let mut settings = SoundSettings {
+            enabled: true,
+            ..SoundSettings::default()
+        };
+        for event in SoundEvent::ALL {
+            settings.set_event_selected(event, true);
+        }
+        assert_eq!(
+            action_cue(SoundEvent::AutoCorrect, &settings, true),
+            Some(ActionCue::Event(SoundEvent::AutoCorrect))
+        );
+        assert_eq!(
+            action_cue(SoundEvent::LayoutSwitch, &settings, false),
+            Some(ActionCue::LayoutTune)
+        );
+
+        settings.set_event_selected(SoundEvent::AutoCorrect, false);
+        assert_eq!(
+            action_cue(SoundEvent::AutoCorrect, &settings, true),
+            Some(ActionCue::LayoutTune)
+        );
+        assert_eq!(action_cue(SoundEvent::AutoCorrect, &settings, false), None);
+
+        settings.set_event_selected(SoundEvent::LayoutSwitch, false);
+        assert_eq!(action_cue(SoundEvent::AutoCorrect, &settings, true), None);
+        assert_eq!(action_cue(SoundEvent::LayoutSwitch, &settings, true), None);
+    }
+
+    #[test]
+    fn a_layout_tune_follows_the_landed_source_in_the_cycle() {
+        let sources = [
+            source("ABC", Some(SystemLayout::English)),
+            source("Russian", None),
+            source("US", Some(SystemLayout::English)),
+            source("Ukrainian-PC", Some(SystemLayout::Ukrainian)),
+        ];
+        let settings = GlobeSettings {
+            skipped_layouts: vec!["Russian".to_owned()],
+            ..GlobeSettings::default()
+        };
+        let slot = |target, current: Option<&ActiveInputSource>| {
+            tune_slot_in(target, current, &sources, &settings)
+        };
+
+        assert_eq!(slot(SwitchTarget::Source("Ukrainian-PC"), None), Some(2));
+        assert_eq!(slot(SwitchTarget::Source("Russian"), None), None);
+        // A correction lands on whichever English source the OS selected.
+        assert_eq!(
+            slot(
+                SwitchTarget::Family(SystemLayout::English),
+                Some(&sources[2])
+            ),
+            Some(1)
+        );
+        // Without a matching current source, the first source of the family.
+        assert_eq!(
+            slot(
+                SwitchTarget::Family(SystemLayout::English),
+                Some(&sources[3])
+            ),
+            Some(0)
+        );
+        assert_eq!(
+            slot(SwitchTarget::Family(SystemLayout::Ukrainian), None),
+            Some(2)
+        );
+    }
+
+    #[test]
+    fn without_a_source_list_families_keep_a_fixed_tune() {
+        assert_eq!(family_tune_slot(SystemLayout::English), 0);
+        assert_eq!(family_tune_slot(SystemLayout::Ukrainian), 1);
     }
 
     #[test]
