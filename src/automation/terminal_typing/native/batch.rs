@@ -101,6 +101,68 @@ fn holds_line_break(
     armed && !job_active && !own && kind == 10 && autorepeat == 0 && matches!(keycode, 36 | 76)
 }
 
+/// One keyboard event: its type, timestamp and key code. Copies of the same
+/// event share all three; distinct events never do.
+type EventId = (u32, u64, i64);
+
+/// Keyboard events this tap has already let through, held or posted.
+///
+/// Some apps (Gemini, Claude) receive every key-down at their process tap
+/// twice, with the same timestamp. Without an active tap the system delivers
+/// it once; with one in place, both copies reach the app and every letter is
+/// typed twice until the tap moves to another app. The tap therefore passes
+/// each event once and drops any later arrival of it.
+#[derive(Default)]
+struct SeenEvents {
+    recent: std::collections::VecDeque<EventId>,
+}
+
+impl SeenEvents {
+    /// Copies arrive within milliseconds; this covers a burst of typing.
+    const CAPACITY: usize = 64;
+
+    /// Records `id`; `false` means it was already seen and must be dropped.
+    fn first_sight(&mut self, id: EventId) -> bool {
+        if self.recent.contains(&id) {
+            return false;
+        }
+        self.remember(id);
+        true
+    }
+
+    /// Marks an event posted past this tap, so a copy coming back is dropped.
+    fn remember(&mut self, id: EventId) {
+        if self.recent.contains(&id) {
+            return;
+        }
+        if self.recent.len() == Self::CAPACITY {
+            self.recent.pop_front();
+        }
+        self.recent.push_back(id);
+    }
+
+    /// Lets an event pass once more: a held key re-posted to the process
+    /// enters the stream ahead of this tap.
+    fn forget(&mut self, id: EventId) {
+        self.recent.retain(|seen| *seen != id);
+    }
+}
+
+/// The identity of a key-down, key-up or modifier change; `None` otherwise.
+fn keyboard_event_id(kind: u32, event: Event) -> Option<EventId> {
+    matches!(kind, 10..=12).then(|| unsafe {
+        (
+            kind,
+            CGEventGetTimestamp(event),
+            CGEventGetIntegerValueField(event, 9),
+        )
+    })
+}
+
+fn event_kind(event: Event) -> u32 {
+    unsafe { CGEventGetType(event) }
+}
+
 struct HoldStart {
     signal: Arc<HoldSignal>,
     duration: Duration,
@@ -122,6 +184,8 @@ unsafe extern "C" {
     fn CGEventPostToPid(pid: i32, event: Event);
     fn CGEventGetIntegerValueField(event: Event, field: u32) -> i64;
     fn CGEventGetFlags(event: Event) -> u64;
+    fn CGEventGetTimestamp(event: Event) -> u64;
+    fn CGEventGetType(event: Event) -> u32;
 }
 
 #[link(name = "CoreFoundation", kind = "framework")]
@@ -188,9 +252,10 @@ impl Job {
         }
     }
 
-    fn flush(&mut self, proxy: Ref) {
+    /// Posts held keys past this tap, in order.
+    fn flush(&mut self, proxy: Ref, seen: &mut SeenEvents) {
         for key in self.queued.drain(..) {
-            unsafe { CGEventTapPostEvent(proxy, key.0.cast_mut()) };
+            post_past_tap(proxy, &key, seen);
         }
     }
 
@@ -217,6 +282,27 @@ struct State {
     job: Option<Job>,
     disabled: bool,
     line_break: SharedArm,
+    seen: SeenEvents,
+}
+
+/// Posts `event` immediately after this tap. A copy that returns to the tap
+/// is then dropped instead of reaching the app a second time.
+fn post_past_tap(proxy: Ref, event: &Owned, seen: &mut SeenEvents) {
+    let event = event.0.cast_mut();
+    if let Some(id) = keyboard_event_id(event_kind(event), event) {
+        seen.remember(id);
+    }
+    unsafe { CGEventTapPostEvent(proxy, event) };
+}
+
+/// Re-posts a held key to the target process, ahead of this tap, where it
+/// must be let through once more.
+fn post_to_target(target_pid: i32, event: &Owned, seen: &mut SeenEvents) {
+    let event = event.0.cast_mut();
+    if let Some(id) = keyboard_event_id(event_kind(event), event) {
+        seen.forget(id);
+    }
+    unsafe { CGEventPostToPid(target_pid, event) };
 }
 
 unsafe extern "C" fn deliver(proxy: Ref, kind: u32, event: Event, context: *mut c_void) -> Event {
@@ -226,10 +312,17 @@ unsafe extern "C" fn deliver(proxy: Ref, kind: u32, event: Event, context: *mut 
         state.disabled = true;
         if let Some(job) = state.job.as_mut() {
             job.finished = true;
-            job.flush(proxy);
+            job.flush(proxy, &mut state.seen);
             job.end();
         }
         return event;
+    }
+    if let Some(id) = keyboard_event_id(kind, event) {
+        if !state.seen.first_sight(id) {
+            // A second copy of an event this tap already passed, held or
+            // posted; see `SeenEvents`.
+            return std::ptr::null_mut();
+        }
     }
     let own = unsafe { CGEventGetIntegerValueField(event, 41) } == i64::from(std::process::id());
     if kind == 10 && state.job.is_none() {
@@ -318,12 +411,12 @@ unsafe extern "C" fn deliver(proxy: Ref, kind: u32, event: Event, context: *mut 
                     &request.prepared.fallback
                 };
                 for key in batch {
-                    unsafe { CGEventTapPostEvent(proxy, key.0.cast_mut()) };
+                    post_past_tap(proxy, key, &mut state.seen);
                 }
                 job.applied = committed;
             }
         }
-        job.flush(proxy);
+        job.flush(proxy, &mut state.seen);
         job.end();
         // The empty key-up is only a trigger, never input to the application.
         return std::ptr::null_mut();
@@ -367,7 +460,7 @@ unsafe extern "C" fn deliver(proxy: Ref, kind: u32, event: Event, context: *mut 
     }
     if matches!(kind, 1 | 3 | 6 | 7 | 10 | 12 | 22 | 25 | 27) {
         job.cancelled = true;
-        job.flush(proxy);
+        job.flush(proxy, &mut state.seen);
     }
     event
 }
@@ -631,6 +724,7 @@ fn run(
         job: None,
         disabled: false,
         line_break,
+        seen: SeenEvents::default(),
     });
     let mask = [1, 2, 3, 4, 6, 7, 10, 11, 12, 22, 25, 26, 27]
         .into_iter()
@@ -720,7 +814,7 @@ fn run(
                     );
                 }
                 for key in job.queued.drain(..) {
-                    unsafe { CGEventPostToPid(target_pid, key.0.cast_mut()) };
+                    post_to_target(target_pid, &key, &mut state.seen);
                 }
                 job.end();
                 job.reply();
@@ -743,7 +837,7 @@ fn run(
     // event after removing the tap rather than dropping any part of their input.
     if let Some(mut job) = state.job.take() {
         for key in job.queued.drain(..) {
-            unsafe { CGEventPostToPid(target_pid, key.0.cast_mut()) };
+            post_to_target(target_pid, &key, &mut state.seen);
         }
         job.applied = false;
         job.end();
@@ -755,6 +849,61 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_key_event_passes_once_and_its_second_arrival_is_dropped() {
+        // Gemini and Claude deliver each key-down to their process tap twice
+        // with one timestamp; letting both through doubles every letter.
+        let mut seen = SeenEvents::default();
+        let key_down = (10, 1_000, 4);
+        assert!(seen.first_sight(key_down));
+        assert!(!seen.first_sight(key_down));
+        assert!(!seen.first_sight(key_down));
+    }
+
+    #[test]
+    fn events_sharing_a_timestamp_are_told_apart_by_type_and_key() {
+        let mut seen = SeenEvents::default();
+        assert!(seen.first_sight((10, 1_000, 4)));
+        assert!(seen.first_sight((11, 1_000, 4)));
+        assert!(seen.first_sight((10, 1_000, 5)));
+        assert!(seen.first_sight((10, 1_001, 4)));
+    }
+
+    #[test]
+    fn a_held_key_reposted_to_the_process_passes_once_more() {
+        // A held key re-enters the stream ahead of this tap when it is
+        // released by timeout, so it must not count as its own repeat.
+        let mut seen = SeenEvents::default();
+        let held = (10, 2_000, 4);
+        assert!(seen.first_sight(held));
+        seen.forget(held);
+        assert!(seen.first_sight(held));
+        assert!(!seen.first_sight(held));
+    }
+
+    #[test]
+    fn an_event_posted_after_the_tap_is_not_let_through_again() {
+        // Upyr's own edit is posted past this tap; a copy coming back to the
+        // tap would insert the paste twice.
+        let mut seen = SeenEvents::default();
+        seen.remember((10, 3_000, 9));
+        assert!(!seen.first_sight((10, 3_000, 9)));
+        seen.remember((10, 3_000, 9));
+        seen.forget((10, 3_000, 9));
+        assert!(seen.first_sight((10, 3_000, 9)));
+    }
+
+    #[test]
+    fn only_recent_events_are_remembered() {
+        let mut seen = SeenEvents::default();
+        for stamp in 0..SeenEvents::CAPACITY as u64 + 1 {
+            assert!(seen.first_sight((10, stamp, 0)));
+        }
+        // The oldest identity has been evicted; the newest is still known.
+        assert!(seen.first_sight((10, 0, 0)));
+        assert!(!seen.first_sight((10, SeenEvents::CAPACITY as u64, 0)));
+    }
 
     #[test]
     fn a_selection_hold_queues_every_user_key_and_passes_upyrs_own_edit() {

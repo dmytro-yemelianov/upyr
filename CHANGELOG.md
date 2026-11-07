@@ -100,6 +100,12 @@ change between minor releases while the version is below 1.0.
 
 ### Fixed
 
+- macOS: every key was typed twice in Gemini and Claude ("tteesstt") from the
+  moment Upyr started watching a word it would correct until you typed in
+  another app. These apps receive each key-down at their process event tap
+  twice; with Upyr's tap in place, both copies reached the app. The tap now
+  lets each key event through once and drops a repeated copy, including
+  copies of Upyr's own paste and of held keys it releases.
 - macOS: words corrected while typing no longer reach clipboard-history apps
   such as Paste, in apps that expose the selection through Accessibility.
   Upyr checked the selected word with a copy, which left it on the clipboard
