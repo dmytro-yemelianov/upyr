@@ -1618,6 +1618,7 @@ impl App {
             Some(TrayAction::OpenAbout) => settings::spawn_about(),
             Some(TrayAction::ReloadConfiguration) => self.reload_configuration(),
             Some(TrayAction::ToggleAutostart) => self.toggle_autostart(),
+            Some(TrayAction::ToggleFunctionKeys) => self.toggle_function_keys(),
             Some(TrayAction::Quit) => {
                 #[cfg(target_os = "macos")]
                 {
@@ -1683,6 +1684,17 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    /// Switches F1–F12 between standard function keys and media keys.
+    fn toggle_function_keys(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            let standard = !crate::function_keys::standard()?;
+            crate::function_keys::set_standard(standard)?;
+            info!(standard, "switched the function-key mode");
+        }
+        self.update_tray()
     }
 
     fn toggle_autostart(&self) -> Result<()> {

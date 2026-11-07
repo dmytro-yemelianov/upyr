@@ -14,6 +14,8 @@ mod clipboard_guard;
 pub mod config;
 mod config_watcher;
 mod feedback;
+#[cfg(target_os = "macos")]
+mod function_keys;
 pub mod globe_switch;
 mod hotkey_bindings;
 mod input_context;
