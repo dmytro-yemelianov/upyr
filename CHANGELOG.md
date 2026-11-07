@@ -6,6 +6,13 @@ change between minor releases while the version is below 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- macOS: "Use F1–F12 as standard function keys" in the menu bar menu switches
+  the function keys between standard F1–F12 and the printed brightness, volume
+  and media actions, without opening System Settings. The change applies
+  immediately, survives a restart, and the checkmark shows the current mode.
+
 ### Planned
 
 - Notarized Developer ID distribution for macOS.

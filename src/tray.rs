@@ -29,6 +29,8 @@ pub enum TrayAction {
     OpenAbout,
     ReloadConfiguration,
     ToggleAutostart,
+    /// Switch F1–F12 between standard function keys and media keys (macOS).
+    ToggleFunctionKeys,
     Quit,
 }
 
@@ -44,6 +46,7 @@ pub struct Tray {
     about: MenuItem,
     reload_config: MenuItem,
     autostart: CheckMenuItem,
+    function_keys: CheckMenuItem,
     quit: MenuItem,
 }
 
@@ -78,6 +81,9 @@ impl Tray {
         let autostart_status = autostart::status()?;
         let (autostart_label, autostart_checked) = autostart_presentation(autostart_status.state);
         let autostart = CheckMenuItem::new(autostart_label, true, autostart_checked, None);
+        let (keys_label, keys_checked, keys_enabled) =
+            function_keys_presentation(function_keys_state());
+        let function_keys = CheckMenuItem::new(keys_label, keys_enabled, keys_checked, None);
         let quit = MenuItem::new("Quit Upyr", true, None);
         let first_separator = PredefinedMenuItem::separator();
         let second_separator = PredefinedMenuItem::separator();
@@ -95,6 +101,8 @@ impl Tray {
             &about,
             &reload_config,
             &autostart,
+            #[cfg(target_os = "macos")]
+            &function_keys,
             &third_separator,
             &quit,
         ])
@@ -121,6 +129,7 @@ impl Tray {
             about,
             reload_config,
             autostart,
+            function_keys,
             quit,
         })
     }
@@ -143,6 +152,8 @@ impl Tray {
             Some(TrayAction::ReloadConfiguration)
         } else if id == self.autostart.id() {
             Some(TrayAction::ToggleAutostart)
+        } else if id == self.function_keys.id() {
+            Some(TrayAction::ToggleFunctionKeys)
         } else if id == self.quit.id() {
             Some(TrayAction::Quit)
         } else {
@@ -156,6 +167,9 @@ impl Tray {
         let (autostart_label, autostart_checked) = autostart_presentation(autostart_status.state);
         self.autostart.set_text(autostart_label);
         self.autostart.set_checked(autostart_checked);
+        let (_, keys_checked, keys_enabled) = function_keys_presentation(function_keys_state());
+        self.function_keys.set_checked(keys_checked);
+        self.function_keys.set_enabled(keys_enabled);
         self.status.set_text(status_text(config, paused));
         self._icon
             .set_tooltip(Some(tooltip(config, paused)))
@@ -317,6 +331,29 @@ fn app_presentation(name: Option<&str>, disabled: bool) -> (String, bool, bool) 
         disabled,
         name.is_some(),
     )
+}
+
+/// The function-key item: label, checked, enabled. An unreadable mode
+/// cannot be toggled reliably, so the item is disabled.
+#[cfg(any(not(target_os = "linux"), test))]
+fn function_keys_presentation(standard: Option<bool>) -> (&'static str, bool, bool) {
+    (
+        "Use F1–F12 as standard function keys",
+        standard.unwrap_or(false),
+        standard.is_some(),
+    )
+}
+
+#[cfg(not(target_os = "linux"))]
+fn function_keys_state() -> Option<bool> {
+    #[cfg(target_os = "macos")]
+    {
+        crate::function_keys::standard().ok()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
 }
 
 fn pause_presentation(paused: bool) -> (&'static str, bool) {
@@ -507,6 +544,23 @@ fn inside_ellipse(x: f32, y: f32, center_x: f32, center_y: f32, rx: f32, ry: f32
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_function_key_item_shows_the_current_mode() {
+        assert_eq!(
+            super::function_keys_presentation(Some(true)),
+            ("Use F1–F12 as standard function keys", true, true)
+        );
+        assert_eq!(
+            super::function_keys_presentation(Some(false)),
+            ("Use F1–F12 as standard function keys", false, true)
+        );
+        // An unreadable mode cannot be toggled reliably.
+        assert_eq!(
+            super::function_keys_presentation(None),
+            ("Use F1–F12 as standard function keys", false, false)
+        );
+    }
+
     #[test]
     fn the_per_app_item_names_the_app_it_acts_on() {
         assert_eq!(
