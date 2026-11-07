@@ -182,9 +182,13 @@ fn current_layout_tune_slot(globe: &GlobeSettings) -> Option<usize> {
 
 #[cfg(target_os = "macos")]
 fn layout_tune_slot(target: SwitchTarget<'_>, globe: &GlobeSettings) -> Option<usize> {
-    let sources = crate::system_layout::enabled_sources()
-        .map_err(|error| debug!(%error, "input sources unavailable for the layout tune"))
-        .ok()?;
+    let sources = match crate::system_layout::enabled_sources() {
+        Ok(sources) => sources,
+        Err(error) => {
+            debug!(%error, "input sources unavailable for the layout tune");
+            return None;
+        }
+    };
     let current = match target {
         SwitchTarget::Family(_) => crate::system_layout::current().ok().flatten(),
         SwitchTarget::Source(_) => None,
