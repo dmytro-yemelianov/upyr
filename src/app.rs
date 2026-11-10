@@ -1645,20 +1645,19 @@ impl App {
     }
 
     /// Keeps the tray's per-app item naming the app being typed in, and says
-    /// whether automatic correction is switched off there.
+    /// whether automatic correction is off there: paused by the user, or a
+    /// remote app whose keys go to another computer.
     #[cfg(target_os = "macos")]
     fn auto_correct_paused_here(&mut self) -> bool {
         let app = crate::input_context::frontmost_app();
+        let correction = crate::input_context::correction_in(app.as_ref(), &self.config);
         if app.as_ref().map(|(id, _)| id) != self.typing_app.as_ref() {
             self.typing_app = app.as_ref().map(|(id, _)| id.clone());
             if let Some(tray) = &self.tray {
-                tray.set_current_app(
-                    app.as_ref().map(|(_, name)| name.as_str()),
-                    crate::input_context::auto_correct_disabled(&self.config),
-                );
+                tray.set_current_app(app.as_ref().map(|(_, name)| name.as_str()), correction);
             }
         }
-        crate::input_context::auto_correct_disabled(&self.config)
+        correction.is_off()
     }
 
     /// Switches automatic correction off or back on for the frontmost app.
@@ -1666,9 +1665,17 @@ impl App {
     fn toggle_current_app(&mut self) -> Result<()> {
         #[cfg(target_os = "macos")]
         {
-            let Some((id, name)) = crate::input_context::frontmost_app() else {
+            use crate::input_context::AppCorrection;
+            let Some(app) = crate::input_context::frontmost_app() else {
                 return Ok(());
             };
+            if crate::input_context::correction_in(Some(&app), &self.config)
+                == AppCorrection::Remote
+            {
+                // Correction always stays off there; the item is disabled.
+                return Ok(());
+            }
+            let (id, name) = app;
             let mut config = Config::load()?;
             let disabled = config.toggle_auto_correct_app(&id);
             config.write(true)?;
@@ -1676,7 +1683,12 @@ impl App {
             self.config.auto_correct_disabled_apps = config.auto_correct_disabled_apps;
             self.typing_app = Some(id);
             if let Some(tray) = &self.tray {
-                tray.set_current_app(Some(&name), disabled);
+                let correction = if disabled {
+                    AppCorrection::Paused
+                } else {
+                    AppCorrection::Running
+                };
+                tray.set_current_app(Some(&name), correction);
             }
             if disabled {
                 self.reset_auto_context();

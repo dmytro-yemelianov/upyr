@@ -13,6 +13,15 @@ change between minor releases while the version is below 1.0.
   and media actions, without opening System Settings. The change applies
   immediately, survives a restart, and the checkmark shows the current mode.
 
+### Fixed
+
+- macOS: automatic correction no longer runs in remote-desktop and
+  virtual-machine apps such as Windows App, Screen Sharing, Parallels Desktop
+  and UTM. The remote system reads keys with its own layout, and the editing
+  shortcuts a correction posts reached it as the Windows key and Alt+Shift,
+  opening the Start menu and switching its layout while you typed. The menu
+  bar item shows correction as paused there.
+
 ### Planned
 
 - Notarized Developer ID distribution for macOS.
