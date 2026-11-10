@@ -13,7 +13,7 @@ use tray_icon::{
     menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem},
 };
 
-use crate::{autostart, config::Config, settings::pretty_hotkey};
+use crate::{autostart, config::Config, input_context::AppCorrection, settings::pretty_hotkey};
 
 pub const TRAY_FLIP_FRAME_COUNT: u8 = 17;
 pub const TRAY_FLIP_FRAME_DELAY_MS: u64 = 32;
@@ -73,7 +73,7 @@ impl Tray {
         let convert = MenuItem::new("Convert selected text", true, None);
         let (pause_label, pause_checked) = pause_presentation(false);
         let pause = CheckMenuItem::new(pause_label, true, pause_checked, None);
-        let (app_label, app_checked, app_enabled) = app_presentation(None, false);
+        let (app_label, app_checked, app_enabled) = app_presentation(None, AppCorrection::Running);
         let current_app = CheckMenuItem::new(app_label, app_enabled, app_checked, None);
         let edit_config = MenuItem::new("Settings…", true, None);
         let about = MenuItem::new("About Upyr…", true, None);
@@ -178,8 +178,8 @@ impl Tray {
 
     /// Names the app the per-app item acts on: the one last typed in.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-    pub fn set_current_app(&self, name: Option<&str>, disabled: bool) {
-        let (label, checked, enabled) = app_presentation(name, disabled);
+    pub(crate) fn set_current_app(&self, name: Option<&str>, correction: AppCorrection) {
+        let (label, checked, enabled) = app_presentation(name, correction);
         self.current_app.set_text(label);
         self.current_app.set_checked(checked);
         self.current_app.set_enabled(enabled);
@@ -321,16 +321,17 @@ impl ksni::Tray for LinuxTray {
 /// correction, Globe switching and key sounds), so the item names the app
 /// rather than a shortcut. Its check mark shows the paused state.
 /// Label, check mark and availability of "Pause automatic correction in …".
+/// A remote app stays paused, so its item cannot be switched.
 #[cfg_attr(target_os = "linux", allow(dead_code))]
-fn app_presentation(name: Option<&str>, disabled: bool) -> (String, bool, bool) {
-    (
-        format!(
-            "Pause automatic correction in {}",
-            name.unwrap_or("this app")
-        ),
-        disabled,
-        name.is_some(),
-    )
+fn app_presentation(name: Option<&str>, correction: AppCorrection) -> (String, bool, bool) {
+    let label = format!(
+        "Pause automatic correction in {}",
+        name.unwrap_or("this app")
+    );
+    match correction {
+        AppCorrection::Remote => (format!("{label} (remote)"), true, false),
+        _ => (label, correction.is_off(), name.is_some()),
+    }
 }
 
 /// The function-key item: label, checked, enabled. An unreadable mode
@@ -564,7 +565,7 @@ mod tests {
     #[test]
     fn the_per_app_item_names_the_app_it_acts_on() {
         assert_eq!(
-            super::app_presentation(Some("Slack"), false),
+            super::app_presentation(Some("Slack"), AppCorrection::Running),
             (
                 "Pause automatic correction in Slack".to_owned(),
                 false,
@@ -572,14 +573,27 @@ mod tests {
             )
         );
         assert_eq!(
-            super::app_presentation(Some("Slack"), true),
+            super::app_presentation(Some("Slack"), AppCorrection::Paused),
             ("Pause automatic correction in Slack".to_owned(), true, true)
         );
         assert_eq!(
-            super::app_presentation(None, false),
+            super::app_presentation(None, AppCorrection::Running),
             (
                 "Pause automatic correction in this app".to_owned(),
                 false,
+                false
+            )
+        );
+    }
+
+    #[test]
+    fn a_remote_app_stays_paused() {
+        // Its keys go to another system, so the item cannot switch it back on.
+        assert_eq!(
+            super::app_presentation(Some("Windows App"), AppCorrection::Remote),
+            (
+                "Pause automatic correction in Windows App (remote)".to_owned(),
+                true,
                 false
             )
         );
