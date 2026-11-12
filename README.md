@@ -283,7 +283,12 @@ upyr settings
 
 The settings app exposes General, Correction, Exceptions, Shortcuts, Feedback, Advanced, and About tabs. Automatic sensitivity can be conservative, balanced, or aggressive; deliberate strings can be added on the Exceptions tab. Feedback includes three local sound packs: Upyr Original, Pocket Arcade, and the opt-in Anime Reactions pack. Every key cue and most event cues are synthesized locally (the Anime pack's six application-event cues are the one exception; see below); keyboard feedback crosses into the app as physical key categories only and never stores typed characters. Use `UPYR_CONFIG` to select a different config file.
 
-Two optional local editors cover Correction and Exceptions:
+Settings in the tray menu opens the pixel-style Correction and Exceptions
+editor. Use its **Full Settings…** button for shortcuts, feedback, startup and
+other controls. Switching to the full editor asks before discarding unsaved
+changes. Reopening Settings from the menu focuses an existing pixel window.
+
+The editors can also be opened explicitly:
 
 ```sh
 upyr settings --pixel   # retro-style GUI with Unicode text fields

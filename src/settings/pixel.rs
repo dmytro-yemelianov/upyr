@@ -1,5 +1,6 @@
 //! Optional retro form renderer. Semantic egui widgets retain Unicode editing.
 use super::{
+    ACTIVATION_POLL_INTERVAL, ActivationInbox,
     draft::{SettingsAction, SettingsDraft},
     navigation::{CONTEXT_HELP, CORRECTION_FOOTNOTE, MIDWORD_HELP},
     persistence::{self, LocalStore, SettingsStore},
@@ -8,6 +9,7 @@ use super::{
 use crate::config::{AutoCorrectSensitivity, Config};
 use anyhow::{Result, anyhow};
 use eframe::egui::{self, Color32, RichText};
+use std::{cell::Cell, rc::Rc, time::Instant};
 
 #[derive(Clone, Copy, PartialEq)]
 enum Section {
@@ -18,10 +20,13 @@ enum Section {
 enum Discard {
     Close,
     Reload,
+    FullSettings,
 }
 
-pub(super) fn run() -> Result<()> {
+pub(super) fn run(activation: ActivationInbox) -> Result<bool> {
     let config = Config::load()?;
+    let open_full_settings = Rc::new(Cell::new(false));
+    let next_editor = Rc::clone(&open_full_settings);
     eframe::run_native(
         "Upyr · Pixel Settings",
         eframe::NativeOptions {
@@ -58,10 +63,14 @@ pub(super) fn run() -> Result<()> {
                 status: String::new(),
                 confirm: None,
                 allow_close: false,
+                open_full_settings: next_editor,
+                activation: Some(activation),
+                last_activation_poll: Instant::now(),
             }))
         }),
     )
-    .map_err(|error| anyhow!("Could not open pixel settings: {error}"))
+    .map_err(|error| anyhow!("Could not open pixel settings: {error}"))?;
+    Ok(open_full_settings.get())
 }
 
 struct PixelSettings {
@@ -71,8 +80,42 @@ struct PixelSettings {
     status: String,
     confirm: Option<Discard>,
     allow_close: bool,
+    open_full_settings: Rc<Cell<bool>>,
+    activation: Option<ActivationInbox>,
+    last_activation_poll: Instant,
 }
 impl PixelSettings {
+    fn poll_activation(&mut self, ctx: &egui::Context) {
+        let Some(activation) = &self.activation else {
+            return;
+        };
+        ctx.request_repaint_after(ACTIVATION_POLL_INTERVAL);
+        if self.last_activation_poll.elapsed() < ACTIVATION_POLL_INTERVAL {
+            return;
+        }
+        self.last_activation_poll = Instant::now();
+        match activation.drain() {
+            Ok(Some(_)) => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+            Ok(None) => {}
+            Err(error) => self.status = format!("Could not activate settings: {error:#}"),
+        }
+    }
+    fn request_full_settings(&mut self, ctx: &egui::Context) {
+        if self.dirty() {
+            self.confirm = Some(Discard::FullSettings);
+        } else {
+            self.open_full_settings(ctx);
+        }
+    }
+    fn open_full_settings(&mut self, ctx: &egui::Context) {
+        self.open_full_settings.set(true);
+        self.allow_close = true;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
     fn dirty(&self) -> bool {
         self.draft.dirty() || !self.new_exception.trim().is_empty()
     }
@@ -220,6 +263,7 @@ impl PixelSettings {
 }
 impl PixelSettings {
     fn draw(&mut self, ctx: &egui::Context) {
+        self.poll_activation(ctx);
         if ctx.input(|i| i.viewport().close_requested()) && self.dirty() && !self.allow_close {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.confirm = Some(Discard::Close);
@@ -234,8 +278,13 @@ impl PixelSettings {
                 );
                 ui.label(if self.dirty() { "[UNSAVED]" } else { "[SAVED]" });
             });
-            ui.label("Correction & Exceptions · Full settings: upyr settings");
             ui.add_enabled_ui(self.confirm.is_none(), |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Correction & Exceptions");
+                    if ui.button("Full Settings…").clicked() {
+                        self.request_full_settings(ctx);
+                    }
+                });
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.section, Section::Correction, "Correction");
                     ui.selectable_value(&mut self.section, Section::Exceptions, "Exceptions");
@@ -297,6 +346,7 @@ impl PixelSettings {
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                             }
                             Discard::Reload => self.reload(&LocalStore),
+                            Discard::FullSettings => self.open_full_settings(ctx),
                         }
                     }
                 });
@@ -338,6 +388,9 @@ mod tests {
             status: String::new(),
             confirm: None,
             allow_close: false,
+            open_full_settings: Rc::new(Cell::new(false)),
+            activation: None,
+            last_activation_poll: Instant::now(),
         }
     }
     fn input(events: Vec<egui::Event>) -> egui::RawInput {
@@ -501,5 +554,71 @@ mod tests {
         app.reload(&store);
         assert!(app.new_exception.is_empty());
         assert!(!app.dirty());
+    }
+
+    #[test]
+    fn menu_activation_restores_focus_without_replacing_unsaved_edits() {
+        use super::super::{ACTIVATION_SEQUENCE, SettingsTab};
+        use std::sync::atomic::Ordering;
+        let unique = ACTIVATION_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let directory = std::env::temp_dir().join(format!(
+            "upyr-pixel-activation-{}-{unique}",
+            std::process::id()
+        ));
+        let inbox = ActivationInbox::at(directory.clone()).unwrap();
+        let ctx = egui::Context::default();
+        let mut app = app();
+        app.new_exception = "Їжак".into();
+        app.section = Section::Exceptions;
+        app.activation = Some(inbox.clone());
+        for _ in 0..2 {
+            inbox.send(SettingsTab::General).unwrap();
+            app.last_activation_poll = Instant::now() - ACTIVATION_POLL_INTERVAL;
+            let out = ctx.run(input(vec![]), |ctx| app.draw(ctx));
+            let commands = &out.viewport_output[&egui::ViewportId::ROOT].commands;
+            assert!(commands.contains(&egui::ViewportCommand::Minimized(false)));
+            assert!(commands.contains(&egui::ViewportCommand::Focus));
+            assert_eq!(app.new_exception, "Їжак");
+            assert!(matches!(app.section, Section::Exceptions));
+            assert!(app.dirty());
+            assert_eq!(inbox.drain().unwrap(), None);
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn full_settings_handoff_requires_explicit_discard_of_pending_input() {
+        let ctx = egui::Context::default();
+        let mut app = app();
+        app.new_exception = "Ґанок".into();
+        let out = ctx.run(input(vec![]), |ctx| {
+            app.request_full_settings(ctx);
+            app.draw(ctx);
+        });
+        assert!(matches!(app.confirm, Some(Discard::FullSettings)));
+        assert!(!app.open_full_settings.get());
+        assert!(!app.allow_close);
+        assert!(
+            !out.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .contains(&egui::ViewportCommand::Close)
+        );
+        assert_eq!(app.new_exception, "Ґанок");
+
+        // The explicit discard handler closes this editor and records the
+        // handoff; the host launches the replacement after releasing its guard.
+        let out = ctx.run(input(vec![]), |ctx| app.open_full_settings(ctx));
+        assert!(app.open_full_settings.get());
+        assert!(app.allow_close);
+        assert!(
+            out.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .contains(&egui::ViewportCommand::Close)
+        );
+
+        let mut clean = self::app();
+        let _ = ctx.run(input(vec![]), |ctx| clean.request_full_settings(ctx));
+        assert!(clean.confirm.is_none());
+        assert!(clean.open_full_settings.get());
     }
 }

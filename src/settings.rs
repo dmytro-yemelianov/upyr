@@ -227,7 +227,7 @@ pub fn run_with(options: SettingsOptions) -> Result<()> {
     if !instance.is_single() {
         let current = fs::read_to_string(&mode_path).unwrap_or_else(|_| "native".into());
         anyhow::ensure!(
-            frontend == "native" && current == "native",
+            frontend == current && frontend != "tui",
             "Settings is already open in {current} mode. Close that editor before choosing another interface."
         );
         return activation.send(requested_tab);
@@ -244,7 +244,11 @@ pub fn run_with(options: SettingsOptions) -> Result<()> {
         return tui::run();
     }
     if options.pixel {
-        return pixel::run();
+        let open_full_settings = pixel::run(activation)?;
+        // The next editor must acquire its own guard after this window closes.
+        drop(_frontend_lease);
+        drop(instance);
+        return if open_full_settings { spawn() } else { Ok(()) };
     }
 
     // Keep the existing window available to inspect defaults. Saving still
@@ -367,23 +371,36 @@ pub fn spawn() -> Result<()> {
     spawn_tab(SettingsTab::General)
 }
 
+/// The tray's primary settings action uses the pixel-style editor.
+pub fn spawn_pixel() -> Result<()> {
+    spawn_editor(SettingsTab::General, true)
+}
+
 pub fn spawn_about() -> Result<()> {
     spawn_tab(SettingsTab::About)
 }
 
 fn spawn_tab(tab: SettingsTab) -> Result<()> {
+    spawn_editor(tab, false)
+}
+
+fn spawn_editor(tab: SettingsTab, pixel: bool) -> Result<()> {
     if is_open() {
         let inbox = ActivationInbox::open()?;
         let current = fs::read_to_string(inbox.directory.join("frontend"))
             .unwrap_or_else(|_| "native".into());
         anyhow::ensure!(
-            current == "native",
-            "Settings is already open in {current} mode. Close that editor to open the full settings window."
+            current == if pixel { "pixel" } else { "native" },
+            "Settings is already open in {current} mode. Close that editor before choosing another interface."
         );
         return inbox.send(tab);
     }
 
-    let argument = tab.cli_argument();
+    let argument = if pixel {
+        Some("--pixel")
+    } else {
+        tab.cli_argument()
+    };
     #[cfg(target_os = "macos")]
     if let Some(bundle) = packaged_macos_bundle()? {
         let mut command = Command::new("open");

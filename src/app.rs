@@ -1703,7 +1703,7 @@ impl App {
             }
             Some(TrayAction::TogglePaused) => self.toggle_paused(),
             Some(TrayAction::ToggleCurrentApp) => self.toggle_current_app(),
-            Some(TrayAction::OpenSettings) => settings::spawn(),
+            Some(TrayAction::OpenSettings) => settings::spawn_pixel(),
             Some(TrayAction::OpenAbout) => settings::spawn_about(),
             Some(TrayAction::ReloadConfiguration) => self.reload_configuration(),
             Some(TrayAction::ToggleAutostart) => self.toggle_autostart(),

@@ -8,6 +8,10 @@ change between minor releases while the version is below 1.0.
 
 ### Added
 
+- The tray's Settings action opens the pixel-style editor. Repeated activation
+  restores its window; Full Settings opens the complete editor after guarding
+  unsaved changes.
+
 - Optional `upyr settings --pixel` and `--tui` editors for Correction and
   Exceptions, sharing a staged draft, validation and concurrent-config merge
   with the existing Save flow. Invalid edits remain visible; failed saves keep
