@@ -75,7 +75,12 @@ class RawFixtureTests(unittest.TestCase):
         self.fail('raw fixture did not reach the expected state')
 
     def test_nonce_marker_fits_an_80_column_terminal(self):
-        bars = [line for line in self.output.split(b'\r\n') if b'\x1b[48;2;' in line]
+        # state.json is published before the repaint, and a PTY read can end
+        # inside an ANSI marker. Only newline-terminated rows are complete.
+        def complete_bars():
+            return [line for line in self.output.split(b'\r\n')[:-1] if b'\x1b[48;2;' in line]
+        self.wait_for(lambda _: bool(complete_bars()))
+        bars = complete_bars()
         self.assertTrue(bars)
         ansi = re.compile(rb'\x1b\[[0-?]*[ -/]*[@-~]')
         for line in bars:

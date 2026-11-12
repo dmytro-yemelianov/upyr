@@ -22,6 +22,7 @@ if args.count == 1 {
     let app = NSWorkspace.shared.frontmostApplication
     emit(["source": sourceID(), "frontPID": app?.processIdentifier ?? 0,
           "bundle": app?.bundleIdentifier ?? "", "window": firstWindow(app?.processIdentifier ?? 0) ?? 0,
+          "screenLocked": (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool ?? false,
           "postAccess": CGPreflightPostEventAccess()])
     exit(0)
 }
@@ -118,6 +119,8 @@ func ownsFixture() -> Bool {
           let state = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
           state["nonce"] as? String == nonce, state["ready"] as? Bool == true,
           let fixturePID = state["pid"] as? Int32, kill(fixturePID, 0) == 0 else { return false }
+    if let observed = state["observed_at_ms"] as? Double,
+       abs(Date().timeIntervalSince1970 * 1000 - observed) > 500 { return false }
     return true
 }
 var interrupted = false
@@ -142,13 +145,37 @@ func clipboard() -> [[String: Data]] {
 }
 let before = clipboard(), revision = NSPasteboard.general.changeCount
 let eventSource = CGEventSource(stateID: .hidSystemState)
+var posted: [[String: Any]] = []
+var checkpoints: [[String: Any]] = []
+var marks: [String: UInt64] = [:]
+var activeMark: String?
+var latestKey: UInt64 = 0
 func post(_ code: CGKeyCode, _ down: Bool, _ flags: CGEventFlags = [], modifier: Bool = false) {
     let event = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: down)!
     if modifier { event.type = .flagsChanged }
-    event.flags = flags; event.post(tap: .cghidEventTap)
+    event.flags = flags
+    let now = DispatchTime.now().uptimeNanoseconds
+    if down && !modifier {
+        latestKey = now
+        if let label = activeMark { marks[label] = now }
+        posted.append(["key": code, "flags": flags.rawValue, "post_ns": now])
+    }
+    event.post(tap: .cghidEventTap)
 }
 func requireFocus() {
-    guard !interrupted, ownsFixture() else { emit(["error": "test interrupted or owned fixture lost focus"]); exit(3) }
+    guard !interrupted, ownsFixture() else {
+        let state = (try? JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("state.json")))) as? [String: Any] ?? [:]
+        let partial: [String: Any] = ["checkpoints": checkpoints, "posted": posted, "outsideInput": interrupted]
+        if let data = try? JSONSerialization.data(withJSONObject: partial, options: [.sortedKeys]) {
+            try? data.write(to: root.appendingPathComponent("interrupted.json"), options: .atomic)
+        }
+        emit(["error": "test interrupted or owned fixture lost focus", "outsideInput": interrupted,
+              "frontPID": NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0,
+              "expectedPID": pid, "actualWindow": firstWindow(pid) ?? 0, "expectedWindow": window,
+              "ready": state["ready"] as? Bool ?? false, "nonceMatches": state["nonce"] as? String == nonce,
+              "stateAge_ms": Date().timeIntervalSince1970 * 1000 - (state["observed_at_ms"] as? Double ?? Date().timeIntervalSince1970 * 1000),
+              "postedKeys": posted.count]); exit(3)
+    }
 }
 pump(80); requireFocus()
 if let sourceID = plan["source"] as? String {
@@ -159,25 +186,97 @@ if let sourceID = plan["source"] as? String {
 let codes: [Character: CGKeyCode] = ["a":0,"b":11,"c":8,"d":2,"e":14,"f":3,"g":5,"h":4,"i":34,"j":38,"k":40,"l":37,"m":46,"n":45,"o":31,"p":35,"q":12,"r":15,"s":1,"t":17,"u":32,"v":9,"w":13,"x":7,"y":16,"z":6,"'":39,"[":33,"]":30,";":41,",":43,".":47,"/":44," ":49,"\\":42,"`":50]
 for action in plan["actions"] as? [[String: Any]] ?? [] {
     requireFocus()
+    activeMark = action["mark"] as? String
+    let wanted = (action["expect"] as? String).map { [$0] } ?? action["expect"] as? [String]
+    if let wanted {
+        let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(action["timeout"] as? Int ?? 2000) * 1_000_000
+        let start = (action["since"] as? String).flatMap { marks[$0] } ?? latestKey
+        var textAt: UInt64?, layoutAt: UInt64?
+        var current = ""
+        while DispatchTime.now().uptimeNanoseconds < deadline {
+            requireFocus()
+            let state = (try? JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("state.json")))) as? [String: Any]
+            current = state?["text"] as? String ?? ""
+            let now = DispatchTime.now().uptimeNanoseconds
+            if wanted.contains(current) && textAt == nil { textAt = now }
+            if (action["layout"] as? String).map({ sourceID() == $0 }) ?? true {
+                if layoutAt == nil { layoutAt = now }
+            }
+            if wanted.contains(current) && ((action["layout"] as? String).map({ sourceID() == $0 }) ?? true) { break }
+            pump(2)
+        }
+        let passed = wanted.contains(current) && ((action["layout"] as? String).map({ sourceID() == $0 }) ?? true)
+        var record: [String: Any] = ["name": action["name"] as? String ?? "checkpoint", "passed": passed, "observed": current, "source": sourceID(), "timed": action["since"] is String]
+        if start != 0 && passed, let textAt, let layoutAt {
+            record["text_ms"] = Double(textAt - start) / 1_000_000
+            record["layout_ms"] = Double(layoutAt - start) / 1_000_000
+            record["settled_ms"] = Double(max(textAt, layoutAt) - start) / 1_000_000
+        }
+        checkpoints.append(record)
+        if !passed { break }
+        continue
+    }
+    if let selected = action["source"] as? String {
+        let list = TISCreateInputSourceList([kTISPropertyInputSourceID: selected] as CFDictionary, false).takeRetainedValue() as! [TISInputSource]
+        guard let source = list.first, TISSelectInputSource(source) == noErr else { exit(2) }
+        pump(160); continue
+    }
+    if action["globe"] as? Bool == true {
+        post(63, true, .maskSecondaryFn, modifier: true); pump(60)
+        let now = DispatchTime.now().uptimeNanoseconds
+        latestKey = now
+        if let label = activeMark { marks[label] = now }
+        post(63, false, [], modifier: true)
+        continue
+    }
     if let wait = action["wait"] as? Int { pump(wait); continue }
     if action["undo"] as? Bool == true {
         post(55, true, .maskCommand, modifier: true); pump(20)
         post(58, true, [.maskCommand, .maskAlternate], modifier: true); pump(20)
         if !interrupted && ownsFixture() {
-            post(6, true, [.maskCommand, .maskAlternate]); post(6, false, [.maskCommand, .maskAlternate]); pump(80)
+            post(6, true, [.maskCommand, .maskAlternate]); post(6, false, [.maskCommand, .maskAlternate]); pump(action["keyWait"] as? Int ?? 80)
         } else { interrupted = true }
         // Always release our modifiers, including after an interruption.
         post(58, false, .maskCommand, modifier: true); post(55, false, [], modifier: true)
-        pump(700); continue
+        pump(action["settle"] as? Int ?? 700); continue
     }
-    let sequence: [CGKeyCode]
+    let sequence: [(CGKeyCode, Bool)]
     if let text = action["text"] as? String {
-        guard text.allSatisfy({ codes[$0] != nil }) else { exit(2) }
-        sequence = text.map { codes[$0]! }
-    } else if let key = action["key"] as? UInt16 { sequence = [key] } else { exit(2) }
-    for code in sequence {
-        requireFocus(); post(code, true); post(code, false); pump(action["gap"] as? Int ?? 70)
+        guard text.allSatisfy({ codes[Character(String($0).lowercased())] != nil }) else { exit(2) }
+        sequence = text.map { (codes[Character(String($0).lowercased())]!, $0.isUppercase) }
+    } else if let key = action["key"] as? UInt16 { sequence = [(key, action["shift"] as? Bool ?? false)] } else { exit(2) }
+    for (code, shifted) in sequence {
+        requireFocus()
+        if shifted { post(56, true, .maskShift, modifier: true) }
+        post(code, true, shifted ? .maskShift : []); post(code, false, shifted ? .maskShift : [])
+        if shifted { post(56, false, [], modifier: true) }
+        pump(action["gap"] as? Int ?? 70)
     }
 }
-pump(150); requireFocus()
-emit(["source": sourceID(), "clipboardUnchanged": clipboard() == before && NSPasteboard.general.changeCount == revision])
+let cleanupStart = DispatchTime.now().uptimeNanoseconds
+pump(plan["finalWait"] as? Int ?? 150); requireFocus()
+// Clipboard restoration is asynchronous and can lag editor confirmation when
+// the app's event loop is busy (for example during cold audio initialization).
+// This bounded wait is outside every editing-latency checkpoint.
+let cleanupDeadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(0, plan["clipboardRestoreTimeout"] as? Int ?? 0)) * 1_000_000
+var contentRestored = clipboard() == before
+while !contentRestored && DispatchTime.now().uptimeNanoseconds < cleanupDeadline {
+    pump(10); requireFocus()
+    contentRestored = clipboard() == before
+}
+let after = clipboard()
+var clipboardDiagnostic: [String: Any] = [:]
+if !contentRestored {
+    // Format names/sizes only, never the user's clipboard payload.
+    clipboardDiagnostic["before"] = before.map { $0.mapValues { $0.count } }
+    clipboardDiagnostic["after"] = after.map { $0.mapValues { $0.count } }
+    clipboardDiagnostic["changed_formats"] = before.enumerated().map { index, item in
+        item.keys.filter { key in index >= after.count || after[index][key] != item[key] }.sorted()
+    }
+}
+emit(["source": sourceID(), "clipboardUnchanged": after == before && NSPasteboard.general.changeCount == revision,
+      "clipboardContentRestored": contentRestored,
+      "clipboardDiagnostic": clipboardDiagnostic,
+      "clipboard_restore_wait_ms": Double(DispatchTime.now().uptimeNanoseconds - cleanupStart) / 1_000_000,
+      "posted": posted, "checkpoints": checkpoints,
+      "poll_interval_ms": 2])

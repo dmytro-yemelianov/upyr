@@ -1,0 +1,474 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "midword-uk",
+      "source": "com.apple.keylayout.ABC",
+      "latency": true,
+      "actions": [
+        {
+          "text": "dbg",
+          "gap": 60
+        },
+        {
+          "text": "h",
+          "gap": 0,
+          "mark": "trigger"
+        },
+        {
+          "expect": "випр",
+          "layout": "com.apple.keylayout.Ukrainian-PC",
+          "since": "trigger"
+        }
+      ]
+    },
+    {
+      "name": "midword-en",
+      "source": "com.apple.keylayout.Ukrainian-PC",
+      "latency": true,
+      "actions": [
+        {
+          "text": "con",
+          "gap": 60
+        },
+        {
+          "text": "t",
+          "gap": 0,
+          "mark": "trigger"
+        },
+        {
+          "expect": "cont",
+          "layout": "com.apple.keylayout.ABC",
+          "since": "trigger"
+        }
+      ]
+    },
+    {
+      "name": "context-space",
+      "source": "com.apple.keylayout.ABC",
+      "latency": true,
+      "actions": [
+        {
+          "text": "nj vb",
+          "gap": 60
+        },
+        {
+          "text": " ",
+          "gap": 0,
+          "mark": "trigger"
+        },
+        {
+          "expect": "то ми ",
+          "layout": "com.apple.keylayout.Ukrainian-PC",
+          "since": "trigger"
+        }
+      ]
+    },
+    {
+      "name": "context-manual",
+      "source": "com.apple.keylayout.Ukrainian-PC",
+      "latency": true,
+      "actions": [
+        {
+          "text": "I ",
+          "gap": 60
+        },
+        {
+          "source": "com.apple.keylayout.ABC"
+        },
+        {
+          "text": "have",
+          "gap": 60
+        },
+        {
+          "text": " ",
+          "gap": 0,
+          "mark": "trigger"
+        },
+        {
+          "expect": "I have ",
+          "layout": "com.apple.keylayout.ABC",
+          "since": "trigger"
+        }
+      ]
+    },
+    {
+      "name": "context-enter",
+      "surface": "native",
+      "source": "com.apple.keylayout.Ukrainian-PC",
+      "latency": true,
+      "actions": [
+        {
+          "text": "I have",
+          "gap": 60
+        },
+        {
+          "key": 36,
+          "gap": 0,
+          "mark": "trigger"
+        },
+        {
+          "expect": "I have\n",
+          "layout": "com.apple.keylayout.ABC",
+          "since": "trigger"
+        }
+      ]
+    },
+    {
+      "name": "terminal-enter",
+      "surface": "terminal",
+      "source": "com.apple.keylayout.ABC",
+      "actions": [
+        {
+          "text": "nj vb ",
+          "gap": 60
+        },
+        {
+          "expect": "то ми ",
+          "layout": "com.apple.keylayout.Ukrainian-PC"
+        },
+        {
+          "key": 36,
+          "gap": 0
+        },
+        {
+          "expect": "то ми \n",
+          "layout": "com.apple.keylayout.Ukrainian-PC"
+        }
+      ]
+    },
+    {
+      "name": "globe-pending-context",
+      "source": "com.apple.keylayout.Ukrainian-PC",
+      "latency": true,
+      "actions": [
+        {
+          "text": "I ",
+          "gap": 60
+        },
+        {
+          "globe": true,
+          "mark": "trigger"
+        },
+        {
+          "expect": "Ш ",
+          "layout": "com.apple.keylayout.ABC",
+          "since": "trigger",
+          "name": "globe-layout"
+        },
+        {
+          "text": "have ",
+          "gap": 60
+        },
+        {
+          "expect": "I have ",
+          "layout": "com.apple.keylayout.ABC"
+        }
+      ]
+    },
+    {
+      "name": "context-undo",
+      "source": "com.apple.keylayout.ABC",
+      "latency": true,
+      "actions": [
+        {
+          "text": "nj vb ",
+          "gap": 60
+        },
+        {
+          "expect": "то ми ",
+          "layout": "com.apple.keylayout.Ukrainian-PC"
+        },
+        {
+          "wait": 400
+        },
+        {
+          "undo": true,
+          "settle": 0,
+          "mark": "trigger",
+          "keyWait": 0
+        },
+        {
+          "expect": "nj vb ",
+          "layout": "com.apple.keylayout.ABC",
+          "since": "trigger",
+          "name": "undo"
+        }
+      ]
+    },
+    {
+      "name": "context-backspace",
+      "source": "com.apple.keylayout.ABC",
+      "latency": true,
+      "actions": [
+        {
+          "text": "nj vb ",
+          "gap": 60
+        },
+        {
+          "expect": "то ми ",
+          "layout": "com.apple.keylayout.Ukrainian-PC"
+        },
+        {
+          "wait": 400
+        },
+        {
+          "key": 51,
+          "gap": 0,
+          "mark": "trigger"
+        },
+        {
+          "expect": "nj vb",
+          "layout": "com.apple.keylayout.ABC",
+          "since": "trigger",
+          "name": "backspace-undo"
+        }
+      ]
+    },
+    {
+      "name": "boundary-overtaken",
+      "source": "com.apple.keylayout.ABC",
+      "actions": [
+        {
+          "text": "nj vb",
+          "gap": 60
+        },
+        {
+          "text": " x",
+          "gap": 0
+        },
+        {
+          "wait": 500
+        },
+        {
+          "expect": [
+            "nj vb x",
+            "то ми ч"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "repeated-space",
+      "source": "com.apple.keylayout.ABC",
+      "actions": [
+        {
+          "text": "nj vb",
+          "gap": 60
+        },
+        {
+          "text": "  ",
+          "gap": 0
+        },
+        {
+          "wait": 500
+        },
+        {
+          "expect": [
+            "nj vb  ",
+            "то ми  "
+          ]
+        }
+      ]
+    },
+    {
+      "name": "native-abbreviations",
+      "source": "com.apple.keylayout.ABC",
+      "actions": [
+        {
+          "text": "NJ VB vs I have a question ",
+          "gap": 60
+        },
+        {
+          "expect": "NJ VB vs I have a question ",
+          "layout": "com.apple.keylayout.ABC"
+        }
+      ]
+    },
+    {
+      "name": "mixed-languages",
+      "source": "com.apple.keylayout.Ukrainian-PC",
+      "actions": [
+        {
+          "text": "ntgth yjhvfkmyj ,eltvj ",
+          "gap": 60
+        },
+        {
+          "source": "com.apple.keylayout.ABC"
+        },
+        {
+          "text": "fastest as ever proof of ",
+          "gap": 60
+        },
+        {
+          "source": "com.apple.keylayout.Ukrainian-PC"
+        },
+        {
+          "text": "ghfw.dfnb s yfc ysoj yt pegbybnm ",
+          "gap": 60
+        },
+        {
+          "expect": "тепер нормально будемо fastest as ever proof of працювати і нас ніщо не зупинить ",
+          "layout": "com.apple.keylayout.Ukrainian-PC"
+        }
+      ]
+    },
+    {
+      "name": "fast-uk-10ms",
+      "source": "com.apple.keylayout.ABC",
+      "actions": [
+        {
+          "text": "dbghfdktyyz ",
+          "gap": 10
+        },
+        {
+          "expect": "виправлення ",
+          "layout": "com.apple.keylayout.Ukrainian-PC"
+        }
+      ]
+    },
+    {
+      "name": "fast-en-10ms",
+      "source": "com.apple.keylayout.Ukrainian-PC",
+      "actions": [
+        {
+          "text": "continue ",
+          "gap": 10
+        },
+        {
+          "expect": "continue ",
+          "layout": "com.apple.keylayout.ABC"
+        }
+      ]
+    },
+    {
+      "name": "fast-uk-20ms",
+      "source": "com.apple.keylayout.ABC",
+      "actions": [
+        {
+          "text": "dbghfdktyyz ",
+          "gap": 20
+        },
+        {
+          "expect": "виправлення ",
+          "layout": "com.apple.keylayout.Ukrainian-PC"
+        }
+      ]
+    },
+    {
+      "name": "fast-en-20ms",
+      "source": "com.apple.keylayout.Ukrainian-PC",
+      "actions": [
+        {
+          "text": "continue ",
+          "gap": 20
+        },
+        {
+          "expect": "continue ",
+          "layout": "com.apple.keylayout.ABC"
+        }
+      ]
+    },
+    {
+      "name": "fast-uk-40ms",
+      "source": "com.apple.keylayout.ABC",
+      "actions": [
+        {
+          "text": "dbghfdktyyz ",
+          "gap": 40
+        },
+        {
+          "expect": "виправлення ",
+          "layout": "com.apple.keylayout.Ukrainian-PC"
+        }
+      ]
+    },
+    {
+      "name": "fast-en-40ms",
+      "source": "com.apple.keylayout.Ukrainian-PC",
+      "actions": [
+        {
+          "text": "continue ",
+          "gap": 40
+        },
+        {
+          "expect": "continue ",
+          "layout": "com.apple.keylayout.ABC"
+        }
+      ]
+    },
+    {
+      "name": "fast-uk-80ms",
+      "source": "com.apple.keylayout.ABC",
+      "actions": [
+        {
+          "text": "dbghfdktyyz ",
+          "gap": 80
+        },
+        {
+          "expect": "виправлення ",
+          "layout": "com.apple.keylayout.Ukrainian-PC"
+        }
+      ]
+    },
+    {
+      "name": "fast-en-80ms",
+      "source": "com.apple.keylayout.Ukrainian-PC",
+      "actions": [
+        {
+          "text": "continue ",
+          "gap": 80
+        },
+        {
+          "expect": "continue ",
+          "layout": "com.apple.keylayout.ABC"
+        }
+      ]
+    },
+    {
+      "name": "continuous-alternating-10ms",
+      "source": "com.apple.keylayout.ABC",
+      "actions": [
+        {
+          "text": "dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue ",
+          "gap": 10
+        },
+        {
+          "expect": "виправлення continue виправлення continue виправлення continue виправлення continue виправлення continue виправлення continue виправлення continue виправлення continue ",
+          "layout": "com.apple.keylayout.ABC",
+          "timeout": 3000
+        }
+      ]
+    },
+    {
+      "name": "continuous-alternating-20ms",
+      "source": "com.apple.keylayout.ABC",
+      "actions": [
+        {
+          "text": "dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue ",
+          "gap": 20
+        },
+        {
+          "expect": "виправлення continue виправлення continue виправлення continue виправлення continue виправлення continue виправлення continue виправлення continue виправлення continue ",
+          "layout": "com.apple.keylayout.ABC",
+          "timeout": 3000
+        }
+      ]
+    },
+    {
+      "name": "continuous-alternating-40ms",
+      "source": "com.apple.keylayout.ABC",
+      "actions": [
+        {
+          "text": "dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue dbghfdktyyz continue ",
+          "gap": 40
+        },
+        {
+          "expect": "виправлення continue виправлення continue виправлення continue виправлення continue виправлення continue виправлення continue виправлення continue виправлення continue ",
+          "layout": "com.apple.keylayout.ABC",
+          "timeout": 3000
+        }
+      ]
+    }
+  ]
+}
