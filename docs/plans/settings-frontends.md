@@ -24,7 +24,22 @@ expects the new style from Settings in the menu, so AC10 now covers that route.
 
 - [x] M1 — Route tray Settings to pixel; preserve full settings for repair/About.
 - [x] M2 — Handle repeat activation and a guarded Full Settings transition.
-- [ ] M3 — Test activation/discard behavior, verify the menu flow and install.
+- [x] M3 — Test activation/discard behavior, verify the menu flow and install.
+
+Follow-up evidence (2026-11-12): `233880a` records the specification change;
+`fd3b38f` implements the tray route, activation polling and Full Settings button.
+All 28 settings tests, formatting, macOS and Windows cross-target Clippy passed.
+The installed pixel window and Full Settings button were visually observed.
+An isolated live button click exited the pixel process and launched a native
+helper, which acquired the released settings guard. The native process was no
+longer present at the next readback, so its rendered window was not verified in
+this pass. Repeat activation and dirty handoff are covered by headless GUI tests;
+the tray handler's route was checked in code, not by an automated tray click.
+
+All three binaries were installed with a backup under
+`.stos/install-settings-menu-20261112/previous/Upyr.app`; the background app was
+restarted, and the user's config hash remained unchanged. Local evidence:
+`.stos/settings-menu/`.
 
 ## Initial implementation evidence
 
