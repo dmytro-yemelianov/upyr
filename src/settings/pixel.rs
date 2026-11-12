@@ -7,6 +7,7 @@ use super::{
     sensitivity_label,
 };
 use crate::config::{AutoCorrectSensitivity, Config};
+use crate::settings::i18n::tr;
 use anyhow::{Result, anyhow};
 use eframe::egui::{self, Color32, RichText};
 use std::{cell::Cell, rc::Rc, time::Instant};
@@ -44,6 +45,7 @@ fn apply_style(ctx: &egui::Context) {
 
 pub(super) fn run(activation: ActivationInbox) -> Result<bool> {
     let config = Config::load()?;
+    super::i18n::set_language(config.ui_language);
     let forms = SettingsApp::new(
         config.clone(),
         crate::autostart::status()?,
@@ -59,7 +61,7 @@ pub(super) fn run(activation: ActivationInbox) -> Result<bool> {
     let open_full_settings = Rc::new(Cell::new(false));
     let next_editor = Rc::clone(&open_full_settings);
     eframe::run_native(
-        "Upyr · Pixel Settings",
+        tr("Upyr · Pixel Settings"),
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
                 .with_inner_size([780.0, 680.0])
@@ -118,7 +120,12 @@ impl PixelSettings {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             }
             Ok(None) => {}
-            Err(error) => self.status = format!("Could not activate settings: {error:#}"),
+            Err(error) => {
+                self.status = crate::settings::i18n::localized_format!(
+                    "Could not activate settings: {error:#}",
+                    "Не вдалося активувати налаштування: {error:#}"
+                )
+            }
         }
     }
     fn request_full_settings(&mut self, ctx: &egui::Context) {
@@ -158,8 +165,11 @@ impl PixelSettings {
         let result = persistence::save(&mut self.draft, store);
         let saved = result.is_ok();
         self.status = match result {
-            Ok(()) => "Saved. Upyr will reload these settings.".into(),
-            Err(e) => format!("Save failed: {e:#}"),
+            Ok(()) => tr("Saved. Upyr will reload these settings.").into(),
+            Err(e) => crate::settings::i18n::localized_format!(
+                "Save failed: {e:#}",
+                "Не вдалося зберегти: {e:#}"
+            ),
         };
         saved
     }
@@ -172,33 +182,36 @@ impl PixelSettings {
                 self.forms.launch_at_login = self.forms.autostart_status.enabled;
                 self.forms.recording = None;
                 self.forms.shortcut_error = None;
-                "Reloaded from disk.".into()
+                tr("Reloaded from disk.").into()
             }
-            Err(e) => format!("Reload failed: {e:#}"),
+            Err(e) => crate::settings::i18n::localized_format!(
+                "Reload failed: {e:#}",
+                "Не вдалося перечитати: {e:#}"
+            ),
         };
         loaded
     }
     fn correction(&mut self, ui: &mut egui::Ui) {
-        ui.heading("CORRECTION");
+        ui.heading(tr("CORRECTION"));
         let mut automatic = self.draft.edited.auto_correct;
         if ui
-            .checkbox(&mut automatic, "Correct the wrong layout automatically")
+            .checkbox(&mut automatic, tr("Correct the wrong layout automatically"))
             .changed()
         {
             self.apply(SettingsAction::Automatic(automatic));
         }
         let mut follow = self.draft.edited.switch_layout;
         if ui
-            .checkbox(&mut follow, "Switch OS layout to match corrected text")
+            .checkbox(&mut follow, tr("Switch OS layout to match corrected text"))
             .changed()
         {
             self.apply(SettingsAction::SwitchLayout(follow));
         }
         ui.separator();
-        ui.label(MIDWORD_HELP);
-        ui.label(CONTEXT_HELP);
+        ui.label(tr(MIDWORD_HELP));
+        ui.label(tr(CONTEXT_HELP));
         ui.separator();
-        ui.label("Sensitivity");
+        ui.label(tr("Sensitivity"));
         let mut sensitivity = self.draft.edited.auto_correct_sensitivity;
         egui::ComboBox::from_id_salt("sensitivity")
             .selected_text(sensitivity_label(sensitivity))
@@ -214,7 +227,7 @@ impl PixelSettings {
         if sensitivity != self.draft.edited.auto_correct_sensitivity {
             self.apply(SettingsAction::Sensitivity(sensitivity));
         }
-        let minimum_label = ui.label("Minimum word length (2–32)");
+        let minimum_label = ui.label(tr("Minimum word length (2–32)"));
         let mut minimum = self.draft.minimum.clone();
         if ui
             .add(
@@ -227,7 +240,7 @@ impl PixelSettings {
         {
             self.apply(SettingsAction::Minimum(minimum));
         }
-        let delay_label = ui.label("Pause after Space (10–250 ms)");
+        let delay_label = ui.label(tr("Pause after Space (10–250 ms)"));
         let mut delay = self.draft.delay.clone();
         if ui
             .add(
@@ -240,31 +253,36 @@ impl PixelSettings {
         {
             self.apply(SettingsAction::Delay(delay));
         }
-        ui.small("Clear prefixes can switch immediately while typing.");
+        ui.small(tr("Clear prefixes can switch immediately while typing."));
         #[cfg(target_os = "macos")]
         {
             let mut terminal = super::macos::terminal_correction_enabled(&self.draft.edited);
             if ui
-                .checkbox(&mut terminal, "Allow correction in terminals")
+                .checkbox(&mut terminal, tr("Allow correction in terminals"))
                 .changed()
             {
                 super::macos::set_terminal_correction(&mut self.draft.edited, terminal);
             }
             let mut slash = super::macos::superset_slash_commands_enabled(&self.draft.edited);
             if ui
-                .checkbox(&mut slash, "Correct freshly typed /commands in Superset")
+                .checkbox(
+                    &mut slash,
+                    tr("Correct freshly typed /commands in Superset"),
+                )
                 .changed()
             {
                 super::macos::set_superset_slash_commands(&mut self.draft.edited, slash);
             }
         }
         ui.separator();
-        ui.label(CORRECTION_FOOTNOTE);
+        ui.label(tr(CORRECTION_FOOTNOTE));
     }
     fn exceptions(&mut self, ui: &mut egui::Ui) {
-        ui.heading("EXCEPTIONS");
-        ui.label("Words Upyr should leave alone. Spaces and commas separate words.");
-        let add_label = ui.label("Add words");
+        ui.heading(tr("EXCEPTIONS"));
+        ui.label(tr(
+            "Words Upyr should leave alone. Spaces and commas separate words.",
+        ));
+        let add_label = ui.label(tr("Add words"));
         ui.add(
             egui::TextEdit::singleline(&mut self.new_exception)
                 .id(egui::Id::new("pixel-new-exception"))
@@ -272,31 +290,43 @@ impl PixelSettings {
                 .desired_width(f32::INFINITY),
         )
         .labelled_by(add_label.id);
-        if ui.button("Add words").clicked() {
+        if ui.button(tr("Add words")).clicked() {
             self.stage_new_exceptions();
         }
         ui.separator();
         if self.draft.edited.auto_correct_exceptions.is_empty() {
-            ui.label("No exceptions yet.");
+            ui.label(tr("No exceptions yet."));
         }
         let mut action = None;
         for (i, row) in self.draft.edited.auto_correct_exceptions.iter().enumerate() {
             let mut text = row.clone();
             ui.push_id(i, |ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     let row_label = ui.label(format!("{}.", i + 1));
+                    let remove_width = ui
+                        .painter()
+                        .layout_no_wrap(
+                            tr("Remove").to_owned(),
+                            egui::TextStyle::Button.resolve(ui.style()),
+                            ui.visuals().text_color(),
+                        )
+                        .size()
+                        .x
+                        + 2.0 * ui.spacing().button_padding.x
+                        + ui.spacing().item_spacing.x
+                        + 16.0;
                     if ui
                         .add(
                             egui::TextEdit::singleline(&mut text)
                                 .id(egui::Id::new(("pixel-exception", i)))
-                                .desired_width((ui.available_width() - 96.0).max(100.0)),
+                                .desired_width((ui.available_width() - remove_width).max(100.0)),
                         )
                         .labelled_by(row_label.id)
                         .changed()
                     {
                         action = Some(SettingsAction::EditException(i, text));
                     }
-                    if ui.button("Remove").clicked() {
+                    if ui.button(tr("Remove")).clicked() {
                         action = Some(SettingsAction::RemoveException(i));
                     }
                 });
@@ -353,13 +383,16 @@ impl PixelSettings {
                 }
             }
             Err(error) => {
-                self.status =
-                    format!("Reload failed: could not read launch-at-login status: {error:#}")
+                self.status = crate::settings::i18n::localized_format!(
+                    "Reload failed: could not read launch-at-login status: {error:#}",
+                    "Не вдалося перечитати стан автозапуску: {error:#}"
+                )
             }
         }
     }
 
     fn draw(&mut self, ctx: &egui::Context) {
+        super::i18n::set_language(self.draft.edited.ui_language);
         self.poll_activation(ctx);
         self.capture_shortcut(ctx);
         #[cfg(target_os = "macos")]
@@ -376,20 +409,24 @@ impl PixelSettings {
         egui::TopBottomPanel::top("header").show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label(
-                    RichText::new("UPYR / SETTINGS")
+                    RichText::new(tr("UPYR / SETTINGS"))
                         .strong()
                         .color(Color32::from_rgb(142, 224, 184)),
                 );
-                ui.label(if self.dirty() { "[UNSAVED]" } else { "[SAVED]" });
+                ui.label(if self.dirty() {
+                    tr("[UNSAVED]")
+                } else {
+                    tr("[SAVED]")
+                });
             });
             ui.add_enabled_ui(self.confirm.is_none(), |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("All settings");
-                    if ui.button("Native interface…").clicked() {
+                    ui.label(tr("All settings"));
+                    if ui.button(tr("Native interface…")).clicked() {
                         self.request_full_settings(ctx);
                     }
                 });
-                let label = ui.label("Search settings");
+                let label = ui.label(tr("Search settings"));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.search)
                         .id(egui::Id::new("pixel-search"))
@@ -412,15 +449,18 @@ impl PixelSettings {
         });
         egui::TopBottomPanel::bottom("actions").show(ctx, |ui| {
             if let Some(error) = &validation {
-                ui.colored_label(Color32::from_rgb(255, 173, 132), error);
+                ui.colored_label(
+                    Color32::from_rgb(255, 173, 132),
+                    super::i18n::diagnostic(error),
+                );
             }
             if !self.status.is_empty() {
-                ui.label(&self.status);
+                ui.label(super::i18n::diagnostic(&self.status));
             }
             ui.add_enabled_ui(self.confirm.is_none(), |ui| {
                 ui.horizontal_wrapped(|ui| {
                     if ui
-                        .add_enabled(validation.is_none(), egui::Button::new("Save"))
+                        .add_enabled(validation.is_none(), egui::Button::new(tr("Save")))
                         .clicked()
                         && self.save(&LocalStore)
                     {
@@ -430,24 +470,24 @@ impl PixelSettings {
                         }
                     }
                     if ui
-                        .add_enabled(self.dirty(), egui::Button::new("Revert"))
+                        .add_enabled(self.dirty(), egui::Button::new(tr("Revert")))
                         .clicked()
                     {
                         self.revert();
                     }
-                    if ui.button("Reload").clicked() {
+                    if ui.button(tr("Reload")).clicked() {
                         if self.dirty() {
                             self.confirm = Some(Discard::Reload);
                         } else {
                             self.reload_desktop(&LocalStore, crate::autostart::status());
                         }
                     }
-                    if ui.button("Defaults").clicked() {
+                    if ui.button(tr("Defaults")).clicked() {
                         self.apply(SettingsAction::Defaults);
                         self.new_exception.clear();
                         self.forms.recording = None;
                         self.forms.shortcut_error = None;
-                        self.status = "Defaults staged. Choose Save to apply them.".into();
+                        self.status = tr("Defaults staged. Choose Save to apply them.").into();
                     }
                 });
             });
@@ -464,7 +504,7 @@ impl PixelSettings {
                             {
                                 count += 1;
                                 if ui
-                                    .button(format!("{} › {}", item.tab.label(), item.label))
+                                    .button(format!("{} › {}", item.tab.label(), tr(item.label)))
                                     .clicked()
                                 {
                                     self.section = item.tab;
@@ -473,7 +513,7 @@ impl PixelSettings {
                                 }
                             }
                             if count == 0 {
-                                ui.label("No settings match this search.");
+                                ui.label(tr("No settings match this search."));
                             }
                         } else {
                             match self.section {
@@ -487,13 +527,13 @@ impl PixelSettings {
         });
         if let Some(discard) = self.confirm {
             egui::Modal::new(egui::Id::new("discard")).show(ctx, |ui| {
-                ui.heading("Discard unsaved changes?");
-                ui.label("Your edits have not been saved.");
+                ui.heading(tr("Discard unsaved changes?"));
+                ui.label(tr("Your edits have not been saved."));
                 ui.horizontal(|ui| {
-                    if ui.button("Keep editing").clicked() {
+                    if ui.button(tr("Keep editing")).clicked() {
                         self.confirm = None;
                     }
-                    if ui.button("Discard changes").clicked() {
+                    if ui.button(tr("Discard changes")).clicked() {
                         self.confirm = None;
                         match discard {
                             Discard::Close => {
@@ -538,7 +578,10 @@ mod tests {
         }
     }
     fn app() -> PixelSettings {
-        let config = Config::default();
+        let config = Config {
+            ui_language: crate::config::UiLanguage::English,
+            ..Config::default()
+        };
         let forms = SettingsApp::new(
             config.clone(),
             crate::autostart::AutostartStatus {
@@ -589,6 +632,125 @@ mod tests {
             egui::Event::Paste(text.into()),
         ]
     }
+
+    #[test]
+    fn ukrainian_pages_language_picker_save_and_revert_preserve_user_values() {
+        use crate::config::UiLanguage;
+        let ctx = egui::Context::default();
+        apply_style(&ctx);
+        ctx.enable_accesskit();
+        let mut app = app();
+        let config = Config {
+            auto_correct_exceptions: vec!["General".into(), "Українська".into()],
+            ..Config::default()
+        };
+        app.draft.accept(config.clone());
+        let store = Store {
+            config: RefCell::new(config.clone()),
+            fail: Cell::new(false),
+        };
+        let frame = |events| {
+            let mut raw = input(events);
+            raw.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(780.0, 1800.0),
+            ));
+            raw
+        };
+        for (tab, label) in [
+            (SettingsTab::General, "Мова інтерфейсу"),
+            (SettingsTab::Automatic, "ВИПРАВЛЕННЯ"),
+            (SettingsTab::Exceptions, "ВИНЯТКИ"),
+            (SettingsTab::Shortcuts, "Перетворити виділене"),
+            (SettingsTab::Feedback, "Візуальні індикатори"),
+            (SettingsTab::Advanced, "Затримка копіювання"),
+            (SettingsTab::About, "Приватність за задумом"),
+        ] {
+            app.section = tab;
+            let _ = ctx.run(frame(vec![]), |ctx| app.draw(ctx));
+            let out = ctx.run(frame(vec![]), |ctx| app.draw(ctx));
+            let tree = out.platform_output.accesskit_update.unwrap();
+            assert!(
+                tree.nodes
+                    .iter()
+                    .any(|(_, n)| n.label() == Some(label) || n.value() == Some(label)),
+                "missing {label}"
+            );
+        }
+        for tab in SettingsTab::ALL {
+            app.section = tab;
+            let _ = ctx.run(input(vec![]), |ctx| app.draw(ctx));
+            let _ = ctx.run(input(vec![]), |ctx| app.draw(ctx));
+            assert!(
+                ctx.used_size().x <= 481.0,
+                "Ukrainian {} overflows: {:?}",
+                tab.label(),
+                ctx.used_size()
+            );
+        }
+        app.section = SettingsTab::General;
+        let click = |app: &mut PixelSettings, label: &str| {
+            let _ = ctx.run(frame(vec![]), |ctx| app.draw(ctx));
+            let out = ctx.run(frame(vec![]), |ctx| app.draw(ctx));
+            let tree = out.platform_output.accesskit_update.unwrap();
+            let bounds = tree
+                .nodes
+                .iter()
+                .find(|(_, n)| n.label() == Some(label) || n.value() == Some(label))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "missing {label}: {:?}",
+                        tree.nodes
+                            .iter()
+                            .map(|(_, n)| (n.role(), n.label(), n.value()))
+                            .collect::<Vec<_>>()
+                    )
+                })
+                .1
+                .bounds()
+                .unwrap();
+            let pos = egui::pos2(
+                ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                ((bounds.y0 + bounds.y1) / 2.0) as f32,
+            );
+            for pressed in [true, false] {
+                let _ = ctx.run(
+                    frame(vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ]),
+                    |ctx| app.draw(ctx),
+                );
+            }
+        };
+        click(&mut app, "Мова інтерфейсу: Українська");
+        click(&mut app, "English");
+        let mut expected = config.clone();
+        expected.ui_language = UiLanguage::English;
+        assert_eq!(app.draft.edited, expected);
+        assert!(app.dirty());
+        app.revert();
+        assert_eq!(app.draft.edited.ui_language, UiLanguage::Ukrainian);
+        assert!(!app.dirty());
+        app.draft.edited.ui_language = UiLanguage::English;
+        assert!(app.save(&store));
+        assert_eq!(store.config.borrow().ui_language, UiLanguage::English);
+        assert_eq!(
+            store.config.borrow().auto_correct_exceptions,
+            config.auto_correct_exceptions
+        );
+        assert_eq!(store.config.borrow().hotkey, config.hotkey);
+        assert!(!app.dirty());
+        app.draft.edited.ui_language = UiLanguage::Ukrainian;
+        assert!(app.reload(&store));
+        assert_eq!(app.draft.edited.ui_language, UiLanguage::English);
+    }
+
     #[test]
     fn gui_edits_unicode_via_keyboard_and_publishes_named_fields() {
         let ctx = egui::Context::default();

@@ -41,8 +41,8 @@ impl SettingsTab {
             .expect("known settings tab") as isize
     }
 
-    pub(super) const fn label(self) -> &'static str {
-        match self {
+    pub(super) fn label(self) -> &'static str {
+        super::i18n::tr(match self {
             Self::General => "General",
             Self::Automatic => "Correction",
             Self::Exceptions => "Exceptions",
@@ -50,7 +50,7 @@ impl SettingsTab {
             Self::Feedback => "Feedback",
             Self::Advanced => "Advanced",
             Self::About => "About",
-        }
+        })
     }
 
     pub(super) const fn command(self) -> &'static str {
@@ -89,6 +89,11 @@ pub(super) struct SearchParameter {
 }
 
 pub(super) const SEARCH_PARAMETERS: &[SearchParameter] = &[
+    SearchParameter {
+        tab: SettingsTab::General,
+        label: "Interface language",
+        terms: "language ukrainian english мова інтерфейсу українська англійська",
+    },
     #[cfg(target_os = "macos")]
     SearchParameter {
         tab: SettingsTab::General,
@@ -278,7 +283,14 @@ impl SearchParameter {
         if query.is_empty() {
             return false;
         }
-        let haystack = format!("{} {} {}", self.tab.label(), self.label, self.terms).to_lowercase();
+        let haystack = format!(
+            "{} {} {} {}",
+            self.tab.label(),
+            self.label,
+            self.terms,
+            super::i18n::translate(crate::config::UiLanguage::Ukrainian, self.label)
+        )
+        .to_lowercase();
         query.split_whitespace().all(|word| haystack.contains(word))
     }
 }

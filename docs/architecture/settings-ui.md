@@ -28,6 +28,14 @@ seven pages and the shared search catalog. Startup preference state remains in
 the desktop host; config edits and per-source flag changes use the same staged
 save and merge. The TUI still covers Correction and Exceptions.
 
+Settings use a shared Ukrainian/English catalog (`settings/i18n.rs`). The additive
+`ui_language` config field defaults to `uk`, including existing files that omit
+it. General offers Українська / English. Pixel edits preview immediately and use
+the existing Save/Revert/Reload flow; native controls apply the choice when the
+window is reopened. The TUI follows the same preference while preserving its
+English command syntax. Search matches both languages, and editable values and
+IDs are never passed through translation. See the [localization spec](../specs/settings-localization.md).
+
 The reviewed repository is `dmytro-yemelianov/pixel-ssh`, clean local revision
 `a74e1a5ea71794332280776fce52dd0d3bc2e44b` (2026-11-12 review).
 

@@ -1,3 +1,4 @@
+use crate::settings::i18n::tr;
 use std::{
     env,
     fs::{self, OpenOptions},
@@ -32,6 +33,7 @@ use crate::{
 mod draft;
 #[cfg(any(target_os = "macos", test))]
 mod flag_choices;
+mod i18n;
 mod navigation;
 mod persistence;
 mod pixel;
@@ -249,6 +251,7 @@ pub fn run_with(options: SettingsOptions) -> Result<()> {
     // Keep the existing window available to inspect defaults. Saving still
     // requires a readable current file so concurrent edits are not lost.
     let (config, problem) = Config::load_or_default();
+    i18n::set_language(config.ui_language);
     let problem = problem.map(|problem| {
         format!("Could not read the settings file ({problem}). Showing defaults; repair the file before saving.")
     });
@@ -261,13 +264,13 @@ pub fn run_with(options: SettingsOptions) -> Result<()> {
     {
         let options = eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
-                .with_title("Upyr Settings")
+                .with_title(tr("Upyr Settings"))
                 .with_inner_size([680.0, 800.0])
                 .with_min_inner_size([520.0, 560.0]),
             ..Default::default()
         };
         eframe::run_native(
-            "Upyr Settings",
+            tr("Upyr Settings"),
             options,
             Box::new(move |_context| {
                 let mut app = SettingsApp::new(config, autostart_status, initial_tab, activation);
@@ -314,12 +317,12 @@ fn sync_launch_at_login(desired: bool) -> Result<autostart::AutostartStatus> {
 
 fn autostart_attention(status: &autostart::AutostartStatus) -> Option<String> {
     let action = match status.state {
-        autostart::AutostartState::Stale => {
-            "Launch at login points to another Upyr installation. Choose Repair Entry to update it, or Remove Entry to disable it."
-        }
-        autostart::AutostartState::Broken => {
-            "The launch-at-login entry needs attention and Upyr will not overwrite it. Choose Remove Entry explicitly before enabling it again."
-        }
+        autostart::AutostartState::Stale => tr(
+            "Launch at login points to another Upyr installation. Choose Repair Entry to update it, or Remove Entry to disable it.",
+        ),
+        autostart::AutostartState::Broken => tr(
+            "The launch-at-login entry needs attention and Upyr will not overwrite it. Choose Remove Entry explicitly before enabling it again.",
+        ),
         autostart::AutostartState::Disabled | autostart::AutostartState::Enabled => return None,
     };
     Some(match status.detail.as_deref() {
@@ -544,7 +547,10 @@ impl SettingsApp {
             Err(error) => {
                 self.status = Some((
                     false,
-                    format!("Could not activate the settings window: {error:#}"),
+                    crate::settings::i18n::localized_format!(
+                        "Could not activate the settings window: {error:#}",
+                        "Не вдалося активувати вікно налаштувань: {error:#}"
+                    ),
                 ));
             }
         }
@@ -554,7 +560,13 @@ impl SettingsApp {
         let config = match persistence::save_edits(&self.loaded, self.config.clone()) {
             Ok(config) => config,
             Err(error) => {
-                self.status = Some((false, format!("Could not save settings: {error:#}")));
+                self.status = Some((
+                    false,
+                    crate::settings::i18n::localized_format!(
+                        "Could not save settings: {error:#}",
+                        "Не вдалося зберегти налаштування: {error:#}"
+                    ),
+                ));
                 return;
             }
         };
@@ -569,7 +581,7 @@ impl SettingsApp {
 
     fn save_startup(&mut self) {
         if !self.startup_dirty() {
-            self.status = Some((true, "Saved. Upyr will reload these settings.".into()));
+            self.status = Some((true, tr("Saved. Upyr will reload these settings.").into()));
             return;
         }
         self.accept_startup_result(sync_launch_at_login(self.launch_at_login));
@@ -581,18 +593,26 @@ impl SettingsApp {
                 self.launch_at_login = status.enabled;
                 self.autostart_status = status;
                 self.status = Some(match autostart_attention(&self.autostart_status) {
-                    Some(attention) => (false, format!("Settings saved. {attention}")),
+                    Some(attention) => (
+                        false,
+                        crate::settings::i18n::localized_format!(
+                            "Settings saved. {attention}",
+                            "Налаштування збережено. {attention}"
+                        ),
+                    ),
                     None => (
                         true,
-                        "Saved. The running background app will reload these settings.".to_owned(),
+                        tr("Saved. The running background app will reload these settings.")
+                            .to_owned(),
                     ),
                 });
             }
             Err(error) => {
                 self.status = Some((
                     false,
-                    format!(
-                        "Settings saved, but launch at login failed: {error:#}. Your choice is kept; Save retries it."
+                    crate::settings::i18n::localized_format!(
+                        "Settings saved, but launch at login failed: {error:#}. Your choice is kept; Save retries it.",
+                        "Налаштування збережено, але автозапуск не змінився: {error:#}. Ваш вибір залишено; «Зберегти» повторить спробу."
                     ),
                 ));
             }
@@ -604,10 +624,16 @@ impl SettingsApp {
             Ok(status) => {
                 self.launch_at_login = status.enabled;
                 self.autostart_status = status;
-                self.status = Some((true, "Launch-at-login entry repaired.".to_owned()));
+                self.status = Some((true, tr("Launch-at-login entry repaired.").to_owned()));
             }
             Err(error) => {
-                self.status = Some((false, format!("Could not repair entry: {error:#}")));
+                self.status = Some((
+                    false,
+                    crate::settings::i18n::localized_format!(
+                        "Could not repair entry: {error:#}",
+                        "Не вдалося виправити запис: {error:#}"
+                    ),
+                ));
             }
         }
     }
@@ -617,10 +643,16 @@ impl SettingsApp {
             Ok(status) => {
                 self.launch_at_login = status.enabled;
                 self.autostart_status = status;
-                self.status = Some((true, "Launch-at-login entry removed.".to_owned()));
+                self.status = Some((true, tr("Launch-at-login entry removed.").to_owned()));
             }
             Err(error) => {
-                self.status = Some((false, format!("Could not remove entry: {error:#}")));
+                self.status = Some((
+                    false,
+                    crate::settings::i18n::localized_format!(
+                        "Could not remove entry: {error:#}",
+                        "Не вдалося видалити запис: {error:#}"
+                    ),
+                ));
             }
         }
     }
@@ -632,7 +664,7 @@ impl SettingsApp {
         self.shortcut_error = None;
         self.status = Some((
             true,
-            "Defaults restored in the form. Choose Save to apply them.".to_owned(),
+            tr("Defaults restored in the form. Choose Save to apply them.").to_owned(),
         ));
     }
 
@@ -662,13 +694,14 @@ impl SettingsApp {
         }
 
         let Some(code) = egui_key_to_code(key) else {
-            self.shortcut_error = Some("That key cannot be used in a global shortcut.".to_owned());
+            self.shortcut_error =
+                Some(tr("That key cannot be used in a global shortcut.").to_owned());
             return;
         };
         let modifiers = hotkey_modifiers(modifiers);
         if modifiers.is_empty() {
             self.shortcut_error = Some(
-                "Include Command, Control, Option/Alt, or Shift so normal typing is never captured."
+                tr("Include Command, Control, Option/Alt, or Shift so normal typing is never captured.")
                     .to_owned(),
             );
             return;
@@ -694,14 +727,38 @@ impl SettingsApp {
     fn draw_general(&mut self, ui: &mut egui::Ui) {
         section_heading(
             ui,
-            "General",
-            "Core conversion, clipboard, and startup behavior.",
+            tr("General"),
+            tr("Core conversion, clipboard, and startup behavior."),
         );
         egui::Grid::new("general-grid")
             .num_columns(2)
             .spacing([20.0, 12.0])
             .show(ui, |ui| {
-                ui.label("Conversion direction");
+                ui.label(tr("Interface language"));
+                let language_picker = egui::ComboBox::from_id_salt("ui-language")
+                    .selected_text(self.config.ui_language.label())
+                    .show_ui(ui, |ui| {
+                        for language in crate::config::UiLanguage::ALL {
+                            ui.selectable_value(
+                                &mut self.config.ui_language,
+                                language,
+                                language.label(),
+                            );
+                        }
+                    });
+                language_picker.response.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::ComboBox,
+                        ui.is_enabled(),
+                        format!(
+                            "{}: {}",
+                            tr("Interface language"),
+                            self.config.ui_language.label()
+                        ),
+                    )
+                });
+                ui.end_row();
+                ui.label(tr("Conversion direction"));
                 egui::ComboBox::from_id_salt("direction")
                     .selected_text(direction_label(self.config.direction))
                     .show_ui(ui, |ui| {
@@ -722,30 +779,32 @@ impl SettingsApp {
         ui.add_space(6.0);
         ui.checkbox(
             &mut self.config.switch_layout,
-            "Switch the OS layout to match converted text",
+            tr("Switch the OS layout to match converted text"),
         );
         ui.checkbox(
             &mut self.config.restore_clipboard,
-            "Restore clipboard contents after conversion",
+            tr("Restore clipboard contents after conversion"),
         );
         #[cfg(target_os = "macos")]
         {
             ui.checkbox(
                 &mut self.config.globe_switch.enabled,
-                "Tap Globe to switch keyboard layouts",
+                tr("Tap Globe to switch keyboard layouts"),
             );
-            ui.small("Keeps fn shortcuts. Restores macOS handling when paused or quit.");
+            ui.small(tr(
+                "Keeps fn shortcuts. Restores macOS handling when paused or quit.",
+            ));
         }
-        ui.checkbox(&mut self.launch_at_login, "Launch Upyr at login");
+        ui.checkbox(&mut self.launch_at_login, tr("Launch Upyr at login"));
         if let Some(attention) = autostart_attention(&self.autostart_status) {
             ui.colored_label(egui::Color32::from_rgb(180, 105, 20), attention);
             ui.horizontal_wrapped(|ui| {
                 if self.autostart_status.state == autostart::AutostartState::Stale
-                    && ui.button("Repair Entry").clicked()
+                    && ui.button(tr("Repair Entry")).clicked()
                 {
                     self.repair_autostart();
                 }
-                if ui.button("Remove Entry").clicked() {
+                if ui.button(tr("Remove Entry")).clicked() {
                     self.remove_autostart();
                 }
             });
@@ -754,20 +813,20 @@ impl SettingsApp {
 
     fn draw_automatic(&mut self, ui: &mut egui::Ui) {
         section_heading(ui, CORRECTION_TITLE, CORRECTION_DESCRIPTION);
-        ui.checkbox(&mut self.config.auto_correct, CORRECTION_TOGGLE);
+        ui.checkbox(&mut self.config.auto_correct, tr(CORRECTION_TOGGLE));
         ui.small(
-            "Opt-in: a short input prefix is kept only in memory, cleared at safe boundaries, and never logged.",
+            tr("Opt-in: a short input prefix is kept only in memory, cleared at safe boundaries, and never logged."),
         );
         #[cfg(target_os = "macos")]
         ui.colored_label(
             egui::Color32::from_rgb(190, 125, 35),
-            "macOS requires Accessibility access. Upyr checks existing access first and offers one restart after permission is granted.",
+            tr("macOS requires Accessibility access. Upyr checks existing access first and offers one restart after permission is granted."),
         );
         ui.add_space(8.0);
         ui.group(|ui| {
-            ui.label(MIDWORD_HELP);
+            ui.label(tr(MIDWORD_HELP));
             ui.add_space(4.0);
-            ui.label(CONTEXT_HELP);
+            ui.label(tr(CONTEXT_HELP));
         });
         ui.add_space(8.0);
         ui.add_enabled_ui(self.config.auto_correct, |ui| {
@@ -775,7 +834,7 @@ impl SettingsApp {
                 .num_columns(2)
                 .spacing([20.0, 12.0])
                 .show(ui, |ui| {
-                    ui.label("Sensitivity");
+                    ui.label(tr("Sensitivity"));
                     egui::ComboBox::from_id_salt("auto-correct-sensitivity")
                         .selected_text(sensitivity_label(self.config.auto_correct_sensitivity))
                         .show_ui(ui, |ui| {
@@ -792,31 +851,31 @@ impl SettingsApp {
                             }
                         });
                     ui.end_row();
-                    ui.label("Minimum word length");
+                    ui.label(tr("Minimum word length"));
                     ui.add(
                         egui::DragValue::new(&mut self.config.auto_correct_min_word_length)
                             .range(2..=32),
                     );
                     ui.end_row();
-                    ui.label("Pause after Space").on_hover_text("This delay applies after Space; a clear prefix can switch immediately during typing.");
+                    ui.label(tr("Pause after Space")).on_hover_text(tr("This delay applies after Space; a clear prefix can switch immediately during typing."));
                     ui.horizontal_wrapped(|ui| {
                         ui.add(
                             egui::DragValue::new(&mut self.config.auto_correct_delay_ms)
                                 .range(10..=250),
                         );
-                        ui.label("ms");
+                        ui.label(tr("ms"));
                     });
                     ui.end_row();
                 });
         });
-        ui.small(CORRECTION_FOOTNOTE);
+        ui.small(tr(CORRECTION_FOOTNOTE));
     }
 
     fn draw_exceptions(&mut self, ui: &mut egui::Ui) {
         section_heading(
             ui,
-            "Never correct",
-            "Exact words that automatic correction must always leave alone.",
+            tr("Never correct"),
+            tr("Exact words that automatic correction must always leave alone."),
         );
         ui.add_space(8.0);
 
@@ -826,11 +885,11 @@ impl SettingsApp {
             .spacing([12.0, 6.0])
             .striped(true)
             .show(ui, |ui| {
-                ui.strong("Word");
+                ui.strong(tr("Word"));
                 ui.end_row();
                 for (index, word) in self.config.auto_correct_exceptions.iter_mut().enumerate() {
                     ui.add(egui::TextEdit::singleline(word).desired_width(260.0));
-                    if ui.small_button("Remove").clicked() {
+                    if ui.small_button(tr("Remove")).clicked() {
                         remove_index = Some(index);
                     }
                     ui.end_row();
@@ -840,7 +899,7 @@ impl SettingsApp {
             self.config.auto_correct_exceptions.remove(index);
         }
         if self.config.auto_correct_exceptions.is_empty() {
-            ui.small("No exceptions yet.");
+            ui.small(tr("No exceptions yet."));
         }
 
         ui.add_space(10.0);
@@ -848,14 +907,14 @@ impl SettingsApp {
             ui.add(
                 egui::TextEdit::singleline(&mut self.new_exception)
                     .desired_width(260.0)
-                    .hint_text("words separated by spaces or commas"),
+                    .hint_text(tr("words separated by spaces or commas")),
             );
-            if ui.button("Add").clicked() {
+            if ui.button(tr("Add")).clicked() {
                 self.add_exceptions();
             }
         });
         ui.small(
-            "Spaces and commas separate words, so \"two words\" adds two exceptions. Case-insensitive duplicates and blank entries are ignored.",
+            tr("Spaces and commas separate words, so \"two words\" adds two exceptions. Case-insensitive duplicates and blank entries are ignored."),
         );
     }
 
@@ -877,33 +936,38 @@ impl SettingsApp {
     fn draw_shortcuts(&mut self, ui: &mut egui::Ui) {
         section_heading(
             ui,
-            "Shortcuts",
-            "Click a recorder, then press the combination you want.",
+            tr("Shortcuts"),
+            tr("Click a recorder, then press the combination you want."),
         );
-        self.shortcut_row(ui, "Convert selection", ShortcutSlot::Selection);
+        self.shortcut_row(ui, tr("Convert selection"), ShortcutSlot::Selection);
         ui.add_space(8.0);
-        self.shortcut_row(ui, "Fix previous word", ShortcutSlot::PreviousWord);
+        self.shortcut_row(ui, tr("Fix previous word"), ShortcutSlot::PreviousWord);
         #[cfg(target_os = "macos")]
         {
             ui.add_space(8.0);
-            self.shortcut_row(ui, "Undo auto-correction", ShortcutSlot::Undo);
-            ui.small("Undo is available for 30 seconds, until further input or navigation.");
+            self.shortcut_row(ui, tr("Undo auto-correction"), ShortcutSlot::Undo);
+            ui.small(tr(
+                "Undo is available for 30 seconds, until further input or navigation.",
+            ));
         }
         if let Some(error) = &self.shortcut_error {
             ui.add_space(6.0);
-            ui.colored_label(egui::Color32::from_rgb(190, 55, 55), error);
+            ui.colored_label(
+                egui::Color32::from_rgb(190, 55, 55),
+                i18n::diagnostic(error),
+            );
         }
         ui.add_space(18.0);
         section_heading(
             ui,
-            "Modifier gesture",
-            "An optional double-tap trigger without a regular key.",
+            tr("Modifier gesture"),
+            tr("An optional double-tap trigger without a regular key."),
         );
         egui::Grid::new("gesture-grid")
             .num_columns(2)
             .spacing([20.0, 12.0])
             .show(ui, |ui| {
-                ui.label("Gesture");
+                ui.label(tr("Gesture"));
                 egui::ComboBox::from_id_salt("modifier-gesture")
                     .selected_text(gesture_label(self.config.modifier_gesture))
                     .show_ui(ui, |ui| {
@@ -921,7 +985,7 @@ impl SettingsApp {
                         }
                     });
                 ui.end_row();
-                ui.label("Action");
+                ui.label(tr("Action"));
                 egui::ComboBox::from_id_salt("gesture-action")
                     .selected_text(gesture_action_label(self.config.modifier_gesture_action))
                     .show_ui(ui, |ui| {
@@ -934,13 +998,13 @@ impl SettingsApp {
                         }
                     });
                 ui.end_row();
-                ui.label("Double-tap timeout");
+                ui.label(tr("Double-tap timeout"));
                 ui.horizontal_wrapped(|ui| {
                     ui.add(
                         egui::DragValue::new(&mut self.config.modifier_gesture_timeout_ms)
                             .range(150..=2_000),
                     );
-                    ui.label("ms");
+                    ui.label(tr("ms"));
                 });
                 ui.end_row();
             });
@@ -954,10 +1018,10 @@ impl SettingsApp {
             #[cfg(target_os = "macos")]
             ShortcutSlot::Undo => self.config.undo_hotkey.clone(),
         };
-        ui.label(egui::RichText::new(label).strong());
+        ui.label(egui::RichText::new(tr(label)).strong());
         ui.horizontal_wrapped(|ui| {
             let text = if active {
-                "Press shortcut…  (Esc to cancel)".to_owned()
+                tr("Press shortcut…  (Esc to cancel)").to_owned()
             } else {
                 text_hotkey(&value).unwrap_or_else(|| value.clone())
             };
@@ -979,7 +1043,7 @@ impl SettingsApp {
                 ShortcutSlot::Undo => default.undo_hotkey,
             };
             if ui
-                .add_enabled(value != default_value, egui::Button::new("Reset"))
+                .add_enabled(value != default_value, egui::Button::new(tr("Reset")))
                 .clicked()
             {
                 match slot {
@@ -992,17 +1056,32 @@ impl SettingsApp {
                 self.shortcut_error = None;
             }
         });
-        ui.small("The shortcut uses physical keys, so it keeps working in either keyboard layout.");
+        ui.small(tr(
+            "The shortcut uses physical keys, so it keeps working in either keyboard layout.",
+        ));
     }
 
     fn preview_key_sound(&mut self, cue: KeyCue, label: &str) {
+        let label = tr(label);
         let mut preview_settings = self.config.sounds;
         preview_settings.enabled = true;
         preview_settings.key_clicks = true;
         self.status = Some(
             match crate::feedback::preview_key_sound(cue, &preview_settings) {
-                Ok(()) => (true, format!("Previewed {label}.")),
-                Err(error) => (false, format!("Could not preview {label}: {error:#}")),
+                Ok(()) => (
+                    true,
+                    crate::settings::i18n::localized_format!(
+                        "Previewed {label}.",
+                        "Відтворено: {label}."
+                    ),
+                ),
+                Err(error) => (
+                    false,
+                    crate::settings::i18n::localized_format!(
+                        "Could not preview {label}: {error:#}",
+                        "Не вдалося відтворити {label}: {error:#}"
+                    ),
+                ),
             },
         );
     }
@@ -1017,7 +1096,7 @@ impl SettingsApp {
             let route = crate::audio_output::current();
             self.audio_status = Some((
                 Instant::now(),
-                format!("{} · {}", route.name, route.kind.label()),
+                format!("{} · {}", route.name, tr(route.kind.label())),
             ));
         }
     }
@@ -1025,32 +1104,32 @@ impl SettingsApp {
     fn draw_feedback(&mut self, ui: &mut egui::Ui) {
         section_heading(
             ui,
-            "Visual feedback",
-            "Optional confirmation after Upyr changes the active input source.",
+            tr("Visual feedback"),
+            tr("Optional confirmation after Upyr changes the active input source."),
         );
         ui.checkbox(
             &mut self.config.show_layout_indicator,
-            "Show a temporary language flag next to the pointer",
+            tr("Show a temporary language flag next to the pointer"),
         );
         ui.add_enabled_ui(self.config.show_layout_indicator, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label("Visible for");
+                ui.label(tr("Visible for"));
                 ui.add(
                     egui::DragValue::new(&mut self.config.layout_indicator_duration_ms)
                         .range(250..=3_000),
                 );
-                ui.label("ms");
+                ui.label(tr("ms"));
             });
             ui.horizontal_wrapped(|ui| {
-                ui.label("Shows");
+                ui.label(tr("Shows"));
                 egui::ComboBox::from_id_salt("indicator-style")
-                    .selected_text(self.config.indicator_style.label())
+                    .selected_text(tr(self.config.indicator_style.label()))
                     .show_ui(ui, |ui| {
                         for style in IndicatorStyle::ALL {
                             ui.selectable_value(
                                 &mut self.config.indicator_style,
                                 style,
-                                style.label(),
+                                tr(style.label()),
                             );
                         }
                     });
@@ -1061,18 +1140,18 @@ impl SettingsApp {
         self.flags.show(ui, &mut self.config, &mut self.status);
         section_heading(
             ui,
-            "Sound feedback",
-            "Choose which Upyr actions play a subtle confirmation sound.",
+            tr("Sound feedback"),
+            tr("Choose which Upyr actions play a subtle confirmation sound."),
         );
-        ui.checkbox(&mut self.config.sounds.enabled, "Enable sound feedback");
+        ui.checkbox(&mut self.config.sounds.enabled, tr("Enable sound feedback"));
         ui.horizontal_wrapped(|ui| {
-            ui.label("Volume");
+            ui.label(tr("Volume"));
             ui.add(egui::Slider::new(&mut self.config.sounds.volume_percent, 0..=100).suffix("%"));
         });
         #[cfg(target_os = "macos")]
         {
             ui.horizontal_wrapped(|ui| {
-                ui.label("Headphone limit");
+                ui.label(tr("Headphone limit"));
                 ui.add(
                     egui::Slider::new(&mut self.config.sounds.headphone_volume_percent, 0..=30)
                         .suffix("%"),
@@ -1081,10 +1160,10 @@ impl SettingsApp {
             if let Some((_, text)) = &self.audio_status {
                 ui.small(text);
             }
-            ui.small("Quiet limit for headphones and unrecognized outputs. Does not change system volume.");
+            ui.small(tr("Quiet limit for headphones and unrecognized outputs. Does not change system volume."));
         }
         ui.horizontal_wrapped(|ui| {
-            ui.label("Sound pack");
+            ui.label(tr("Sound pack"));
             egui::ComboBox::from_id_salt("sound-pack")
                 .selected_text(self.config.sounds.pack.label())
                 .show_ui(ui, |ui| {
@@ -1093,22 +1172,22 @@ impl SettingsApp {
                     }
                 });
         });
-        ui.small(self.config.sounds.pack.description());
+        ui.small(tr(self.config.sounds.pack.description()));
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {
             ui.checkbox(
                 &mut self.config.sounds.key_clicks,
-                "Keyboard sounds (control-key reactions in Anime pack)",
+                tr("Keyboard sounds (control-key reactions in Anime pack)"),
             );
-            if ui.button("Preview click").clicked() {
+            if ui.button(tr("Preview click")).clicked() {
                 self.preview_key_sound(KeyCue::Character, "typing click");
             }
-            if ui.button("Preview control").clicked() {
+            if ui.button(tr("Preview control")).clicked() {
                 self.preview_key_sound(KeyCue::Space, "control-key reaction");
             }
         });
         ui.small(
-            "Keyboard sounds are opt-in and use only physical key categories; no typed text is retained.",
+            tr("Keyboard sounds are opt-in and use only physical key categories; no typed text is retained."),
         );
         ui.add_space(8.0);
         egui::Grid::new("sound-feedback-grid")
@@ -1117,10 +1196,10 @@ impl SettingsApp {
             .show(ui, |ui| {
                 for event in SoundEvent::ALL {
                     let mut selected = self.config.sounds.event_selected(event);
-                    if ui.checkbox(&mut selected, event.label()).changed() {
+                    if ui.checkbox(&mut selected, tr(event.label())).changed() {
                         self.config.sounds.set_event_selected(event, selected);
                     }
-                    if ui.button("Preview").clicked() {
+                    if ui.button(tr("Preview")).clicked() {
                         let mut preview_settings = self.config.sounds;
                         preview_settings.enabled = true;
                         preview_settings.set_event_selected(event, true);
@@ -1130,10 +1209,21 @@ impl SettingsApp {
                                 &preview_settings,
                                 &self.config.globe_switch,
                             ) {
-                                Ok(()) => (true, format!("Previewed {} sound.", event.label())),
+                                Ok(()) => (
+                                    true,
+                                    crate::settings::i18n::localized_format!(
+                                        "Previewed {} sound.",
+                                        "Відтворено звук «{}».",
+                                        tr(event.label())
+                                    ),
+                                ),
                                 Err(error) => (
                                     false,
-                                    format!("Could not preview {} sound: {error:#}", event.label()),
+                                    crate::settings::i18n::localized_format!(
+                                        "Could not preview {} sound: {error:#}",
+                                        "Не вдалося відтворити звук «{}»: {error:#}",
+                                        tr(event.label())
+                                    ),
                                 ),
                             },
                         );
@@ -1142,26 +1232,38 @@ impl SettingsApp {
                 }
             });
         ui.add_space(10.0);
-        ui.small(
+        ui.small(tr(
             "Preview buttons work even while sound feedback or an individual event is disabled.",
-        );
+        ));
     }
 
     fn draw_advanced(&mut self, ui: &mut egui::Ui) {
         section_heading(
             ui,
-            "Advanced timing",
-            "Increase these only for applications with slow clipboard handling.",
+            tr("Advanced timing"),
+            tr("Increase these only for applications with slow clipboard handling."),
         );
         egui::Grid::new("timing-grid")
             .num_columns(3)
             .spacing([20.0, 12.0])
             .show(ui, |ui| {
-                timing_row(ui, "Copy delay", &mut self.config.copy_delay_ms, 10, 2_000);
-                timing_row(ui, "Paste delay", &mut self.config.paste_delay_ms, 0, 2_000);
                 timing_row(
                     ui,
-                    "Clipboard restore delay",
+                    tr("Copy delay"),
+                    &mut self.config.copy_delay_ms,
+                    10,
+                    2_000,
+                );
+                timing_row(
+                    ui,
+                    tr("Paste delay"),
+                    &mut self.config.paste_delay_ms,
+                    0,
+                    2_000,
+                );
+                timing_row(
+                    ui,
+                    tr("Clipboard restore delay"),
                     &mut self.config.restore_delay_ms,
                     0,
                     5_000,
@@ -1173,24 +1275,24 @@ impl SettingsApp {
         section_heading(
             ui,
             &format!("Upyr {APP_VERSION}"),
-            "English ↔ Ukrainian keyboard layout correction.",
+            tr("English ↔ Ukrainian keyboard layout correction."),
         );
         ui.add_space(8.0);
-        ui.label(egui::RichText::new("Private by construction").strong());
-        ui.label(PRIVACY_SUMMARY);
+        ui.label(egui::RichText::new(tr("Private by construction")).strong());
+        ui.label(tr(PRIVACY_SUMMARY));
         ui.add_space(14.0);
-        ui.label(egui::RichText::new("How it works").strong());
-        ui.label(IMPLEMENTATION_SUMMARY);
+        ui.label(egui::RichText::new(tr("How it works")).strong());
+        ui.label(tr(IMPLEMENTATION_SUMMARY));
         ui.add_space(14.0);
-        ui.label(egui::RichText::new("Open source").strong());
-        ui.label("MIT licensed. Security reports and implementation details are published with the source.");
+        ui.label(egui::RichText::new(tr("Open source")).strong());
+        ui.label(tr("MIT licensed. Security reports and implementation details are published with the source."));
         ui.horizontal_wrapped(|ui| {
-            ui.hyperlink_to("Project website", PROJECT_WEBSITE_URL);
+            ui.hyperlink_to(tr("Project website"), PROJECT_WEBSITE_URL);
             ui.separator();
-            ui.hyperlink_to("Source repository", REPOSITORY_URL);
+            ui.hyperlink_to(tr("Source repository"), REPOSITORY_URL);
             ui.separator();
             ui.hyperlink_to(
-                "Report a security issue",
+                tr("Report a security issue"),
                 format!("{REPOSITORY_URL}/security/advisories/new"),
             );
         });
@@ -1198,7 +1300,11 @@ impl SettingsApp {
 
     fn draw_search_results(&mut self, ui: &mut egui::Ui) {
         let query = self.search.trim().to_lowercase();
-        section_heading(ui, "Search results", "Choose a setting to open its tab.");
+        section_heading(
+            ui,
+            tr("Search results"),
+            tr("Choose a setting to open its tab."),
+        );
         let mut found = 0;
         for parameter in SEARCH_PARAMETERS {
             if !parameter.matches(&query) {
@@ -1208,7 +1314,11 @@ impl SettingsApp {
             if ui
                 .add_sized(
                     [ui.available_width(), 38.0],
-                    egui::Button::new(format!("{}  ›  {}", parameter.tab.label(), parameter.label)),
+                    egui::Button::new(format!(
+                        "{}  ›  {}",
+                        parameter.tab.label(),
+                        tr(parameter.label)
+                    )),
                 )
                 .clicked()
             {
@@ -1217,13 +1327,14 @@ impl SettingsApp {
             }
         }
         if found == 0 {
-            ui.label("No settings match this search.");
+            ui.label(tr("No settings match this search."));
         }
     }
 }
 
 impl eframe::App for SettingsApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        i18n::set_language(self.config.ui_language);
         self.poll_activation(context);
         context.request_repaint_after(ACTIVATION_POLL_INTERVAL);
         if !self.style_applied {
@@ -1240,13 +1351,14 @@ impl eframe::App for SettingsApp {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label(egui::RichText::new("Upyr Settings").size(22.0).strong());
-                    ui.small("English ↔ Ukrainian keyboard layout correction");
+                    ui.label(egui::RichText::new(tr("Upyr Settings")).size(22.0).strong());
+                    ui.small(tr("English ↔ Ukrainian keyboard layout correction"));
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_sized(
                         [245.0, 32.0],
-                        egui::TextEdit::singleline(&mut self.search).hint_text("Search settings…"),
+                        egui::TextEdit::singleline(&mut self.search)
+                            .hint_text(tr("Search settings…")),
                     );
                 });
             });
@@ -1271,23 +1383,23 @@ impl eframe::App for SettingsApp {
                     } else {
                         egui::Color32::from_rgb(190, 55, 55)
                     },
-                    message,
+                    i18n::diagnostic(message),
                 );
             }
             ui.horizontal(|ui| {
                 if ui
                     .add(
-                        egui::Button::new(egui::RichText::new("Save settings").strong())
+                        egui::Button::new(egui::RichText::new(tr("Save settings")).strong())
                             .fill(egui::Color32::from_rgb(37, 105, 177)),
                     )
                     .clicked()
                 {
                     self.save();
                 }
-                if ui.button("Reset all").clicked() {
+                if ui.button(tr("Reset all")).clicked() {
                     self.reset();
                 }
-                if ui.button("Close").clicked() {
+                if ui.button(tr("Close")).clicked() {
                     context.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             });
@@ -1317,15 +1429,15 @@ impl eframe::App for SettingsApp {
 }
 
 fn section_heading(ui: &mut egui::Ui, title: &str, description: &str) {
-    ui.label(egui::RichText::new(title).size(18.0).strong());
-    ui.label(egui::RichText::new(description).weak());
+    ui.label(egui::RichText::new(tr(title)).size(18.0).strong());
+    ui.label(egui::RichText::new(tr(description)).weak());
     ui.add_space(2.0);
 }
 
 fn timing_row(ui: &mut egui::Ui, label: &str, value: &mut u64, min: u64, max: u64) {
-    ui.label(label);
+    ui.label(tr(label));
     ui.add(egui::DragValue::new(value).range(min..=max));
-    ui.label("ms");
+    ui.label(tr("ms"));
     ui.end_row();
 }
 
@@ -1538,33 +1650,33 @@ fn pretty_key(code: Code) -> String {
 
 fn sensitivity_label(value: AutoCorrectSensitivity) -> &'static str {
     match value {
-        AutoCorrectSensitivity::Conservative => "Conservative",
-        AutoCorrectSensitivity::Balanced => "Balanced",
-        AutoCorrectSensitivity::Aggressive => "Aggressive",
+        AutoCorrectSensitivity::Conservative => tr("Conservative"),
+        AutoCorrectSensitivity::Balanced => tr("Balanced"),
+        AutoCorrectSensitivity::Aggressive => tr("Aggressive"),
     }
 }
 
 fn gesture_label(value: ModifierGesture) -> &'static str {
     match value {
-        ModifierGesture::Disabled => "Disabled",
-        ModifierGesture::DoubleControl => "Double Control",
-        ModifierGesture::DoubleShift => "Double Shift",
-        ModifierGesture::DoubleControlShift => "Double Control + Shift",
+        ModifierGesture::Disabled => tr("Disabled"),
+        ModifierGesture::DoubleControl => tr("Double Control"),
+        ModifierGesture::DoubleShift => tr("Double Shift"),
+        ModifierGesture::DoubleControlShift => tr("Double Control + Shift"),
     }
 }
 
 fn gesture_action_label(value: GestureAction) -> &'static str {
     match value {
-        GestureAction::PreviousWord => "Fix previous word",
-        GestureAction::Selection => "Convert selection",
+        GestureAction::PreviousWord => tr("Fix previous word"),
+        GestureAction::Selection => tr("Convert selection"),
     }
 }
 
 fn direction_label(value: Direction) -> &'static str {
     match value {
-        Direction::Smart => "Smart (detect script)",
-        Direction::EnglishToUkrainian => "English → Ukrainian",
-        Direction::UkrainianToEnglish => "Ukrainian → English",
+        Direction::Smart => tr("Smart (detect script)"),
+        Direction::EnglishToUkrainian => tr("English → Ukrainian"),
+        Direction::UkrainianToEnglish => tr("Ukrainian → English"),
     }
 }
 

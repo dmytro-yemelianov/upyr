@@ -1,4 +1,5 @@
 //! Local line-oriented terminal adapter. No raw mode, global hooks or network.
+use super::i18n::{self, tr};
 use super::{
     draft::{SettingsAction, SettingsDraft},
     persistence::{self, LocalStore, SettingsStore},
@@ -89,23 +90,32 @@ fn render(
     status: &str,
     ansi: bool,
 ) -> Result<()> {
+    i18n::set_language(draft.edited.ui_language);
     if ansi {
         write!(out, "\x1b[2J\x1b[H")?;
     }
     writeln!(
         out,
-        "+-- UPYR SETTINGS / {} -- {} --+",
-        if exceptions {
-            "EXCEPTIONS"
-        } else {
-            "CORRECTION"
-        },
-        if draft.dirty() { "UNSAVED" } else { "SAVED" }
+        "{}",
+        i18n::localized_format!(
+            "+-- UPYR SETTINGS / {} -- {} --+",
+            "+-- НАЛАШТУВАННЯ UPYR / {} -- {} --+",
+            if exceptions {
+                tr("EXCEPTIONS")
+            } else {
+                tr("CORRECTION")
+            },
+            if draft.dirty() {
+                tr("UNSAVED")
+            } else {
+                tr("SAVED")
+            }
+        )
     )?;
-    writeln!(out, "Local editor · Full settings: upyr settings")?;
+    writeln!(out, "{}", tr("Local editor · Full settings: upyr settings"))?;
     if exceptions {
         if draft.edited.auto_correct_exceptions.is_empty() {
-            writeln!(out, "No exceptions yet.")?;
+            writeln!(out, "{}", tr("No exceptions yet."))?;
         }
         for (index, word) in draft.edited.auto_correct_exceptions.iter().enumerate() {
             writeln!(out, "{:>3}. {}", index + 1, printable(word))?;
@@ -113,34 +123,64 @@ fn render(
     } else {
         writeln!(
             out,
-            "Automatic: {}   Switch OS layout: {}",
-            draft.edited.auto_correct, draft.edited.switch_layout
+            "{}",
+            i18n::localized_format!(
+                "Automatic: {}   Switch OS layout: {}",
+                "Автовиправлення: {}   Перемикання розкладки: {}",
+                draft.edited.auto_correct,
+                draft.edited.switch_layout
+            )
         )?;
         writeln!(
             out,
-            "Sensitivity: {}",
-            sensitivity_label(draft.edited.auto_correct_sensitivity)
+            "{}",
+            i18n::localized_format!(
+                "Sensitivity: {}",
+                "Чутливість: {}",
+                sensitivity_label(draft.edited.auto_correct_sensitivity)
+            )
         )?;
         writeln!(
             out,
-            "Minimum: {}   Pause after Space: {} ms",
-            printable(&draft.minimum),
-            printable(&draft.delay)
+            "{}",
+            i18n::localized_format!(
+                "Minimum: {}   Pause after Space: {} ms",
+                "Мінімум: {}   Пауза після пробілу: {} мс",
+                printable(&draft.minimum),
+                printable(&draft.delay)
+            )
         )?;
         writeln!(
             out,
             "{}\n{}",
-            super::navigation::MIDWORD_HELP,
-            super::navigation::CONTEXT_HELP
+            tr(super::navigation::MIDWORD_HELP),
+            tr(super::navigation::CONTEXT_HELP)
         )?;
     }
     if let Err(error) = draft.candidate() {
-        writeln!(out, "Invalid: {}", printable(&format!("{error:#}")))?;
+        writeln!(
+            out,
+            "{}",
+            i18n::localized_format!(
+                "Invalid: {}",
+                "Помилка: {}",
+                printable(&i18n::diagnostic(&format!("{error:#}")))
+            )
+        )?;
     }
     if !status.is_empty() {
-        writeln!(out, "{}", printable(status))?;
+        writeln!(out, "{}", printable(&i18n::diagnostic(status)))?;
     }
-    writeln!(out, "{HELP}")?;
+    let help = if i18n::language() == crate::config::UiLanguage::Ukrainian {
+        "tab correction|exceptions · auto on|off · layout on|off\n\
+sensitivity conservative|balanced|aggressive · min 2..32 · delay 10..250\n\
+add СЛОВА · edit РЯДОК СЛОВА · remove РЯДОК (нумерація від 1)\n\
+save (зберегти) · revert (відкотити) · reload (перечитати) · reload! (відкинути зміни)\n\
+quit (вийти) · quit! (відкинути зміни й вийти) · help (довідка)"
+    } else {
+        HELP
+    };
+    writeln!(out, "{help}")?;
     write!(out, "upyr> ")?;
     out.flush()?;
     Ok(())
@@ -189,7 +229,7 @@ fn session(
             }
             Ok(Command::Quit(discard)) => {
                 if !draft.dirty() || discard {
-                    writeln!(output, "Closed without further changes.")?;
+                    writeln!(output, "{}", tr("Closed without further changes."))?;
                     return Ok(());
                 }
                 Ok("Unsaved changes. Use save, revert or quit!.".into())
@@ -216,9 +256,33 @@ mod tests {
             Ok(())
         }
     }
+
+    #[test]
+    fn terminal_uses_ukrainian_default_with_existing_commands() {
+        let store = Store(RefCell::new(Config::default()));
+        let mut output = Vec::new();
+        session(
+            &mut io::Cursor::new("add General, Їжак\nsave\nquit\n".as_bytes()),
+            &mut output,
+            &store,
+            false,
+        )
+        .unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("НАЛАШТУВАННЯ UPYR"));
+        assert!(output.contains("Збережено. Upyr застосує ці налаштування."));
+        assert!(output.contains("Закрито без подальших змін."));
+        assert_eq!(
+            store.0.borrow().auto_correct_exceptions,
+            ["General", "Їжак"]
+        );
+    }
     #[test]
     fn terminal_replay_uses_shared_edits_and_refuses_dirty_discard() {
-        let store = Store(RefCell::new(Config::default()));
+        let store = Store(RefCell::new(Config {
+            ui_language: crate::config::UiLanguage::English,
+            ..Config::default()
+        }));
         let mut input = io::Cursor::new("auto on\nmin 6\nadd Ґанок, Їжак їжак\nedit 1 Іван Єва\nsave\nmin invalid\nquit\nreload\nrevert\nquit\n".as_bytes());
         let mut output = Vec::new();
         session(&mut input, &mut output, &store, false).unwrap();
@@ -234,7 +298,10 @@ mod tests {
     #[test]
     fn terminal_output_escapes_control_text_and_eof_never_saves() {
         assert_eq!(printable("Ґ\x1b[2J\r\n\u{9b}Є"), "Ґ�[2J���Є");
-        let store = Store(RefCell::new(Config::default()));
+        let store = Store(RefCell::new(Config {
+            ui_language: crate::config::UiLanguage::English,
+            ..Config::default()
+        }));
         assert!(
             session(
                 &mut io::Cursor::new(b"min 7\n"),

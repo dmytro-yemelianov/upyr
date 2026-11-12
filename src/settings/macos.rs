@@ -1,4 +1,5 @@
 #![allow(unsafe_code)]
+use crate::settings::i18n::tr;
 
 use std::{
     cell::{Cell, OnceCell, RefCell},
@@ -74,6 +75,7 @@ struct Controls {
     tabs: Retained<NSTabView>,
     search: Retained<NSSearchField>,
     status: Retained<NSTextField>,
+    ui_language: Retained<NSPopUpButton>,
     direction: Retained<NSPopUpButton>,
     switch_layout: Retained<NSButton>,
     globe_switch: Retained<NSButton>,
@@ -189,20 +191,21 @@ define_class!(
             let edited = match self.collect_config() {
                 Ok(config) => config,
                 Err(error) => {
-                    self.set_status(false, &format!("Could not save settings: {error:#}"));
+                    self.set_status(false, &crate::settings::i18n::localized_format!("Could not save settings: {error:#}", "Не вдалося зберегти налаштування: {error:#}"));
                     return;
                 }
             };
             let config = match super::persistence::save_edits(&self.ivars().config.borrow(), edited) {
                 Ok(config) => config,
                 Err(error) => {
-                    self.set_status(false, &format!("Could not save settings: {error:#}"));
+                    self.set_status(false, &crate::settings::i18n::localized_format!("Could not save settings: {error:#}", "Не вдалося зберегти налаштування: {error:#}"));
                     return;
                 }
             };
             self.ivars().flag_choices.borrow_mut().accept(config.globe_switch.layout_flags.clone());
             // Show the saved list: an edited "two words" row became two rows.
             self.rebuild_exception_rows(&config.auto_correct_exceptions);
+            let language_changed = config.ui_language != super::i18n::language();
             self.ivars().config.replace(config);
             self.refresh_flag_choices();
 
@@ -210,11 +213,12 @@ define_class!(
             match sync_launch_at_login(desired) {
                 Ok(status) => {
                     self.set_autostart_status(status);
-                    if !self.show_autostart_attention("Settings saved. ") {
-                        self.set_status(
-                            true,
-                            "Saved. The running Upyr process will reload these settings.",
-                        );
+                    if !self.show_autostart_attention(tr("Settings saved. ")) {
+                        self.set_status(true, if language_changed {
+                            tr("Saved. Reopen settings to apply the language.")
+                        } else {
+                            tr("Saved. The running Upyr process will reload these settings.")
+                        });
                     }
                 }
                 Err(error) => {
@@ -223,8 +227,7 @@ define_class!(
                     }
                     self.set_status(
                         false,
-                        &format!(
-                            "Settings saved, but launch at login was not changed: {error:#}"
+                        &crate::settings::i18n::localized_format!("Settings saved, but launch at login was not changed: {error:#}", "Налаштування збережено, але автозапуск не змінився: {error:#}"
                         ),
                     );
                 }
@@ -236,10 +239,10 @@ define_class!(
             match autostart::enable() {
                 Ok(status) => {
                     self.set_autostart_status(status);
-                    self.set_status(true, "Launch-at-login entry repaired.");
+                    self.set_status(true, tr("Launch-at-login entry repaired."));
                 }
                 Err(error) => {
-                    self.set_status(false, &format!("Could not repair entry: {error:#}"));
+                    self.set_status(false, &crate::settings::i18n::localized_format!("Could not repair entry: {error:#}", "Не вдалося виправити запис: {error:#}"));
                 }
             }
         }
@@ -249,10 +252,10 @@ define_class!(
             match autostart::disable() {
                 Ok(status) => {
                     self.set_autostart_status(status);
-                    self.set_status(true, "Launch-at-login entry removed.");
+                    self.set_status(true, tr("Launch-at-login entry removed."));
                 }
                 Err(error) => {
-                    self.set_status(false, &format!("Could not remove entry: {error:#}"));
+                    self.set_status(false, &crate::settings::i18n::localized_format!("Could not remove entry: {error:#}", "Не вдалося видалити запис: {error:#}"));
                 }
             }
         }
@@ -261,7 +264,7 @@ define_class!(
         fn reset_settings(&self, _sender: &AnyObject) {
             self.apply_config(&Config::default());
             set_checked(&self.controls().launch_at_login, false);
-            self.set_status(true, "Defaults restored in the form. Choose Save to apply them.");
+            self.set_status(true, tr("Defaults restored in the form. Choose Save to apply them."));
         }
 
         #[unsafe(method(closeSettings:))]
@@ -298,10 +301,10 @@ define_class!(
                     .selectTabViewItemAtIndex(parameter.tab.index());
                 self.set_status(
                     true,
-                    &format!("{}  ›  {}", parameter.tab.label(), parameter.label),
+                    &format!("{}  ›  {}", parameter.tab.label(), tr(parameter.label)),
                 );
             } else {
-                self.set_status(false, "No settings match this search.");
+                self.set_status(false, tr("No settings match this search."));
             }
         }
 
@@ -346,7 +349,7 @@ define_class!(
                     ];
                 }
             }
-            self.set_status(true, "Previewed the language flag.");
+            self.set_status(true, tr("Previewed the language flag."));
         }
 
         #[unsafe(method(flagPreviewChanged:))]
@@ -388,7 +391,7 @@ define_class!(
             self.ivars().flag_choices.borrow_mut().draft.insert(source.to_owned(), code.to_owned());
             self.sync_flag_layout();
             self.refresh_flag_choices();
-            self.set_status(true, "Flag preview updated. Choose Save Flags to apply your choices.");
+            self.set_status(true, tr("Flag preview updated. Choose Save Flags to apply your choices."));
         }
 
         #[unsafe(method(useAutomaticFlag:))]
@@ -404,7 +407,7 @@ define_class!(
         fn revert_country_flags(&self, _sender: &AnyObject) {
             self.ivars().flag_choices.borrow_mut().revert();
             self.refresh_flag_choices();
-            self.set_status(true, "Unsaved flag changes reverted.");
+            self.set_status(true, tr("Unsaved flag changes reverted."));
         }
 
         #[unsafe(method(saveCountryFlags:))]
@@ -413,10 +416,10 @@ define_class!(
             if let Some(gallery) = self.ivars().flags_gallery.get() {
                 match result {
                     Ok(()) => {
-                        gallery.set_status(true, "Flags saved.");
-                        self.set_status(true, "Flags saved. The running Upyr process will reload them.");
+                        gallery.set_status(true, tr("Flags saved."));
+                        self.set_status(true, tr("Flags saved. The running Upyr process will reload them."));
                     }
-                    Err(error) => gallery.set_status(false, &format!("Could not save flags: {error:#}")),
+                    Err(error) => gallery.set_status(false, &crate::settings::i18n::localized_format!("Could not save flags: {error:#}", "Не вдалося зберегти прапорці: {error:#}")),
                 }
             }
         }
@@ -517,7 +520,7 @@ define_class!(
                 Ok(None) => {}
                 Err(error) => self.set_status(
                     false,
-                    &format!("Could not activate the settings window: {error:#}"),
+                    &crate::settings::i18n::localized_format!("Could not activate the settings window: {error:#}", "Не вдалося активувати вікно налаштувань: {error:#}"),
                 ),
             }
             self.schedule_activation_poll();
@@ -531,9 +534,15 @@ impl NativeController {
         match Command::new("open").arg(url).spawn() {
             Ok(child) => {
                 crate::child_processes::track(child);
-                self.set_status(true, "Opened in your default browser.");
+                self.set_status(true, tr("Opened in your default browser."));
             }
-            Err(error) => self.set_status(false, &format!("Could not open the link: {error}")),
+            Err(error) => self.set_status(
+                false,
+                &crate::settings::i18n::localized_format!(
+                    "Could not open the link: {error}",
+                    "Не вдалося відкрити посилання: {error}"
+                ),
+            ),
         }
     }
 
@@ -546,15 +555,27 @@ impl NativeController {
         settings.headphone_volume_percent = self.headphone_volume_percent();
         let globe = self.ivars().config.borrow().globe_switch.clone();
         match crate::feedback::preview_sound(event, &settings, &globe) {
-            Ok(()) => self.set_status(true, &format!("Previewed {} sound.", event.label())),
+            Ok(()) => self.set_status(
+                true,
+                &crate::settings::i18n::localized_format!(
+                    "Previewed {} sound.",
+                    "Відтворено звук «{}».",
+                    event.label()
+                ),
+            ),
             Err(error) => self.set_status(
                 false,
-                &format!("Could not preview {} sound: {error:#}", event.label()),
+                &crate::settings::i18n::localized_format!(
+                    "Could not preview {} sound: {error:#}",
+                    "Не вдалося відтворити звук «{}»: {error:#}",
+                    event.label()
+                ),
             ),
         }
     }
 
     fn preview_key_sound(&self, cue: KeyCue, label: &str) {
+        let label = tr(label);
         let mut settings = self.ivars().config.borrow().sounds;
         settings.enabled = true;
         settings.key_clicks = true;
@@ -562,9 +583,21 @@ impl NativeController {
         settings.volume_percent = self.sound_volume_percent();
         settings.headphone_volume_percent = self.headphone_volume_percent();
         match crate::feedback::preview_key_sound(cue, &settings) {
-            Ok(()) => self.set_status(true, &format!("Previewed {label}.")),
+            Ok(()) => self.set_status(
+                true,
+                &crate::settings::i18n::localized_format!(
+                    "Previewed {label}.",
+                    "Відтворено: {label}."
+                ),
+            ),
             Err(error) => {
-                self.set_status(false, &format!("Could not preview {label}: {error:#}"));
+                self.set_status(
+                    false,
+                    &crate::settings::i18n::localized_format!(
+                        "Could not preview {label}: {error:#}",
+                        "Не вдалося відтворити {label}: {error:#}"
+                    ),
+                );
             }
         }
     }
@@ -626,7 +659,7 @@ impl NativeController {
         );
         let remove = unsafe {
             NSButton::buttonWithTitle_target_action(
-                &NSString::from_str("Remove"),
+                &NSString::from_str(tr("Remove")),
                 Some(self),
                 Some(sel!(removeException:)),
                 mtm,
@@ -716,7 +749,7 @@ impl NativeController {
             format!(
                 "{} · {} · Upyr {}%",
                 route.name,
-                route.kind.label(),
+                tr(route.kind.label()),
                 route.kind.volume(&settings)
             ),
         );
@@ -797,18 +830,18 @@ impl NativeController {
             )
         };
         unsafe { window.setReleasedWhenClosed(false) };
-        window.setTitle(&NSString::from_str("Upyr Settings"));
+        window.setTitle(&NSString::from_str(tr("Upyr Settings")));
         window.center();
         window.setDelegate(Some(ProtocolObject::from_ref(self)));
         let content = window
             .contentView()
             .expect("native settings window must have a content view");
 
-        let title = label("Upyr Settings", rect(24.0, 632.0, 280.0, 30.0), mtm);
+        let title = label(tr("Upyr Settings"), rect(24.0, 632.0, 280.0, 30.0), mtm);
         title.setFont(Some(&NSFont::boldSystemFontOfSize(22.0)));
         content.addSubview(&title);
         content.addSubview(&label(
-            "English ↔ Ukrainian keyboard layout correction",
+            tr("English ↔ Ukrainian keyboard layout correction"),
             rect(24.0, 610.0, 330.0, 20.0),
             mtm,
         ));
@@ -817,7 +850,7 @@ impl NativeController {
             NSSearchField::alloc(mtm),
             rect(420.0, 624.0, 276.0, 30.0),
         );
-        search.setPlaceholderString(Some(&NSString::from_str("Search settings")));
+        search.setPlaceholderString(Some(&NSString::from_str(tr("Search settings"))));
         search.setSendsSearchStringImmediately(true);
         unsafe {
             search.setTarget(Some(self));
@@ -828,6 +861,7 @@ impl NativeController {
         let tabs = NSTabView::initWithFrame(NSTabView::alloc(mtm), rect(18.0, 106.0, 684.0, 492.0));
         let (
             general,
+            ui_language,
             direction,
             switch_layout,
             globe_switch,
@@ -893,21 +927,21 @@ impl NativeController {
         status.setUsesSingleLineMode(false);
         content.addSubview(&status);
         content.addSubview(&action_button(
-            "Save",
+            tr("Save"),
             rect(504.0, 24.0, 92.0, 32.0),
             self,
             sel!(saveSettings:),
             mtm,
         ));
         content.addSubview(&action_button(
-            "Reset All",
+            tr("Reset All"),
             rect(400.0, 24.0, 96.0, 32.0),
             self,
             sel!(resetSettings:),
             mtm,
         ));
         content.addSubview(&action_button(
-            "Close",
+            tr("Close"),
             rect(604.0, 24.0, 92.0, 32.0),
             self,
             sel!(closeSettings:),
@@ -921,6 +955,7 @@ impl NativeController {
                 tabs,
                 search,
                 status,
+                ui_language,
                 direction,
                 switch_layout,
                 globe_switch,
@@ -981,6 +1016,11 @@ impl NativeController {
             return Err(anyhow!("previous-word shortcut: {error}"));
         }
         let mut config = self.ivars().config.borrow().clone();
+        config.ui_language = if controls.ui_language.indexOfSelectedItem() == 1 {
+            crate::config::UiLanguage::English
+        } else {
+            crate::config::UiLanguage::Ukrainian
+        };
         config.hotkey = controls.selection_shortcut.value();
         config.last_word_hotkey = controls.previous_word_shortcut.value();
         config.undo_hotkey = controls.undo_shortcut.value();
@@ -1058,6 +1098,13 @@ impl NativeController {
             .draft
             .clone_from(&config.globe_switch.layout_flags);
         let controls = self.controls();
+        controls.ui_language.selectItemAtIndex(
+            if config.ui_language == crate::config::UiLanguage::English {
+                1
+            } else {
+                0
+            },
+        );
         controls
             .direction
             .selectItemAtIndex(match config.direction {
@@ -1234,7 +1281,7 @@ impl NativeController {
                 .and_then(|source| source.layout);
             let text = layout
                 .map(|layout| crate::feedback::indicator_text(layout, config.indicator_style))
-                .unwrap_or("Layout preview");
+                .unwrap_or(tr("Layout preview"));
             let label = label(text, rect(260.0, 32.0, 220.0, 36.0), self.mtm());
             label.setFont(Some(&NSFont::boldSystemFontOfSize(24.0)));
             container.addSubview(&label);
@@ -1251,7 +1298,7 @@ impl NativeController {
         if recorders.iter().any(|recorder| recorder.error().is_some()) {
             self.set_status(
                 false,
-                "A shortcut is incomplete. Record a key together with a modifier.",
+                tr("A shortcut is incomplete. Record a key together with a modifier."),
             );
         } else {
             let values = recorders.map(|recorder| recorder.value());
@@ -1263,9 +1310,9 @@ impl NativeController {
             self.set_status(
                 !duplicates,
                 if duplicates {
-                    "Actions must use different shortcuts."
+                    tr("Actions must use different shortcuts.")
                 } else {
-                    "Shortcuts are valid."
+                    tr("Shortcuts are valid.")
                 },
             );
         }
@@ -1301,8 +1348,12 @@ impl NativeController {
 
     fn set_status(&self, success: bool, message: &str) {
         let status = &self.controls().status;
-        status.setStringValue(&NSString::from_str(message));
-        status.setToolTip(Some(&NSString::from_str(message)));
+        status.setStringValue(&NSString::from_str(&crate::settings::i18n::diagnostic(
+            message,
+        )));
+        status.setToolTip(Some(&NSString::from_str(
+            &crate::settings::i18n::diagnostic(message),
+        )));
         let color = if success {
             NSColor::systemGreenColor()
         } else {
@@ -1334,7 +1385,7 @@ define_class!(
             self.ivars().previous.replace(self.value());
             self.ivars().recording.set(true);
             self.ivars().error.replace(None);
-            self.setTitle(&NSString::from_str("Press shortcut…  (Esc to cancel)"));
+            self.setTitle(&NSString::from_str(tr("Press shortcut…  (Esc to cancel)")));
             if let Some(window) = self.window() {
                 window.makeFirstResponder(Some(self));
             }
@@ -1361,16 +1412,16 @@ define_class!(
             let Some(code) = mac_key_code(event.keyCode()) else {
                 self.ivars()
                     .error
-                    .replace(Some("That key is not supported.".to_owned()));
-                self.setTitle(&NSString::from_str("Unsupported key — try another"));
+                    .replace(Some(tr("That key is not supported.").to_owned()));
+                self.setTitle(&NSString::from_str(tr("Unsupported key — try another")));
                 return;
             };
             let modifiers = mac_modifiers(event.modifierFlags());
             if modifiers.is_empty() {
                 self.ivars().error.replace(Some(
-                    "Include Command, Control, Option, or Shift.".to_owned(),
+                    tr("Include Command, Control, Option, or Shift.").to_owned(),
                 ));
-                self.setTitle(&NSString::from_str("Add a modifier key"));
+                self.setTitle(&NSString::from_str(tr("Add a modifier key")));
                 return;
             }
             self.set_value(&HotKey::new(Some(modifiers), code).to_string());
@@ -1439,6 +1490,7 @@ pub(super) fn run(
     activation: ActivationInbox,
     problem: Option<String>,
 ) -> Result<()> {
+    super::i18n::set_language(config.ui_language);
     let mtm =
         MainThreadMarker::new().context("Upyr Settings must start on the macOS main thread")?;
     let app = NSApplication::sharedApplication(mtm);
@@ -1467,6 +1519,7 @@ fn make_general_page(
 ) -> (
     Retained<NSView>,
     Retained<NSPopUpButton>,
+    Retained<NSPopUpButton>,
     Retained<NSButton>,
     Retained<NSButton>,
     Retained<NSButton>,
@@ -1477,45 +1530,49 @@ fn make_general_page(
     let page = page(mtm);
     page_header(
         &page,
-        "General",
-        "Core conversion, clipboard, and startup behavior.",
+        tr("General"),
+        tr("Core conversion, clipboard, and startup behavior."),
         mtm,
     );
     page.addSubview(&label(
-        "Conversion direction",
+        tr("Conversion direction"),
         rect(28.0, 330.0, 210.0, 24.0),
         mtm,
     ));
     let direction = popup(
         &[
-            "Smart (detect script)",
-            "English → Ukrainian",
-            "Ukrainian → English",
+            tr("Smart (detect script)"),
+            tr("English → Ukrainian"),
+            tr("Ukrainian → English"),
         ],
         rect(252.0, 326.0, 260.0, 28.0),
         mtm,
     );
     page.addSubview(&direction);
     let switch_layout = checkbox(
-        "Switch the OS layout to match converted text",
-        rect(24.0, 272.0, 430.0, 26.0),
+        tr("Switch the OS layout to match converted text"),
+        rect(24.0, 272.0, 620.0, 26.0),
         mtm,
     );
     let restore = checkbox(
-        "Restore clipboard contents after conversion",
-        rect(24.0, 228.0, 430.0, 26.0),
+        tr("Restore clipboard contents after conversion"),
+        rect(24.0, 228.0, 620.0, 26.0),
         mtm,
     );
-    let login = checkbox("Launch Upyr at login", rect(24.0, 184.0, 430.0, 26.0), mtm);
+    let login = checkbox(
+        tr("Launch Upyr at login"),
+        rect(24.0, 184.0, 430.0, 26.0),
+        mtm,
+    );
     let repair_autostart = action_button(
-        "Repair Entry",
+        tr("Repair Entry"),
         rect(24.0, 132.0, 126.0, 32.0),
         controller,
         sel!(repairAutostart:),
         mtm,
     );
     let remove_autostart = action_button(
-        "Remove Entry",
+        tr("Remove Entry"),
         rect(160.0, 132.0, 126.0, 32.0),
         controller,
         sel!(removeAutostart:),
@@ -1526,16 +1583,30 @@ fn make_general_page(
     remove_autostart.setEnabled(false);
     remove_autostart.setHidden(true);
     let globe_switch = checkbox(
-        "Tap Globe (🌐) to switch keyboard layouts instantly",
+        tr("Tap Globe (🌐) to switch keyboard layouts instantly"),
         rect(24.0, 84.0, 590.0, 26.0),
         mtm,
     );
     page.addSubview(&globe_switch);
     page.addSubview(&label(
-        "Keeps fn shortcuts. Restores macOS handling when paused or quit.",
+        tr("Keeps fn shortcuts. Restores macOS handling when paused or quit."),
         rect(28.0, 52.0, 600.0, 24.0),
         mtm,
     ));
+    page.addSubview(&label(
+        tr("Interface language"),
+        rect(28.0, 12.0, 210.0, 24.0),
+        mtm,
+    ));
+    let ui_language = popup(
+        &["Українська", "English"],
+        rect(252.0, 8.0, 260.0, 28.0),
+        mtm,
+    );
+    ui_language.setToolTip(Some(&NSString::from_str(tr(
+        "Save and reopen settings to apply the language.",
+    ))));
+    page.addSubview(&ui_language);
     page.addSubview(&switch_layout);
     page.addSubview(&restore);
     page.addSubview(&login);
@@ -1543,6 +1614,7 @@ fn make_general_page(
     page.addSubview(&remove_autostart);
     (
         page,
+        ui_language,
         direction,
         switch_layout,
         globe_switch,
@@ -1569,7 +1641,11 @@ fn make_automatic_page(mtm: MainThreadMarker) -> AutomaticControls {
         rect(28.0, 248.0, 610.0, 38.0),
         mtm,
     ));
-    page.addSubview(&label("Sensitivity", rect(28.0, 210.0, 180.0, 24.0), mtm));
+    page.addSubview(&label(
+        tr("Sensitivity"),
+        rect(28.0, 210.0, 180.0, 24.0),
+        mtm,
+    ));
     let sensitivity = popup(
         &[
             sensitivity_label(AutoCorrectSensitivity::Conservative),
@@ -1580,22 +1656,22 @@ fn make_automatic_page(mtm: MainThreadMarker) -> AutomaticControls {
         mtm,
     );
     page.addSubview(&sensitivity);
-    let minimum = numeric_row(&page, "Minimum word length", 170.0, mtm);
-    let delay = numeric_row(&page, "Pause after Space (ms)", 132.0, mtm);
-    delay.setToolTip(Some(&NSString::from_str(
+    let minimum = numeric_row(&page, tr("Minimum word length"), 170.0, mtm);
+    let delay = numeric_row(&page, tr("Pause after Space (ms)"), 132.0, mtm);
+    delay.setToolTip(Some(&NSString::from_str(tr(
         "This delay applies after Space; a clear prefix can switch immediately during typing.",
-    )));
+    ))));
     let terminal_correction = checkbox(
-        "Allow correction in terminals",
+        tr("Allow correction in terminals"),
         rect(24.0, 94.0, 610.0, 26.0),
         mtm,
     );
     terminal_correction.setToolTip(Some(&NSString::from_str(
-        "Opt in for Terminal, iTerm2, Ghostty, kitty and Warp. Upyr holds the next keys while replacing the tracked text; it never sends Enter.",
+        tr("Opt in for Terminal, iTerm2, Ghostty, kitty and Warp. Upyr holds the next keys while replacing the tracked text; it never sends Enter."),
     )));
     page.addSubview(&terminal_correction);
     let slash_commands = checkbox(
-        "Correct freshly typed /commands in Superset",
+        tr("Correct freshly typed /commands in Superset"),
         rect(24.0, 62.0, 610.0, 26.0),
         mtm,
     );
@@ -1633,8 +1709,8 @@ fn make_exceptions_page(
     let page = page(mtm);
     page_header(
         &page,
-        "Exceptions",
-        "Exact words that automatic correction must always leave alone.",
+        tr("Exceptions"),
+        tr("Exact words that automatic correction must always leave alone."),
         mtm,
     );
 
@@ -1657,19 +1733,19 @@ fn make_exceptions_page(
     page.addSubview(&scroll);
 
     let new_word = text_field("", rect(24.0, 66.0, 470.0, 26.0), mtm);
-    new_word.setPlaceholderString(Some(&NSString::from_str(
+    new_word.setPlaceholderString(Some(&NSString::from_str(tr(
         "words separated by spaces or commas",
-    )));
+    ))));
     page.addSubview(&new_word);
     page.addSubview(&action_button(
-        "Add",
+        tr("Add"),
         rect(504.0, 64.0, 96.0, 30.0),
         controller,
         sel!(addException:),
         mtm,
     ));
     page.addSubview(&multiline_label(
-        "Spaces and commas separate words, so \"two words\" adds two exceptions. Case-insensitive duplicates and blank entries are ignored.",
+        tr("Spaces and commas separate words, so \"two words\" adds two exceptions. Case-insensitive duplicates and blank entries are ignored."),
         rect(24.0, 26.0, 624.0, 32.0),
         mtm,
     ));
@@ -1697,12 +1773,14 @@ fn make_shortcuts_page(
     let page = page(mtm);
     page_header(
         &page,
-        "Shortcuts",
-        "Click a recorder, then press a physical key combination. Upyr actions are paused here.",
+        tr("Shortcuts"),
+        tr(
+            "Click a recorder, then press a physical key combination. Upyr actions are paused here.",
+        ),
         mtm,
     );
     page.addSubview(&label(
-        "Convert selection",
+        tr("Convert selection"),
         rect(28.0, 338.0, 180.0, 24.0),
         mtm,
     ));
@@ -1714,14 +1792,14 @@ fn make_shortcuts_page(
     );
     page.addSubview(&selection);
     page.addSubview(&action_button(
-        "Reset",
+        tr("Reset"),
         rect(536.0, 332.0, 82.0, 32.0),
         controller,
         sel!(resetSelectionShortcut:),
         mtm,
     ));
     page.addSubview(&label(
-        "Fix previous word",
+        tr("Fix previous word"),
         rect(28.0, 290.0, 180.0, 24.0),
         mtm,
     ));
@@ -1733,14 +1811,14 @@ fn make_shortcuts_page(
     );
     page.addSubview(&previous);
     page.addSubview(&action_button(
-        "Reset",
+        tr("Reset"),
         rect(536.0, 284.0, 82.0, 32.0),
         controller,
         sel!(resetPreviousShortcut:),
         mtm,
     ));
     page.addSubview(&label(
-        "Undo auto-correction",
+        tr("Undo auto-correction"),
         rect(28.0, 242.0, 180.0, 24.0),
         mtm,
     ));
@@ -1750,47 +1828,47 @@ fn make_shortcuts_page(
         controller,
         mtm,
     );
-    undo.setToolTip(Some(&NSString::from_str(
+    undo.setToolTip(Some(&NSString::from_str(tr(
         "Restore the last correction before more typing, clicks or cursor movement.",
-    )));
+    ))));
     page.addSubview(&undo);
     page.addSubview(&action_button(
-        "Reset",
+        tr("Reset"),
         rect(536.0, 236.0, 82.0, 32.0),
         controller,
         sel!(resetUndoShortcut:),
         mtm,
     ));
     page.addSubview(&label(
-        "Modifier gesture",
+        tr("Modifier gesture"),
         rect(28.0, 186.0, 180.0, 24.0),
         mtm,
     ));
     let gesture = popup(
         &[
-            "Disabled",
-            "Double Control",
-            "Double Shift",
-            "Double Control + Shift",
+            tr("Disabled"),
+            tr("Double Control"),
+            tr("Double Shift"),
+            tr("Double Control + Shift"),
         ],
         rect(210.0, 182.0, 258.0, 28.0),
         mtm,
     );
     page.addSubview(&gesture);
     page.addSubview(&label(
-        "Gesture action",
+        tr("Gesture action"),
         rect(28.0, 142.0, 180.0, 24.0),
         mtm,
     ));
     let action = popup(
-        &["Fix previous word", "Convert selection"],
+        &[tr("Fix previous word"), tr("Convert selection")],
         rect(210.0, 138.0, 258.0, 28.0),
         mtm,
     );
     page.addSubview(&action);
-    let timeout = numeric_row(&page, "Double-tap timeout (ms)", 94.0, mtm);
+    let timeout = numeric_row(&page, tr("Double-tap timeout (ms)"), 94.0, mtm);
     page.addSubview(&label(
-        "Undo is available for 30 seconds, until further input or navigation.",
+        tr("Undo is available for 30 seconds, until further input or navigation."),
         rect(28.0, 46.0, 610.0, 24.0),
         mtm,
     ));
@@ -1805,35 +1883,35 @@ fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> F
     );
     page_header(
         &page,
-        "Feedback",
-        "Optional visual and sound confirmation for Upyr actions.",
+        tr("Feedback"),
+        tr("Optional visual and sound confirmation for Upyr actions."),
         mtm,
     );
     let indicator = checkbox(
-        "Show the layout indicator",
+        tr("Show the layout indicator"),
         rect(24.0, 342.0, 470.0, 26.0),
         mtm,
     );
     page.addSubview(&indicator);
     page.addSubview(&action_button(
-        "Preview Flag",
+        tr("Preview Flag"),
         rect(532.0, 339.0, 112.0, 30.0),
         controller,
         sel!(previewFeedback:),
         mtm,
     ));
     page.addSubview(&label(
-        "Indicator duration (ms)",
+        tr("Indicator duration (ms)"),
         rect(48.0, 308.0, 190.0, 24.0),
         mtm,
     ));
     let duration = text_field("", rect(252.0, 305.0, 116.0, 26.0), mtm);
     page.addSubview(&duration);
-    page.addSubview(&label("Shows", rect(388.0, 308.0, 46.0, 24.0), mtm));
+    page.addSubview(&label(tr("Shows"), rect(388.0, 308.0, 46.0, 24.0), mtm));
     let indicator_style = popup(
         &[
             IndicatorStyle::Letters.label(),
-            "GlobeSwitch flags",
+            tr("GlobeSwitch flags"),
             IndicatorStyle::Both.label(),
         ],
         rect(436.0, 305.0, 168.0, 28.0),
@@ -1852,7 +1930,7 @@ fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> F
         child.setFrame(frame);
     }
     page.addSubview(&label(
-        "Preview layout",
+        tr("Preview layout"),
         rect(48.0, 408.0, 130.0, 24.0),
         mtm,
     ));
@@ -1880,7 +1958,7 @@ fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> F
     }
     page.addSubview(&preview_layout);
     page.addSubview(&action_button(
-        "All Country Flags…",
+        tr("All Country Flags…"),
         rect(456.0, 405.0, 188.0, 30.0),
         controller,
         sel!(openCountryFlags:),
@@ -1889,9 +1967,9 @@ fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> F
     let flags_preview = NSView::initWithFrame(NSView::alloc(mtm), rect(24.0, 302.0, 620.0, 100.0));
     page.addSubview(&flags_preview);
 
-    let sounds_enabled = checkbox("Enable sounds", rect(24.0, 267.0, 145.0, 26.0), mtm);
+    let sounds_enabled = checkbox(tr("Enable sounds"), rect(24.0, 267.0, 145.0, 26.0), mtm);
     page.addSubview(&sounds_enabled);
-    page.addSubview(&label("Pack", rect(172.0, 269.0, 42.0, 24.0), mtm));
+    page.addSubview(&label(tr("Pack"), rect(172.0, 269.0, 42.0, 24.0), mtm));
     let sound_pack = popup(
         &[
             SoundPack::Original.label(),
@@ -1902,10 +1980,10 @@ fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> F
         mtm,
     );
     sound_pack.setToolTip(Some(&NSString::from_str(
-        "Anime Reactions synthesizes nonverbal control-key sounds locally; its six event cues are pre-rendered clips bundled with Upyr.",
+        tr("Anime Reactions synthesizes nonverbal control-key sounds locally; its six event cues are pre-rendered clips bundled with Upyr."),
     )));
     page.addSubview(&sound_pack);
-    page.addSubview(&label("Volume", rect(372.0, 269.0, 58.0, 24.0), mtm));
+    page.addSubview(&label(tr("Volume"), rect(372.0, 269.0, 58.0, 24.0), mtm));
     let sound_volume = unsafe {
         NSSlider::sliderWithValue_minValue_maxValue_target_action(
             65.0,
@@ -1921,29 +1999,31 @@ fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> F
     sound_volume.setNumberOfTickMarks(5);
     sound_volume.setAllowsTickMarkValuesOnly(false);
     sound_volume.setAltIncrementValue(5.0);
-    sound_volume.setToolTip(Some(&NSString::from_str("Sound volume, 0 to 100 percent")));
+    sound_volume.setToolTip(Some(&NSString::from_str(tr(
+        "Sound volume, 0 to 100 percent",
+    ))));
     page.addSubview(&sound_volume);
     let sound_volume_label = label("65%", rect(588.0, 269.0, 56.0, 24.0), mtm);
     page.addSubview(&sound_volume_label);
 
     let key_clicks = checkbox(
-        "Keyboard sounds (Anime adds control-key reactions)",
+        tr("Keyboard sounds (Anime adds control-key reactions)"),
         rect(42.0, 230.0, 366.0, 26.0),
         mtm,
     );
-    key_clicks.setToolTip(Some(&NSString::from_str(
+    key_clicks.setToolTip(Some(&NSString::from_str(tr(
         "Opt-in physical-key categories only. Typed characters are never stored.",
-    )));
+    ))));
     page.addSubview(&key_clicks);
     page.addSubview(&action_button(
-        "Click",
+        tr("Click"),
         rect(430.0, 228.0, 96.0, 30.0),
         controller,
         sel!(previewKeyboardClick:),
         mtm,
     ));
     page.addSubview(&action_button(
-        "Control",
+        tr("Control"),
         rect(536.0, 228.0, 108.0, 30.0),
         controller,
         sel!(previewControlReaction:),
@@ -1966,7 +2046,7 @@ fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> F
         }
     }
     page.addSubview(&label(
-        "Headphone limit",
+        tr("Headphone limit"),
         rect(48.0, 290.0, 190.0, 24.0),
         mtm,
     ));
@@ -1982,7 +2062,7 @@ fn make_feedback_page(controller: &NativeController, mtm: MainThreadMarker) -> F
     };
     headphone_volume.setFrame(rect(252.0, 285.0, 328.0, 30.0));
     headphone_volume.setContinuous(true);
-    headphone_volume.setToolTip(Some(&NSString::from_str("Quiet limit for Upyr sounds on headphones and unidentified outputs. Does not change macOS volume.")));
+    headphone_volume.setToolTip(Some(&NSString::from_str(tr("Quiet limit for Upyr sounds on headphones and unidentified outputs. Does not change macOS volume."))));
     page.addSubview(&headphone_volume);
     let headphone_volume_label = label("12%", rect(588.0, 290.0, 56.0, 24.0), mtm);
     page.addSubview(&headphone_volume_label);
@@ -2043,7 +2123,7 @@ fn sound_event_row(
         SoundEvent::Error => sel!(previewErrorSound:),
     };
     page.addSubview(&action_button(
-        "Preview",
+        tr("Preview"),
         rect(532.0, y - 2.0, 112.0, 30.0),
         controller,
         preview_action,
@@ -2063,13 +2143,13 @@ fn make_advanced_page(
     let page = page(mtm);
     page_header(
         &page,
-        "Advanced timing",
-        "Increase these only for applications with slow clipboard handling.",
+        tr("Advanced timing"),
+        tr("Increase these only for applications with slow clipboard handling."),
         mtm,
     );
-    let copy = numeric_row(&page, "Copy delay (ms)", 326.0, mtm);
-    let paste = numeric_row(&page, "Paste delay (ms)", 276.0, mtm);
-    let restore = numeric_row(&page, "Clipboard restore delay (ms)", 226.0, mtm);
+    let copy = numeric_row(&page, tr("Copy delay (ms)"), 326.0, mtm);
+    let paste = numeric_row(&page, tr("Paste delay (ms)"), 276.0, mtm);
+    let restore = numeric_row(&page, tr("Clipboard restore delay (ms)"), 226.0, mtm);
     (page, copy, paste, restore)
 }
 
@@ -2078,12 +2158,12 @@ fn make_about_page(controller: &NativeController, mtm: MainThreadMarker) -> Reta
     page_header(
         &page,
         &format!("Upyr {APP_VERSION}"),
-        "English ↔ Ukrainian keyboard layout correction.",
+        tr("English ↔ Ukrainian keyboard layout correction."),
         mtm,
     );
 
     let privacy_heading = label(
-        "Private by construction",
+        tr("Private by construction"),
         rect(24.0, 330.0, 610.0, 24.0),
         mtm,
     );
@@ -2095,7 +2175,7 @@ fn make_about_page(controller: &NativeController, mtm: MainThreadMarker) -> Reta
         mtm,
     ));
 
-    let implementation_heading = label("How it works", rect(24.0, 238.0, 610.0, 24.0), mtm);
+    let implementation_heading = label(tr("How it works"), rect(24.0, 238.0, 610.0, 24.0), mtm);
     implementation_heading.setFont(Some(&NSFont::boldSystemFontOfSize(14.0)));
     page.addSubview(&implementation_heading);
     page.addSubview(&multiline_label(
@@ -2104,30 +2184,30 @@ fn make_about_page(controller: &NativeController, mtm: MainThreadMarker) -> Reta
         mtm,
     ));
 
-    let license_heading = label("Open source", rect(24.0, 140.0, 610.0, 24.0), mtm);
+    let license_heading = label(tr("Open source"), rect(24.0, 140.0, 610.0, 24.0), mtm);
     license_heading.setFont(Some(&NSFont::boldSystemFontOfSize(14.0)));
     page.addSubview(&license_heading);
     page.addSubview(&label(
-        "MIT licensed. Source, security policy, and release history are public.",
+        tr("MIT licensed. Source, security policy, and release history are public."),
         rect(24.0, 116.0, 620.0, 22.0),
         mtm,
     ));
     page.addSubview(&action_button(
-        "Project Website",
+        tr("Project Website"),
         rect(24.0, 68.0, 150.0, 32.0),
         controller,
         sel!(openProjectWebsite:),
         mtm,
     ));
     page.addSubview(&action_button(
-        "Source Repository",
+        tr("Source Repository"),
         rect(184.0, 68.0, 158.0, 32.0),
         controller,
         sel!(openSourceRepository:),
         mtm,
     ));
     page.addSubview(&action_button(
-        "Report Security Issue",
+        tr("Report Security Issue"),
         rect(352.0, 68.0, 178.0, 32.0),
         controller,
         sel!(reportSecurityIssue:),
@@ -2155,13 +2235,13 @@ fn add_tab(tabs: &NSTabView, tab: SettingsTab, page: &NSView, _mtm: MainThreadMa
 }
 
 fn label(value: &str, frame: NSRect, mtm: MainThreadMarker) -> Retained<NSTextField> {
-    let label = NSTextField::labelWithString(&NSString::from_str(value), mtm);
+    let label = NSTextField::labelWithString(&NSString::from_str(tr(value)), mtm);
     label.setFrame(frame);
     label
 }
 
 fn multiline_label(value: &str, frame: NSRect, mtm: MainThreadMarker) -> Retained<NSTextField> {
-    let label = NSTextField::wrappingLabelWithString(&NSString::from_str(value), mtm);
+    let label = NSTextField::wrappingLabelWithString(&NSString::from_str(tr(value)), mtm);
     label.setFrame(frame);
     label.setMaximumNumberOfLines(3);
     label.setUsesSingleLineMode(false);
@@ -2183,7 +2263,7 @@ fn numeric_row(page: &NSView, title: &str, y: f64, mtm: MainThreadMarker) -> Ret
 
 fn checkbox(title: &str, frame: NSRect, mtm: MainThreadMarker) -> Retained<NSButton> {
     let button = unsafe {
-        NSButton::checkboxWithTitle_target_action(&NSString::from_str(title), None, None, mtm)
+        NSButton::checkboxWithTitle_target_action(&NSString::from_str(tr(title)), None, None, mtm)
     };
     button.setFrame(frame);
     button
@@ -2192,7 +2272,7 @@ fn checkbox(title: &str, frame: NSRect, mtm: MainThreadMarker) -> Retained<NSBut
 fn popup(items: &[&str], frame: NSRect, mtm: MainThreadMarker) -> Retained<NSPopUpButton> {
     let popup = NSPopUpButton::initWithFrame_pullsDown(NSPopUpButton::alloc(mtm), frame, false);
     for item in items {
-        popup.addItemWithTitle(&NSString::from_str(item));
+        popup.addItemWithTitle(&NSString::from_str(tr(item)));
     }
     popup
 }
@@ -2206,7 +2286,7 @@ fn action_button(
 ) -> Retained<NSButton> {
     let button = unsafe {
         NSButton::buttonWithTitle_target_action(
-            &NSString::from_str(title),
+            &NSString::from_str(tr(title)),
             Some(target),
             Some(action),
             mtm,
@@ -2238,7 +2318,12 @@ fn parse_number(field: &NSTextField, label: &str, min: u64, max: u64) -> Result<
         .to_string()
         .trim()
         .parse::<u64>()
-        .with_context(|| format!("{label} must be a whole number"))?;
+        .with_context(|| {
+            crate::settings::i18n::localized_format!(
+                "{label} must be a whole number",
+                "{label}: потрібне ціле число"
+            )
+        })?;
     if !(min..=max).contains(&value) {
         return Err(anyhow!("{label} must be between {min} and {max}"));
     }
@@ -2283,7 +2368,7 @@ fn known_terminals() -> impl Iterator<Item = &'static str> {
         .filter(|app| *app != SUPERSET_APP_ID)
 }
 
-/// True when the "Correct words in terminals" checkbox should appear checked.
+/// True when the tr("Correct words in terminals") checkbox should appear checked.
 pub(super) fn terminal_correction_enabled(config: &Config) -> bool {
     known_terminals().any(|terminal| {
         config
@@ -2293,7 +2378,7 @@ pub(super) fn terminal_correction_enabled(config: &Config) -> bool {
     })
 }
 
-/// Applies the "Correct words in terminals" checkbox: checking opts every
+/// Applies the tr("Correct words in terminals") checkbox: checking opts every
 /// known terminal in; unchecking a previously checked box removes them again.
 /// Superset and hand-written entries are left to their own controls.
 pub(super) fn set_terminal_correction(config: &mut Config, enabled: bool) {
@@ -2314,7 +2399,7 @@ pub(super) fn set_terminal_correction(config: &mut Config, enabled: bool) {
     }
 }
 
-/// True when the "Slash commands in Superset" checkbox should appear checked.
+/// True when the tr("Slash commands in Superset") checkbox should appear checked.
 pub(super) fn superset_slash_commands_enabled(config: &Config) -> bool {
     config
         .slash_command_apps
@@ -2322,7 +2407,7 @@ pub(super) fn superset_slash_commands_enabled(config: &Config) -> bool {
         .any(|app| app == SUPERSET_APP_ID)
 }
 
-/// Applies the "Slash commands in Superset" checkbox to both opt-in lists.
+/// Applies the tr("Slash commands in Superset") checkbox to both opt-in lists.
 /// Slash commands need tracked terminal typing, so checking the box adds
 /// Superset to both lists and unchecking a previously checked box removes it
 /// from both. Other entries are preserved, and an unchanged unchecked box

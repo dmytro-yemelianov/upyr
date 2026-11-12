@@ -1,4 +1,5 @@
 //! Complete country/region collection and per-input-source flag picker.
+use crate::settings::i18n::tr;
 
 use super::{NativeController, action_button, label, popup, rect, set_checked};
 use crate::{
@@ -65,19 +66,19 @@ impl FlagsGallery {
             )
         };
         unsafe { window.setReleasedWhenClosed(false) };
-        window.setTitle(&NSString::from_str("All Country Flags"));
+        window.setTitle(&NSString::from_str(tr("All Country Flags")));
         window.center();
         let content = window.contentView().expect("flag gallery content view");
-        let title = label("All country flags", rect(24.0, 728.0, 730.0, 30.0), mtm);
+        let title = label(tr("All country flags"), rect(24.0, 728.0, 730.0, 30.0), mtm);
         title.setFont(Some(&NSFont::boldSystemFontOfSize(22.0)));
         content.addSubview(&title);
         content.addSubview(&label(
-            "Select a keyboard layout, choose a flag, then Save Flags.",
+            tr("Select a keyboard layout, choose a flag, then Save Flags."),
             rect(24.0, 700.0, 732.0, 22.0),
             mtm,
         ));
         content.addSubview(&label(
-            "Keyboard layout",
+            tr("Keyboard layout"),
             rect(24.0, 664.0, 120.0, 24.0),
             mtm,
         ));
@@ -93,7 +94,7 @@ impl FlagsGallery {
         }
         content.addSubview(&layout);
         let automatic = action_button(
-            "Use Automatic Flag",
+            tr("Use Automatic Flag"),
             rect(504.0, 660.0, 252.0, 30.0),
             controller,
             sel!(useAutomaticFlag:),
@@ -106,7 +107,7 @@ impl FlagsGallery {
         content.addSubview(&choice);
         let search =
             NSSearchField::initWithFrame(NSSearchField::alloc(mtm), rect(24.0, 486.0, 470.0, 30.0));
-        search.setPlaceholderString(Some(&NSString::from_str("Search country name or code")));
+        search.setPlaceholderString(Some(&NSString::from_str(tr("Search country name or code"))));
         search.setSendsSearchStringImmediately(true);
         unsafe {
             search.setTarget(Some(controller));
@@ -124,7 +125,7 @@ impl FlagsGallery {
         scroll.setDocumentView(Some(&document));
         content.addSubview(&scroll);
         let empty = label(
-            "No flags match your search.",
+            tr("No flags match your search."),
             rect(160.0, 220.0, 430.0, 26.0),
             mtm,
         );
@@ -135,14 +136,14 @@ impl FlagsGallery {
         status.setUsesSingleLineMode(false);
         content.addSubview(&status);
         let revert = action_button(
-            "Revert",
+            tr("Revert"),
             rect(500.0, 16.0, 110.0, 32.0),
             controller,
             sel!(revertCountryFlags:),
             mtm,
         );
         let save = action_button(
-            "Save Flags",
+            tr("Save Flags"),
             rect(620.0, 16.0, 136.0, 32.0),
             controller,
             sel!(saveCountryFlags:),
@@ -151,7 +152,10 @@ impl FlagsGallery {
         content.addSubview(&revert);
         content.addSubview(&save);
         window.setInitialFirstResponder(Some(&search));
-        let locale = NSLocale::currentLocale();
+        let locale = NSLocale::initWithLocaleIdentifier(
+            NSLocale::alloc(),
+            &NSString::from_str(crate::settings::i18n::language().code()),
+        );
         let english =
             NSLocale::initWithLocaleIdentifier(NSLocale::alloc(), &NSString::from_str("en"));
         let mut flags: Vec<_> = globe_flags::images()
@@ -279,15 +283,18 @@ impl FlagsGallery {
                 .find(|entry| entry.code == code)
                 .map_or(code.clone(), |entry| format!("{} ({code})", entry.name)),
             Some(Flag::Text(text)) => text,
-            None => "Layout name".to_owned(),
+            None => tr("Layout name").to_owned(),
         };
         self.choice
             .setStringValue(&NSString::from_str(&if active.is_none() {
-                "Add a keyboard input source in macOS Settings to assign a flag.".to_owned()
+                tr("Add a keyboard input source in macOS Settings to assign a flag.").to_owned()
             } else if override_set {
-                format!("Selected: {choice}")
+                crate::settings::i18n::localized_format!("Selected: {choice}", "Вибрано: {choice}")
             } else {
-                format!("Automatic: {choice}")
+                crate::settings::i18n::localized_format!(
+                    "Automatic: {choice}",
+                    "Автоматично: {choice}"
+                )
             }));
         self.layout.setEnabled(!self.layouts.is_empty());
         self.automatic.setEnabled(override_set);
@@ -296,15 +303,18 @@ impl FlagsGallery {
         self.set_status(
             true,
             if dirty {
-                "Preview only. Choose Save Flags to apply your changes."
+                tr("Preview only. Choose Save Flags to apply your changes.")
             } else {
-                "Flag choices are saved."
+                tr("Flag choices are saved.")
             },
         );
     }
 
     pub fn set_status(&self, success: bool, message: &str) {
-        self.status.setStringValue(&NSString::from_str(message));
+        self.status
+            .setStringValue(&NSString::from_str(&crate::settings::i18n::diagnostic(
+                message,
+            )));
         let color = if success {
             NSColor::secondaryLabelColor()
         } else {
@@ -330,11 +340,14 @@ impl FlagsGallery {
                 }
             })
             .collect();
-        self.count.setStringValue(&NSString::from_str(&format!(
-            "{} of {} flags",
-            matches.len(),
-            self.entries.len()
-        )));
+        self.count.setStringValue(&NSString::from_str(
+            &crate::settings::i18n::localized_format!(
+                "{} of {} flags",
+                "Прапорці: {} із {}",
+                matches.len(),
+                self.entries.len()
+            ),
+        ));
         let rows = matches.len().div_ceil(COLUMNS);
         let height =
             (GAP + rows as f64 * (CARD_HEIGHT + GAP)).max(self.scroll.contentSize().height);
@@ -393,9 +406,12 @@ fn card(
     // point in the card activates the same accessible, keyboard-focusable control.
     let button = NSButton::initWithFrame(NSButton::alloc(mtm), card.bounds());
     button.setTitle(&NSString::from_str(&format!("{name} ({code})")));
-    button.setToolTip(Some(&NSString::from_str(&format!(
-        "Choose {name} ({code})"
-    ))));
+    button.setToolTip(Some(&NSString::from_str(
+        &crate::settings::i18n::localized_format!(
+            "Choose {name} ({code})",
+            "Вибрати {name} ({code})"
+        ),
+    )));
     button.setButtonType(NSButtonType::PushOnPushOff);
     button.setTransparent(true);
     button.setTag(index as isize);

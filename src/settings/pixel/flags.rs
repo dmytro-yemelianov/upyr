@@ -1,4 +1,5 @@
 //! Pixel flag views over the same source list, assets and mapping as native UI.
+use crate::settings::i18n::tr;
 use crate::{
     config::{Config, IndicatorStyle},
     feedback::globe_flags::{self, Flag},
@@ -22,6 +23,7 @@ pub(crate) struct FlagPicker {
     sources: Vec<(ActiveInputSource, Vec<String>)>,
     selected: usize,
     entries: Vec<Entry>,
+    language: Option<crate::config::UiLanguage>,
     search: String,
     gallery: bool,
     problem: Option<String>,
@@ -55,35 +57,53 @@ impl FlagPicker {
                     .unwrap_or(0);
             }
             Err(error) => {
-                self.problem = Some(format!("Could not read keyboard layouts: {error:#}"))
+                self.problem = Some(crate::settings::i18n::localized_format!(
+                    "Could not read keyboard layouts: {error:#}",
+                    "Не вдалося прочитати розкладки: {error:#}"
+                ))
             }
         }
-        if !self.entries.is_empty() {
+        if self.entries.is_empty() {
+            self.entries = globe_flags::images()
+                .map(|(code, png)| Entry {
+                    code,
+                    png,
+                    name: code.into(),
+                    search: code.into(),
+                    texture: None,
+                })
+                .collect();
+        }
+        self.localize_entries();
+    }
+
+    fn localize_entries(&mut self) {
+        let language = crate::settings::i18n::language();
+        if self.language == Some(language) {
             return;
         }
-        let locale = NSLocale::currentLocale();
+        let locale = NSLocale::initWithLocaleIdentifier(
+            NSLocale::alloc(),
+            &NSString::from_str(language.code()),
+        );
         let english =
             NSLocale::initWithLocaleIdentifier(NSLocale::alloc(), &NSString::from_str("en"));
-        self.entries = globe_flags::images()
-            .map(|(code, png)| {
-                let country = NSString::from_str(code);
-                let name = locale
+        let ukrainian =
+            NSLocale::initWithLocaleIdentifier(NSLocale::alloc(), &NSString::from_str("uk"));
+        for entry in &mut self.entries {
+            let country = NSString::from_str(entry.code);
+            let name = |locale: &NSLocale| {
+                locale
                     .localizedStringForCountryCode(&country)
-                    .map_or_else(|| code.to_owned(), |name| name.to_string());
-                let english_name = english
-                    .localizedStringForCountryCode(&country)
-                    .map_or_else(|| code.to_owned(), |name| name.to_string());
-                Entry {
-                    code,
-                    search: format!("{code} {name} {english_name}").to_lowercase(),
-                    name,
-                    png,
-                    texture: None,
-                }
-            })
-            .collect();
+                    .map_or_else(|| entry.code.to_owned(), |name| name.to_string())
+            };
+            entry.name = name(&locale);
+            entry.search =
+                format!("{} {} {}", entry.code, name(&english), name(&ukrainian)).to_lowercase();
+        }
         self.entries
             .sort_by_cached_key(|entry| (entry.name.to_lowercase(), entry.code));
+        self.language = Some(language);
     }
 
     fn image(ui: &mut egui::Ui, entry: &mut Entry, size: egui::Vec2) {
@@ -99,11 +119,9 @@ impl FlagPicker {
             }
         }
         if let Some(texture) = &entry.texture {
-            ui.add(
-                egui::Image::new(texture)
-                    .fit_to_exact_size(size)
-                    .alt_text(format!("{} flag", entry.name)),
-            );
+            ui.add(egui::Image::new(texture).fit_to_exact_size(size).alt_text(
+                crate::settings::i18n::localized_format!("{} flag", "Прапорець: {}", entry.name),
+            ));
         } else {
             ui.label(entry.code);
         }
@@ -115,24 +133,25 @@ impl FlagPicker {
         config: &mut Config,
         status: &mut Option<(bool, String)>,
     ) {
-        ui.heading("Layout flags");
+        self.localize_entries();
+        ui.heading(tr("Layout flags"));
         if let Some(problem) = &self.problem {
             ui.label(problem);
         }
         ui.horizontal_wrapped(|ui| {
-            ui.label("Preview layout");
+            ui.label(tr("Preview layout"));
             egui::ComboBox::from_id_salt("flag-layout")
                 .selected_text(
                     self.sources
                         .get(self.selected)
-                        .map_or("No keyboard layouts", |(source, _)| &source.source_name),
+                        .map_or(tr("No keyboard layouts"), |(source, _)| &source.source_name),
                 )
                 .show_ui(ui, |ui| {
                     for (index, (source, _)) in self.sources.iter().enumerate() {
                         ui.selectable_value(&mut self.selected, index, &source.source_name);
                     }
                 });
-            if ui.button("Refresh layouts").clicked() {
+            if ui.button(tr("Refresh layouts")).clicked() {
                 self.load();
             }
         });
@@ -171,9 +190,9 @@ impl FlagPicker {
                         .globe_switch
                         .layout_flags
                         .get(&source.source_id)
-                        .map_or("Automatic flag", String::as_str),
+                        .map_or(tr("Automatic flag"), String::as_str),
                 );
-                if ui.button("Preview indicator").clicked() {
+                if ui.button(tr("Preview indicator")).clicked() {
                     let mut preview = config.clone();
                     preview.show_layout_indicator = true;
                     let shown = crate::feedback::globe_switched(None, source, &preview);
@@ -189,21 +208,21 @@ impl FlagPicker {
                     *status = Some((
                         shown,
                         if shown {
-                            "Indicator preview shown."
+                            tr("Indicator preview shown.")
                         } else {
-                            "Indicator preview unavailable."
+                            tr("Indicator preview unavailable.")
                         }
                         .into(),
                     ));
                 }
             });
-            if ui.button("Use Automatic Flag").clicked() {
+            if ui.button(tr("Use Automatic Flag")).clicked() {
                 config.globe_switch.layout_flags.remove(&source.source_id);
             }
         }
-        ui.toggle_value(&mut self.gallery, "All Country Flags…");
+        ui.toggle_value(&mut self.gallery, tr("All Country Flags…"));
         if self.gallery {
-            let label = ui.label("Search country name or code");
+            let label = ui.label(tr("Search country name or code"));
             ui.add(egui::TextEdit::singleline(&mut self.search).id(egui::Id::new("flag-search")))
                 .labelled_by(label.id);
             let query = self.search.trim().to_lowercase();
@@ -272,6 +291,7 @@ mod tests {
 
     #[test]
     fn bundled_flags_render_and_picker_edits_only_the_selected_source() {
+        crate::settings::i18n::set_language(crate::config::UiLanguage::English);
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
         let mut picker = FlagPicker {
@@ -296,6 +316,7 @@ mod tests {
                     }
                 })
                 .collect(),
+            language: None,
             gallery: true,
             search: "ua".into(),
             selected: 0,
@@ -333,7 +354,7 @@ mod tests {
         };
         let first = frame(vec![]);
         assert!(!first.textures_delta.set.is_empty());
-        for label in ["Use Automatic Flag", "UA · UA"] {
+        for label in ["Use Automatic Flag", "UA · Ukraine"] {
             let out = frame(vec![]);
             let tree = out.platform_output.accesskit_update.unwrap();
             let rect = tree
