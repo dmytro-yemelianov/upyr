@@ -10,7 +10,7 @@ Spec: [settings-frontends.md](../specs/settings-frontends.md).
   Verify CLI dispatch, scrolling, focus, Unicode and dirty-close handling (AC5–AC6).
 - [x] P4 — Local line-oriented ANSI/TUI adapter over the same actions and host.
   Replay commands in an isolated config, including errors and terminal escaping (AC7).
-- [ ] P5 — Workspace/engine checks, isolated GUI verification, docs, measured build size,
+- [x] P5 — Workspace/engine checks, isolated GUI verification, docs, measured build size,
   reviewable commits and installation with backup (AC8–AC9).
 
 Implementation order is P1 → P2 → P3 → P4 → P5. Keep the engine and model data
@@ -42,5 +42,25 @@ first as `8e86198`.
 - The engine contract passed all 18 checks; language/model data and engine
   behavior were not changed. No new dependency packages or Pixel SSH assets.
 
-Detailed local evidence is retained in `.stos/settings-frontends/` (not committed).
-Installation and final build-size evidence follow after the checked build is installed.
+The release build was installed at `/Applications/Upyr.app`, with the prior app
+kept at `.stos/install-settings-frontends-20261112/previous/Upyr.app`. All three
+binary hashes matched the prepared candidate, and the background app restarted.
+Five installed-binary smoke cases passed: both help entry points, isolated init,
+Unicode TUI save and invalid-edit/discard handling through the standalone helper.
+The user's config hash remained unchanged throughout verification and installation.
+
+macOS arm64 release sizes (bytes, before local packaging):
+
+| Binary | Previous build | This build | Difference |
+| --- | ---: | ---: | ---: |
+| `upyr` | 15,165,088 | 19,427,392 | +4,262,304 |
+| `upyr-background` | 14,416,272 | 14,483,712 | +67,440 |
+| `upyr-settings` | 1,599,904 | 6,699,440 | +5,099,536 |
+
+The optional GUI links the existing egui renderer into the macOS settings and
+CLI binaries. This is an interface feature, with no speed or memory improvement
+claim. Opening latency and resident memory were not benchmarked.
+
+Detailed local evidence is retained in `.stos/settings-frontends/` and the
+installation `build.json` (not committed). Implementation commit: `274505e`.
+No remote push or remote CI run was performed.
