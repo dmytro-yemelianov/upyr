@@ -1,6 +1,6 @@
 # Ukrainian settings by default
 
-Status: implemented; validation complete, installation pending. Date: 2026-11-12.
+Status: implemented, verified and installed. Date: 2026-11-12.
 
 Make Ukrainian the default settings UI language and offer Українська / English
 in General (Основні). Persist the choice as `ui_language = "uk" | "en"` in the

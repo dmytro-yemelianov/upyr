@@ -7,7 +7,7 @@ Spec: [settings-localization.md](../specs/settings-localization.md).
   preserve language-neutral values and bilingual search.
 - [x] L3 — Connect native controls and terminal display to the same preference.
 - [x] L4 — Test default/English/save/revert/search and UI coverage; build/check.
-- [ ] L5 — Isolated visual check, backed-up installation and final evidence.
+- [x] L5 — Isolated visual check, backed-up installation and final evidence.
 
 Keep translation separate from engine behavior and user text. Do not change
 the user's config file just to select the new default.
@@ -29,4 +29,9 @@ the user's config file just to select the new default.
   window/menu elements but not egui controls. Widget semantics were tested via
   headless AccessKit. Unknown OS/backend diagnostic details remain in English.
 - Evidence: `.stos/settings-localization/` (local, excluded from git).
-  Backed-up installation pending.
+- Installed `/Applications/Upyr.app` (0.5.0, arm64), runtime source `5b89204`.
+  Previous app retained in `.stos/install-settings-localization-20261112/previous/`.
+  Verified all three installed binary hashes, restarted one background process,
+  checked CLI/helper entrypoints and a Ukrainian TUI save using an isolated config.
+  User config SHA-256 and launch-at-login status remained unchanged; the effective
+  settings language is `uk`. Final local report: `.stos/settings-localization/report.json`.
