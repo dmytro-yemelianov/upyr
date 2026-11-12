@@ -796,3 +796,63 @@ Sources, clean builds, allocation counters, raw samples and reports are in
 comparison and controls. No desktop input is sent. This completes the planned
 general engine optimization sequence; further changes should address a measured
 regression or a concrete correctness issue rather than a blanket speed target.
+
+## Portable engine regression contract
+
+The optimization sequence is now covered by one reproducible offline command:
+
+```sh
+python3 tools/run_engine_contract.py
+```
+
+It builds only the core's `engine_contract` release example with the existing
+`engine-bench` feature and locked, cached dependencies. It needs neither the
+downloaded `.cache/` corpus nor the local `.stos/` measurement archives, desktop
+permissions or OS layout APIs. The committed 191-case boundary fixture supplies
+6,076 incremental/reference comparisons, including append and Backspace, and
+1,146 linear/prepared boundary-decision comparisons. Mismatch budgets are zero;
+minimum comparison counts prevent an empty replay from passing.
+
+Budgets live in `crates/upyr-core/fixtures/engine-budgets-v1.tsv` and are reviewed
+as explicit constraints, not regenerated from each measurement:
+
+| Check | Limit |
+| --- | ---: |
+| Allocations in warmed native-word prefix replay | 0 |
+| Corrections to the native-word warmup fixture | 0 |
+| Allocations in warmed mapped append into a reserved buffer | 0 |
+| Standard prepared-map requested heap | 3,072 bytes |
+| Maximum eligible map and retained replacement heap | 8,192 bytes |
+| Peak requested heap while replacing the maximum map | 16,384 bytes |
+| Index heap after only tiny/oversized maps | 0 |
+| Token entries after 131,072 distinct tokens | 50,000–65,536 |
+| Automatic decreases in token-cache occupancy during insertion | 0 |
+| Token-cache retained / peak requested heap | 4.5 / 4.6 MB |
+| Allocations for warmed hits on the last inserted token | 0 |
+
+The occupancy check detects a return to clearing the entire token cache under
+pressure. A negative-control run in an isolated copy injected one full cache
+reset during replay: this check failed while the other 17 checks passed.
+Random bucket distribution can change the final entry count and a
+small amount of heap, so those checks use bounds. Mapping storage includes
+the owned source and both indexes. Replacement measurement includes overlap
+between old/new indexes. Warmed append uses a preallocated output buffer;
+its zero-allocation budget does not apply to public conversion APIs that must
+return an owned string. All heap counters measure requested bytes, not RSS.
+
+The runner independently validates all 18 expected check/relation pairs and
+their checked-in limits. Missing, duplicate, malformed or inconsistent rows
+fail the run even if the child exits successfully. Cargo failures and timeouts
+retain their logs and partial checks. The JSON report records the source/asset/
+fixture fingerprint, platform and failure details; the default files are
+`target/engine-contract-report.json` and `target/engine-contract-report.log`.
+
+CI is configured to run the contract in the existing macOS/Windows/Linux test
+matrix and upload both artifacts for 14 days on success or failure. The native
+example and budget fixture are included in the core source package. The normal
+workspace tests and WASM contract remain separate checks.
+
+There is deliberately no nanosecond gate on shared CI machines. Future latency
+claims still require paired measurements with controls and retained samples.
+This addition changes validation and CI, not the installed engine's decisions
+or execution path.

@@ -399,6 +399,21 @@ input sources. The live Superset probe above is optional and opens its own tab.
 CI preserves each platform's JSON report and UTF-8 test log for 14 days, including
 failed runs and partial output when the Cargo timeout is reached.
 
+For the portable engine correctness and memory contract, run:
+
+```sh
+python3 tools/run_engine_contract.py
+```
+
+This offline check uses committed fixtures and only `upyr-core`; it needs no
+desktop session or installed layouts. It compares incremental/reference
+decisions and enforces allocation, prepared-mapping and token-cache budgets.
+CI runs it on macOS, Windows and Linux and preserves
+`target/engine-contract-report.json` and its `.log`, including failed runs.
+It has no nanosecond timing gate; latency comparisons remain separate paired
+benchmarks. See [the engine contract](docs/prefix-lexicon.md#portable-engine-regression-contract)
+for the limits and measurement scope.
+
 `slash_command_apps` additionally opts an interface into English `/commands`.
 At the start of a freshly tracked input line, `.сщььфтв` becomes `/command`,
 including the leading slash. Correction starts as soon as the prefix has a

@@ -17,6 +17,7 @@ include = [
   "/THIRD_PARTY_NOTICES.md",
   "/assets/**",
   "/fixtures/**",
+  "/examples/**",
   "/src/**",
 ]
 
@@ -25,3 +26,7 @@ serde.workspace = true
 
 [features]
 engine-bench = []
+
+[[example]]
+name = "engine_contract"
+required-features = ["engine-bench"]
