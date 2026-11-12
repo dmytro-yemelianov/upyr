@@ -9,13 +9,46 @@ use objc2::{MainThreadMarker, rc::Retained, runtime::AnyObject};
 use objc2_app_kit::{NSEvent, NSEventMask, NSEventType};
 use std::{cell::RefCell, ffi::c_void, ptr::NonNull, rc::Rc};
 
+type Ref = *const c_void;
+static SOURCE_OBSERVER: u8 = 0;
+
+#[link(name = "Carbon", kind = "framework")]
+unsafe extern "C" {
+    static kTISNotifySelectedKeyboardInputSourceChanged: Ref;
+}
+#[link(name = "CoreFoundation", kind = "framework")]
+unsafe extern "C" {
+    fn CFNotificationCenterGetDistributedCenter() -> Ref;
+    fn CFNotificationCenterAddObserver(
+        center: Ref,
+        observer: Ref,
+        callback: unsafe extern "C" fn(Ref, *mut c_void, Ref, Ref, Ref),
+        name: Ref,
+        object: Ref,
+        behavior: isize,
+    );
+    fn CFNotificationCenterRemoveObserver(center: Ref, observer: Ref, name: Ref, object: Ref);
+}
+
+unsafe extern "C" fn source_changed(_: Ref, _: *mut c_void, _: Ref, _: Ref, _: Ref) {
+    if MainThreadMarker::new().is_some() {
+        crate::automation::input_source_changed();
+    }
+}
+
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
     fn CGEventGetIntegerValueField(event: *mut c_void, field: u32) -> i64;
+    fn CGEventGetTimestamp(event: *mut c_void) -> u64;
 }
 
 thread_local! {
     static MONITOR: RefCell<Option<Monitor>> = const { RefCell::new(None) };
+    static EVENT_TIME: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+pub(super) fn event_timestamp() -> Option<u64> {
+    EVENT_TIME.get()
 }
 
 struct Monitor(Retained<AnyObject>);
@@ -23,6 +56,14 @@ impl Drop for Monitor {
     fn drop(&mut self) {
         // The token came from this exact AppKit monitor and stays on its thread.
         unsafe { NSEvent::removeMonitor(&self.0) };
+        unsafe {
+            CFNotificationCenterRemoveObserver(
+                CFNotificationCenterGetDistributedCenter(),
+                (&raw const SOURCE_OBSERVER).cast(),
+                kTISNotifySelectedKeyboardInputSourceChanged,
+                std::ptr::null(),
+            );
+        }
     }
 }
 
@@ -80,6 +121,16 @@ pub(super) fn start(state: Arc<ListenerState>) -> Result<()> {
             &handler,
         )
         .context("could not install the AppKit keyboard monitor; check Accessibility permission")?;
+        unsafe {
+            CFNotificationCenterAddObserver(
+                CFNotificationCenterGetDistributedCenter(),
+                (&raw const SOURCE_OBSERVER).cast(),
+                source_changed,
+                kTISNotifySelectedKeyboardInputSourceChanged,
+                std::ptr::null(),
+                4,
+            );
+        }
         *slot = Some(Monitor(token));
         Ok(())
     })
@@ -97,6 +148,7 @@ impl Capture {
             return; // Copy/Paste and recovery keys must not become new user input.
         }
         let kind = event.r#type();
+        EVENT_TIME.set((!cg_event.is_null()).then(|| unsafe { CGEventGetTimestamp(cg_event) }));
         if matches!(
             kind,
             NSEventType::LeftMouseDown

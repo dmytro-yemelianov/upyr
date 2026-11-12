@@ -40,6 +40,7 @@ include = [
   "/assets/globe-switch/**",
   "/assets/sounds/anime/**",
   "/tests/**",
+  "/examples/boundary_benchmark.rs",
 ]
 
 [[bin]]
@@ -77,6 +78,13 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 upyr-core = { path = "crates/upyr-core", version = "=0.5.0" }
 upyr-audio = { path = "crates/upyr-audio", version = "=0.5.0" }
 winit = { version = "0.30.12", default-features = false, features = ["rwh_06", "x11"] }
+
+[features]
+engine-bench = ["upyr-core/engine-bench"]
+
+[[example]]
+name = "boundary_benchmark"
+required-features = ["engine-bench"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "0.3.6", default-features = false, features = ["async-io", "blocking"] }

@@ -60,6 +60,60 @@ pub fn installed_mapping() -> Result<Option<Vec<(char, char)>>> {
     platform::installed_mapping()
 }
 
+/// Share the same immutable installed-layout snapshot without copying its
+/// character pairs on every key. The platform snapshot already lives for the
+/// process lifetime; this does not extend its invalidation policy.
+pub type SharedMapping = std::sync::Arc<[(char, char)]>;
+
+pub fn shared_installed_mapping() -> Result<Option<SharedMapping>> {
+    type Mapping = Option<SharedMapping>;
+    static SHARED: std::sync::OnceLock<std::result::Result<Mapping, String>> =
+        std::sync::OnceLock::new();
+    SHARED
+        .get_or_init(|| {
+            platform::installed_mapping()
+                .map(|mapping| mapping.map(std::sync::Arc::from))
+                .map_err(|error| format!("{error:#}"))
+        })
+        .clone()
+        .map_err(anyhow::Error::msg)
+}
+
+/// A main-thread snapshot of the active physical layout. Only immutable Unicode
+/// values cross to an input worker; Carbon input-source objects never do.
+#[cfg(target_os = "macos")]
+pub(crate) struct KeyTextMap([[Option<char>; 128]; 4]);
+
+#[cfg(target_os = "macos")]
+impl KeyTextMap {
+    #[cfg(test)]
+    pub(crate) fn test_key(code: usize, layers: [char; 4]) -> Self {
+        let mut map = [[None; 128]; 4];
+        for (index, value) in layers.into_iter().enumerate() {
+            map[index][code] = Some(value);
+        }
+        Self(map)
+    }
+    pub(crate) fn character(&self, code: i64, flags: u64) -> Option<char> {
+        // Keep shortcuts, Option/dead-key composition, Fn and control keys intact.
+        if flags & ((1 << 18) | (1 << 19) | (1 << 20) | (1 << 23)) != 0 {
+            return None;
+        }
+        let layer =
+            usize::from(flags & (1 << 17) != 0) | (usize::from(flags & (1 << 16) != 0) << 1);
+        self.0[layer]
+            .get(usize::try_from(code).ok()?)
+            .copied()
+            .flatten()
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn current_key_text_map() -> Option<std::sync::Arc<KeyTextMap>> {
+    objc2::MainThreadMarker::new()?;
+    platform::current_key_text_map()
+}
+
 /// XKB groups from `setxkbmap -query`, each as `layout` or `layout(variant)`.
 /// Variants are positional; a missing `variant:` line means defaults.
 #[cfg(any(target_os = "linux", test))]
@@ -323,6 +377,32 @@ mod platform {
             Ok(mapping) => Ok(Some(mapping.clone())),
             Err(error) => Err(anyhow!(error.clone())),
         }
+    }
+
+    pub(super) fn current_key_text_map() -> Option<std::sync::Arc<super::KeyTextMap>> {
+        // This is called in the main-thread commit handshake after TIS switches.
+        let source = unsafe {
+            OwnedCf::from_create(TISCopyCurrentKeyboardInputSource(), "current input source")
+                .ok()?
+        };
+        let info = source_info(source.non_null())?;
+        let raw = InputSource {
+            raw: source.non_null(),
+            info,
+        };
+        let layout = unicode_layout_data(&raw).ok()?;
+        let keyboard_type = u32::from(unsafe { LMGetKbdType() });
+        let mut layers = [[None; 128]; 4];
+        for (layer, modifier) in [0, SHIFT_MODIFIER, 4, SHIFT_MODIFIER | 4]
+            .into_iter()
+            .enumerate()
+        {
+            for code in KEY_CODES.iter().copied().chain(std::iter::once(49)) {
+                layers[layer][usize::from(code)] =
+                    translate_key(layout, code, modifier, keyboard_type);
+            }
+        }
+        Some(std::sync::Arc::new(super::KeyTextMap(layers)))
     }
 
     fn generate_installed_mapping() -> Result<Vec<(char, char)>> {

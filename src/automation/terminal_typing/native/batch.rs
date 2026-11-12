@@ -163,6 +163,10 @@ fn event_kind(event: Event) -> u32 {
     unsafe { CGEventGetType(event) }
 }
 
+fn terminal_anchor_matches(expected: Option<u64>, delivered: Option<u64>) -> bool {
+    expected.is_none_or(|stamp| delivered == Some(stamp))
+}
+
 struct HoldStart {
     signal: Arc<HoldSignal>,
     duration: Duration,
@@ -186,6 +190,12 @@ unsafe extern "C" {
     fn CGEventGetFlags(event: Event) -> u64;
     fn CGEventGetTimestamp(event: Event) -> u64;
     fn CGEventGetType(event: Event) -> u32;
+    fn CGEventKeyboardGetUnicodeString(
+        event: Event,
+        capacity: usize,
+        length: *mut usize,
+        text: *mut u16,
+    );
 }
 
 #[link(name = "CoreFoundation", kind = "framework")]
@@ -209,12 +219,85 @@ struct Request {
     /// Terminal edits compare Quartz input counters; a GUI release does not,
     /// because Upyr's own selection and copy keys advance them.
     stamp: Option<[u32; 6]>,
+    after_key: Option<u64>,
     reply: mpsc::Sender<Reply>,
 }
 
 enum Reply {
-    Ready(mpsc::Sender<bool>),
+    Ready(mpsc::Sender<Commit>),
     Complete(bool),
+}
+
+#[derive(Default)]
+struct Commit {
+    accepted: bool,
+    translation: Option<Translation>,
+}
+
+struct Translation {
+    source_id: String,
+    text: Arc<crate::system_layout::KeyTextMap>,
+    previous: Arc<crate::system_layout::KeyTextMap>,
+    through: u64,
+    active: bool,
+}
+
+/// Quartz timestamps use nanoseconds of mach uptime. An unposted synthetic
+/// CGEvent has timestamp zero and cannot mark the layout-change boundary.
+fn event_time_now() -> u64 {
+    #[repr(C)]
+    #[derive(Default)]
+    struct Timebase {
+        numer: u32,
+        denom: u32,
+    }
+    unsafe extern "C" {
+        fn mach_absolute_time() -> u64;
+        fn mach_timebase_info(info: *mut Timebase) -> i32;
+    }
+    static SCALE: std::sync::OnceLock<Timebase> = std::sync::OnceLock::new();
+    let scale = SCALE.get_or_init(|| {
+        let mut scale = Timebase::default();
+        assert_eq!(unsafe { mach_timebase_info(&mut scale) }, 0);
+        scale
+    });
+    (u128::from(unsafe { mach_absolute_time() }) * u128::from(scale.numer)
+        / u128::from(scale.denom)) as u64
+}
+
+impl Translation {
+    fn apply(&mut self, kind: u32, event: Event) {
+        let stamp = unsafe { CGEventGetTimestamp(event) };
+        let flags = unsafe { CGEventGetFlags(event) };
+        if matches!(kind, 1 | 3 | 6 | 7 | 22 | 25 | 27)
+            || flags & ((1 << 18) | (1 << 19) | (1 << 20) | (1 << 23)) != 0
+        {
+            self.active = false;
+        }
+        if !matches!(kind, 10 | 11) || (stamp > self.through && !self.active) {
+            return;
+        }
+        let code = unsafe { CGEventGetIntegerValueField(event, 9) };
+        if let Some(character) = self.text.character(code, flags) {
+            let mut length = 0;
+            let mut actual = [0_u16; 2];
+            unsafe { CGEventKeyboardGetUnicodeString(event, 2, &mut length, actual.as_mut_ptr()) };
+            let mut decoded = char::decode_utf16(actual[..length.min(2)].iter().copied());
+            let Some(Ok(actual)) = decoded.next() else {
+                return;
+            };
+            let previous = self.previous.character(code, flags);
+            if decoded.next().is_some() || (Some(actual) != previous && actual != character) {
+                return;
+            }
+            // A fresh Quartz character does not establish that the target's
+            // own layout cache has caught up (notably Chromium). Supply the
+            // chosen layout explicitly until a source change or navigation.
+            let mut units = [0_u16; 2];
+            let units = character.encode_utf16(&mut units);
+            unsafe { CGEventKeyboardSetUnicodeString(event, units.len(), units.as_ptr()) };
+        }
+    }
 }
 
 struct Job {
@@ -253,8 +336,11 @@ impl Job {
     }
 
     /// Posts held keys past this tap, in order.
-    fn flush(&mut self, proxy: Ref, seen: &mut SeenEvents) {
+    fn flush(&mut self, proxy: Ref, seen: &mut SeenEvents, last_keydown: &mut Option<u64>) {
         for key in self.queued.drain(..) {
+            if event_kind(key.0.cast_mut()) == 10 {
+                *last_keydown = Some(unsafe { CGEventGetTimestamp(key.0.cast_mut()) });
+            }
             post_past_tap(proxy, &key, seen);
         }
     }
@@ -283,6 +369,20 @@ struct State {
     disabled: bool,
     line_break: SharedArm,
     seen: SeenEvents,
+    translation: Option<Translation>,
+    last_keydown: Option<u64>,
+}
+
+impl State {
+    fn source_changed(&mut self, source: Option<&str>) {
+        if self
+            .translation
+            .as_ref()
+            .is_some_and(|translation| Some(translation.source_id.as_str()) != source)
+        {
+            self.translation = None;
+        }
+    }
 }
 
 /// Posts `event` immediately after this tap. A copy that returns to the tap
@@ -312,7 +412,7 @@ unsafe extern "C" fn deliver(proxy: Ref, kind: u32, event: Event, context: *mut 
         state.disabled = true;
         if let Some(job) = state.job.as_mut() {
             job.finished = true;
-            job.flush(proxy, &mut state.seen);
+            job.flush(proxy, &mut state.seen, &mut state.last_keydown);
             job.end();
         }
         return event;
@@ -325,6 +425,11 @@ unsafe extern "C" fn deliver(proxy: Ref, kind: u32, event: Event, context: *mut 
         }
     }
     let own = unsafe { CGEventGetIntegerValueField(event, 41) } == i64::from(std::process::id());
+    if !own {
+        if let Some(translation) = &mut state.translation {
+            translation.apply(kind, event);
+        }
+    }
     if kind == 10 && state.job.is_none() {
         let keycode = unsafe { CGEventGetIntegerValueField(event, 9) };
         let autorepeat = unsafe { CGEventGetIntegerValueField(event, 8) };
@@ -358,6 +463,9 @@ unsafe extern "C" fn deliver(proxy: Ref, kind: u32, event: Event, context: *mut 
         }
     }
     let Some(job) = state.job.as_mut() else {
+        if kind == 10 && !own {
+            state.last_keydown = Some(unsafe { CGEventGetTimestamp(event) });
+        }
         return event;
     };
     let own_trigger = kind == 11
@@ -374,6 +482,7 @@ unsafe extern "C" fn deliver(proxy: Ref, kind: u32, event: Event, context: *mut 
                 expected_stamp[2] = expected_stamp[2].wrapping_add(job.queued_keydowns);
                 crate::automation::input_guard::input_counts() == expected_stamp
             });
+            let anchor_matches = terminal_anchor_matches(request.after_key, state.last_keydown);
             let window_matches = crate::automation::input_guard::is_target_window(
                 state.target_pid,
                 request.target_window,
@@ -383,6 +492,7 @@ unsafe extern "C" fn deliver(proxy: Ref, kind: u32, event: Event, context: *mut 
                 window = request.target_window,
                 cancelled = job.cancelled,
                 counts_match,
+                anchor_matches,
                 window_matches,
                 held = job.queued.len(),
                 "validated edit target"
@@ -391,15 +501,26 @@ unsafe extern "C" fn deliver(proxy: Ref, kind: u32, event: Event, context: *mut 
             // nothing Upyr prepared may be inserted at the new position.
             if !job.cancelled && window_matches {
                 let mut committed = false;
-                if Instant::now() < job.deadline && counts_match {
+                if Instant::now() < job.deadline && counts_match && anchor_matches {
                     // The main thread changes TIS only after the target has
                     // accepted this edit. Until it acknowledges, this callback
                     // holds the stream.
                     let (commit, acknowledgement) = mpsc::channel();
-                    committed = request.reply.send(Reply::Ready(commit)).is_ok()
-                        && acknowledgement
+                    if request.reply.send(Reply::Ready(commit)).is_ok() {
+                        let decision = acknowledgement
                             .recv_timeout(Duration::from_millis(100))
-                            .unwrap_or(false);
+                            .unwrap_or_default();
+                        committed = decision.accepted;
+                        if let Some(mut translation) = decision.translation {
+                            // Keys translated before the switch retain old Unicode
+                            // even when delivered after paste. Fix both held keys
+                            // and older keys still travelling toward this tap.
+                            for key in &job.queued {
+                                translation.apply(event_kind(key.0.cast_mut()), key.0.cast_mut());
+                            }
+                            state.translation = Some(translation);
+                        }
+                    }
                 }
                 // Post at this exact point in the stream, bypassing this tap. A
                 // subsequent key cannot overtake the edit or enter inside it. A
@@ -416,12 +537,15 @@ unsafe extern "C" fn deliver(proxy: Ref, kind: u32, event: Event, context: *mut 
                 job.applied = committed;
             }
         }
-        job.flush(proxy, &mut state.seen);
+        job.flush(proxy, &mut state.seen, &mut state.last_keydown);
         job.end();
         // The empty key-up is only a trigger, never input to the application.
         return std::ptr::null_mut();
     }
     if job.finished {
+        if kind == 10 && !own {
+            state.last_keydown = Some(unsafe { CGEventGetTimestamp(event) });
+        }
         return event;
     }
     if job.policy == Policy::Selection {
@@ -460,12 +584,16 @@ unsafe extern "C" fn deliver(proxy: Ref, kind: u32, event: Event, context: *mut 
     }
     if matches!(kind, 1 | 3 | 6 | 7 | 10 | 12 | 22 | 25 | 27) {
         job.cancelled = true;
-        job.flush(proxy, &mut state.seen);
+        job.flush(proxy, &mut state.seen, &mut state.last_keydown);
+    }
+    if kind == 10 && !own {
+        state.last_keydown = Some(unsafe { CGEventGetTimestamp(event) });
     }
     event
 }
 
 enum Command {
+    Source(Option<String>),
     Edit(Request),
     Hold(HoldStart),
     Release(Request),
@@ -567,11 +695,23 @@ pub(super) fn warm(target_pid: i32) -> Result<()> {
     })
 }
 
+pub(super) fn input_source_changed(source: Option<String>) {
+    WORKER.with(|slot| {
+        if let Ok(slot) = slot.try_borrow() {
+            if let Some(worker) = slot.as_ref() {
+                let _ = worker.commands.send(Command::Source(source));
+                worker.wake();
+            }
+        }
+    });
+}
+
 pub(super) fn post(
     prepared: Prepared,
     target_pid: i32,
     target_window: i64,
     stamp: [u32; 6],
+    after_key: Option<u64>,
     on_ready: impl FnOnce() -> bool,
 ) -> Result<bool> {
     warm(target_pid)?;
@@ -586,6 +726,7 @@ pub(super) fn post(
                 prepared,
                 target_window,
                 stamp: Some(stamp),
+                after_key,
                 reply,
             }))
             .map_err(|_| anyhow::anyhow!("terminal event tap stopped"))?;
@@ -686,6 +827,7 @@ pub(super) fn release(
                 prepared,
                 target_window,
                 stamp: None,
+                after_key: None,
                 reply,
             }))
             .map_err(|_| anyhow::anyhow!("hold event tap stopped"))?;
@@ -704,8 +846,32 @@ fn await_commit(result: mpsc::Receiver<Reply>, on_ready: impl FnOnce() -> bool) 
         {
             Reply::Ready(commit) => {
                 if let Some(on_ready) = on_ready.take() {
+                    let source = || {
+                        objc2::MainThreadMarker::new()
+                            .and_then(|_| crate::system_layout::current().ok().flatten())
+                            .map(|s| s.source_id)
+                    };
+                    let before = source();
+                    let previous = crate::system_layout::current_key_text_map();
                     let accepted = on_ready();
-                    let _ = commit.send(accepted);
+                    let through = event_time_now();
+                    let after = source();
+                    let translation = (accepted && before.is_some() && before != after)
+                        .then(|| {
+                            let text = crate::system_layout::current_key_text_map()?;
+                            Some(Translation {
+                                source_id: after?,
+                                text,
+                                previous: previous?,
+                                through,
+                                active: true,
+                            })
+                        })
+                        .flatten();
+                    let _ = commit.send(Commit {
+                        accepted,
+                        translation,
+                    });
                 }
             }
             Reply::Complete(applied) => return Ok(applied),
@@ -725,6 +891,8 @@ fn run(
         disabled: false,
         line_break,
         seen: SeenEvents::default(),
+        translation: None,
+        last_keydown: None,
     });
     let mask = [1, 2, 3, 4, 6, 7, 10, 11, 12, 22, 25, 26, 27]
         .into_iter()
@@ -751,6 +919,9 @@ fn run(
     'worker: loop {
         loop {
             match commands.try_recv() {
+                Ok(Command::Source(source)) => {
+                    state.source_changed(source.as_deref());
+                }
                 Ok(Command::Stop) | Err(mpsc::TryRecvError::Disconnected) => break 'worker,
                 Err(mpsc::TryRecvError::Empty) => break,
                 Ok(Command::Edit(request)) => {
@@ -849,6 +1020,137 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_terminal_snapshot_cannot_hide_a_key_delivered_before_the_guard() {
+        // The guard can stamp counters after key 5, while the event loop is
+        // still recognizing the prefix ending at key 4. Equal counters alone
+        // cannot authorize deleting four characters from a five-key word.
+        assert!(!terminal_anchor_matches(Some(40), Some(50)));
+        assert!(!terminal_anchor_matches(Some(40), Some(30)));
+        assert!(!terminal_anchor_matches(Some(40), None));
+        assert!(terminal_anchor_matches(Some(40), Some(40)));
+        // Manual terminal undo still uses its existing focus/counter guard.
+        assert!(terminal_anchor_matches(None, Some(50)));
+    }
+
+    unsafe extern "C" {
+        fn CGEventSetTimestamp(event: Event, timestamp: u64);
+    }
+
+    fn translated_key(text: char, stamp: u64, flags: u64) -> Owned {
+        let key =
+            Owned::new(unsafe { CGEventCreateKeyboardEvent(std::ptr::null(), 34, true) }).unwrap();
+        let mut units = [0; 2];
+        let units = text.encode_utf16(&mut units);
+        unsafe {
+            CGEventKeyboardSetUnicodeString(key.0.cast_mut(), units.len(), units.as_ptr());
+            CGEventSetTimestamp(key.0.cast_mut(), stamp);
+            CGEventSetFlags(key.0.cast_mut(), flags);
+        }
+        key
+    }
+
+    fn key_text(key: &Owned) -> String {
+        let mut units = [0; 2];
+        let mut length = 0;
+        unsafe {
+            CGEventKeyboardGetUnicodeString(key.0.cast_mut(), 2, &mut length, units.as_mut_ptr());
+        }
+        String::from_utf16(&units[..length]).unwrap()
+    }
+
+    fn transition() -> Translation {
+        Translation {
+            source_id: "test".into(),
+            previous: Arc::new(crate::system_layout::KeyTextMap::test_key(
+                34,
+                ['ш', 'Ш', 'Ш', 'ш'],
+            )),
+            text: Arc::new(crate::system_layout::KeyTextMap::test_key(
+                34,
+                ['i', 'I', 'I', 'i'],
+            )),
+            through: 100,
+            active: true,
+        }
+    }
+
+    #[test]
+    fn fresh_and_delayed_physical_keys_keep_the_committed_layout() {
+        let mut change = transition();
+        for stamp in [90, 101] {
+            let key = translated_key('ш', stamp, 0);
+            change.apply(10, key.0.cast_mut());
+            assert_eq!(key_text(&key), "i");
+            assert_eq!(unsafe { CGEventGetTimestamp(key.0.cast_mut()) }, stamp);
+        }
+        let fresh = translated_key('i', 102, 0);
+        change.apply(10, fresh.0.cast_mut());
+        assert!(change.active);
+        let later = translated_key('ш', change.through + 1, 0);
+        change.apply(10, later.0.cast_mut());
+        assert_eq!(key_text(&later), "i");
+        let delayed = translated_key('ш', 99, 0);
+        change.apply(10, delayed.0.cast_mut());
+        assert_eq!(key_text(&delayed), "i");
+    }
+
+    #[test]
+    fn translation_preserves_case_shortcuts_and_unrelated_unicode() {
+        for (flags, input, expected) in [
+            (1 << 17, 'Ш', 'I'),
+            (1 << 16, 'Ш', 'I'),
+            ((1 << 17) | (1 << 16), 'ш', 'i'),
+            (1 << 20, 'ш', 'ш'),
+            (1 << 19, 'ш', 'ш'),
+            (0, 'ї', 'ї'),
+        ] {
+            let key = translated_key(input, 90, flags);
+            transition().apply(10, key.0.cast_mut());
+            assert_eq!(key_text(&key), expected.to_string());
+            assert_eq!(unsafe { CGEventGetFlags(key.0.cast_mut()) }, flags);
+        }
+    }
+
+    #[test]
+    fn manual_switch_gestures_end_the_source_transition() {
+        for kind in [1, 3, 22, 12] {
+            let mut change = transition();
+            let gesture = translated_key('ш', 101, if kind == 12 { 1 << 23 } else { 0 });
+            change.apply(kind, gesture.0.cast_mut());
+            let key = translated_key('ш', 102, 0);
+            change.apply(10, key.0.cast_mut());
+            assert_eq!(key_text(&key), "ш");
+        }
+    }
+
+    #[test]
+    fn layout_boundary_uses_a_nonzero_monotonic_clock() {
+        let before = event_time_now();
+        assert!(before > 0);
+        assert!(event_time_now() >= before);
+    }
+
+    #[test]
+    fn external_source_changes_clear_a_transition_even_without_another_key() {
+        let mut state = State {
+            target_pid: 0,
+            job: None,
+            disabled: false,
+            line_break: SharedArm::default(),
+            seen: SeenEvents::default(),
+            translation: Some(transition()),
+            last_keydown: None,
+        };
+        state.source_changed(Some("test"));
+        assert!(state.translation.is_some());
+        state.source_changed(Some("manual"));
+        assert!(state.translation.is_none());
+        state.translation = Some(transition());
+        state.source_changed(None);
+        assert!(state.translation.is_none());
+    }
 
     #[test]
     fn a_key_event_passes_once_and_its_second_arrival_is_dropped() {
@@ -964,7 +1266,7 @@ mod tests {
         let target = std::thread::spawn(move || {
             let (commit, acknowledgement) = mpsc::channel();
             sender.send(Reply::Ready(commit)).unwrap();
-            assert!(acknowledgement.recv().unwrap());
+            assert!(acknowledgement.recv().unwrap().accepted);
             assert!(
                 checked.load(Ordering::SeqCst),
                 "typing preceded layout commit"
@@ -987,7 +1289,7 @@ mod tests {
         let target = std::thread::spawn(move || {
             let (commit, acknowledgement) = mpsc::channel();
             sender.send(Reply::Ready(commit)).unwrap();
-            assert!(!acknowledgement.recv().unwrap());
+            assert!(!acknowledgement.recv().unwrap().accepted);
             sender.send(Reply::Complete(false)).unwrap();
         });
         assert!(!await_commit(receiver, || false).unwrap());

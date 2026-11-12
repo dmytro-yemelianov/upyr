@@ -1,7 +1,8 @@
 //! Platform-neutral physical-key tracking and automatic-correction decisions.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,26 @@ const MODEL_MAGIC: &[u8; 8] = b"UPYRLM1\0";
 const MODEL_HEADER_SIZE: usize = 12;
 const MODEL_ENTRY_SIZE: usize = 17;
 const MODEL_MAX_STRENGTH: i64 = 127;
+
+#[cfg(feature = "engine-bench")]
+#[doc(hidden)]
+pub mod benchmark;
+mod contextual;
+mod partial_word;
+#[cfg(test)]
+mod prefix_trim_tests;
+mod score_state;
+mod token_cache;
+pub use contextual::{contextual_edit_is_bounded, evaluate_context, has_pending_context};
+mod prefix_lexicon;
+#[cfg(test)]
+mod punto_compile;
+mod punto_early;
+mod punto_model;
+mod punto_rules;
+mod punto_tables;
+mod punto_trie;
+pub use partial_word::{PartialWordState, evaluate_partial};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -192,6 +213,10 @@ impl WordSample {
     /// The tracked context as US-QWERTY key characters, ending at the word.
     pub fn physical_context(&self) -> &str {
         &self.physical_context
+    }
+
+    pub fn physical_word(&self) -> &str {
+        &self.physical_word
     }
 
     pub fn source_layout(&self) -> InputLayout {
@@ -385,6 +410,7 @@ fn evaluate_with_scorer<S: CandidateScorer + ?Sized>(
             &candidates,
             policy,
             scorer,
+            mapping,
         )),
         decision => decision,
     }
@@ -396,40 +422,61 @@ fn evaluate_with_scorer<S: CandidateScorer + ?Sized>(
 /// token, or that the model reads as the source language by the full margin
 /// (`ok ghbdsn` -> `ok привіт`, while `nfr f xb ,elt` -> `так а чи буде`).
 fn drop_source_language_prefix<S: CandidateScorer + ?Sized>(
-    correction: AutoCorrection,
+    mut correction: AutoCorrection,
     candidates: &Candidates,
     policy: &AutoCorrectPolicy,
     scorer: &S,
+    mapping: Option<&[(char, char)]>,
 ) -> AutoCorrection {
-    let source: Vec<char> = correction.expected_source.chars().collect();
-    let target: Vec<char> = correction.replacement.chars().collect();
-    // Conversion is character-for-character, so word boundaries line up.
-    if source.len() != target.len() {
+    let source = correction.expected_source.as_str();
+    let target = correction.replacement.as_str();
+    let current_start = source.trim_end_matches(' ').rfind(' ').map_or(0, |i| i + 1);
+    if current_start == 0 || source.chars().count() != target.chars().count() {
         return correction;
     }
-    let body_end = source.len() - source.iter().rev().take_while(|c| **c == ' ').count();
-    let current_start = source[..body_end]
-        .iter()
-        .rposition(|c| *c == ' ')
-        .map_or(0, |index| index + 1);
+    let mut target_start = previous_character_boundary(
+        target,
+        target.len(),
+        source[current_start..].chars().count(),
+    );
 
     let (minimum_coverage, minimum_advantage, _) = model_thresholds(policy.sensitivity);
-    let text = |characters: &[char]| characters.iter().collect::<String>();
     let mut start = current_start;
     while start > 0 {
         let previous_end = start - 1;
-        let previous_start = source[..previous_end]
-            .iter()
-            .rposition(|c| *c == ' ')
-            .map_or(0, |index| index + 1);
-        let word = text(&source[previous_start..previous_end]);
+        let previous_start = source[..previous_end].rfind(' ').map_or(0, |i| i + 1);
+        let word = &source[previous_start..previous_end];
+        let target_previous_end = previous_character_boundary(target, target_start, 1);
+        let target_previous_start =
+            previous_character_boundary(target, target_previous_end, word.chars().count());
         if !word.is_empty() {
-            let source_word = normalize_word(&word);
-            let target_word = normalize_word(&text(&target[previous_start..previous_end]));
-            let deliberate_source = known(candidates.source_language, &source_word)
+            let source_word = normalize_word(word);
+            let target_word = normalize_word(&target[target_previous_start..target_previous_end]);
+            let (physical, source_layout) = match candidates.source_language {
+                Language::English => (Cow::Borrowed(source_word.as_ref()), InputLayout::English),
+                Language::Ukrainian => (
+                    Cow::Owned(match mapping {
+                        Some(mapping) => {
+                            convert_with_mapping(
+                                &source_word,
+                                Direction::UkrainianToEnglish,
+                                mapping,
+                            )
+                            .text
+                        }
+                        None => convert(&source_word, Direction::UkrainianToEnglish).text,
+                    }),
+                    InputLayout::Ukrainian,
+                ),
+            };
+            let deliberate_source = is_user_exception(policy, &source_word)
+                || policy.triggers.iter().any(|rule| {
+                    rule.action == TriggerAction::Keep && rule.matches(&physical, source_layout)
+                })
+                || known(candidates.source_language, &source_word)
                 || (matches!(candidates.source_language, Language::English)
-                    && (looks_like_deliberate_latin_identifier(&word)
-                        || looks_like_deliberate_latin_technical_token(&word)));
+                    && (looks_like_deliberate_latin_identifier(word)
+                        || looks_like_deliberate_latin_technical_token(word)));
             let evidence = scorer.compare(candidates.text_pair(&source_word, &target_word));
             let reads_as_source = evidence.source.coverage >= minimum_coverage
                 && evidence.source.coverage - evidence.target.coverage >= minimum_advantage;
@@ -438,15 +485,38 @@ fn drop_source_language_prefix<S: CandidateScorer + ?Sized>(
             }
         }
         start = previous_start;
+        target_start = target_previous_start;
     }
 
     if start == 0 {
         return correction;
     }
-    AutoCorrection {
-        expected_source: text(&source[start..]),
-        replacement: text(&target[start..]),
-        direction: correction.direction,
+    remove_prefix(&mut correction.expected_source, start);
+    remove_prefix(&mut correction.replacement, target_start);
+    correction
+}
+
+/// Move by Unicode scalars while retaining UTF-8 byte boundaries. Callers have
+/// already checked equal scalar counts and walk corresponding source spans.
+fn previous_character_boundary(text: &str, end: usize, count: usize) -> usize {
+    if count == 0 {
+        return end;
+    }
+    text[..end]
+        .char_indices()
+        .rev()
+        .nth(count - 1)
+        .map_or(0, |(index, _)| index)
+}
+
+fn remove_prefix(text: &mut String, start: usize) {
+    let remaining = text.len() - start;
+    // Normal tracked contexts can reuse their buffers. A huge public sample
+    // reduced to a short tail must not retain a huge allocation in the result.
+    if text.capacity() > (MAX_CONTEXT_CHARACTERS * 4).max(remaining.saturating_mul(2)) {
+        *text = text[start..].to_owned();
+    } else {
+        text.drain(..start);
     }
 }
 
@@ -459,7 +529,7 @@ fn decide<S: CandidateScorer + ?Sized>(
 ) -> AutoDecision {
     // A user exception is the most specific rule there is; no built-in trigger
     // may override it.
-    if is_user_exception(policy, &normalize_word(&candidates.source_word)) {
+    if is_user_exception(policy, &normalize_word(candidates.source_word())) {
         return AutoDecision::Reset;
     }
 
@@ -477,7 +547,7 @@ fn decide<S: CandidateScorer + ?Sized>(
     // allowing `Jkmuf,` -> `Ольга,`.
     let full_word_known = known(
         candidates.target_language,
-        &normalize_word(&candidates.target_word),
+        &normalize_word(candidates.target_word()),
     );
     if let Some(preserved) = Candidates::preserving_terminal_delimiter(sample, candidates, mapping)
     {
@@ -485,7 +555,7 @@ fn decide<S: CandidateScorer + ?Sized>(
         // because its shorter stem also looks plausible to the language model.
         let preserved_word_known = known(
             preserved.target_language,
-            &normalize_word(&preserved.target_word),
+            &normalize_word(preserved.target_word()),
         );
         if (!full_word_known || preserved_word_known)
             && terminal_delimiter_is_likely(&preserved, policy, scorer)
@@ -513,8 +583,8 @@ fn evaluate_candidates<S: CandidateScorer + ?Sized>(
     policy: &AutoCorrectPolicy,
     scorer: &S,
 ) -> AutoDecision {
-    let source_word = normalize_word(&candidates.source_word);
-    let target_word = normalize_word(&candidates.target_word);
+    let source_word = normalize_word(candidates.source_word());
+    let target_word = normalize_word(candidates.target_word());
     if target_word.is_empty() || source_word == target_word {
         return AutoDecision::Reset;
     }
@@ -526,9 +596,11 @@ fn evaluate_candidates<S: CandidateScorer + ?Sized>(
     let source_known = known(candidates.source_language, &source_word);
     let target_known = known(candidates.target_language, &target_word);
     if matches!(candidates.source_language, Language::English)
-        && (looks_like_deliberate_latin_identifier(&candidates.source_word)
-            || looks_like_deliberate_latin_technical_token(&candidates.source_word))
-        && !target_known
+        && (looks_like_deliberate_latin_identifier(candidates.source_word())
+            || looks_like_deliberate_latin_technical_token(candidates.source_word()))
+        // Short all-caps/mixed-case tokens are especially ambiguous (VB/МИ).
+        // A target dictionary hit must not override an intentional acronym.
+        && (!target_known || source_word.chars().count() <= 3)
     {
         return AutoDecision::Reset;
     }
@@ -537,7 +609,7 @@ fn evaluate_candidates<S: CandidateScorer + ?Sized>(
     // letters even though the same positions look like punctuation in English.
     let current_word_length = target_word.chars().count();
     let context_characters = candidates
-        .target_context
+        .target_context()
         .chars()
         .filter(|character| character.is_alphabetic())
         .count();
@@ -549,13 +621,13 @@ fn evaluate_candidates<S: CandidateScorer + ?Sized>(
     let (minimum_coverage, minimum_advantage, minimum_characters) =
         model_thresholds(policy.sensitivity);
     let physical_punctuation_evidence = physical_layout_punctuation_evidence(
-        &candidates.source_context,
-        &candidates.target_context,
+        candidates.source_context(),
+        candidates.target_context(),
     );
     let physical_letter_target = matches!(candidates.target_language, Language::Ukrainian)
         && physical_punctuation_evidence > 0
         && candidates
-            .target_word
+            .target_word()
             .chars()
             .all(|character| character.is_alphabetic() || is_apostrophe(character));
     // The relaxed threshold exists for physical `[];'\\,./` keys becoming
@@ -609,7 +681,7 @@ fn evaluate_candidates<S: CandidateScorer + ?Sized>(
     let target_name_model = name_evidence.target;
     let proper_name_model_match = !source_known
         && current_word_length >= policy.min_word_length
-        && is_title_case_word(&candidates.target_word)
+        && is_title_case_word(candidates.target_word())
         && target_name_model.grams >= 3
         && target_name_model.coverage >= minimum_coverage.min(0.22)
         && target_name_model.coverage - source_name_model.coverage >= required_advantage.min(0.07);
@@ -620,8 +692,8 @@ fn evaluate_candidates<S: CandidateScorer + ?Sized>(
 
     if dictionary_match || model_match || physical_letter_model_match || proper_name_model_match {
         return AutoDecision::Correct(AutoCorrection {
-            expected_source: candidates.source_context.clone(),
-            replacement: candidates.target_context.clone(),
+            expected_source: candidates.source_context().to_owned(),
+            replacement: candidates.target_context().to_owned(),
             direction: candidates.direction,
         });
     }
@@ -633,60 +705,121 @@ fn evaluate_candidates<S: CandidateScorer + ?Sized>(
     }
 }
 
-struct Candidates {
-    source_word: String,
-    target_word: String,
-    source_context: String,
-    target_context: String,
+enum CandidateWord<'a> {
+    InContext(std::ops::Range<usize>),
+    Separate(Cow<'a, str>),
+}
+
+struct CandidateText<'a> {
+    word: CandidateWord<'a>,
+    context: Cow<'a, str>,
+}
+impl<'a> CandidateText<'a> {
+    fn borrowed(word: &'a str, context: &'a str) -> Self {
+        Self {
+            word: CandidateWord::Separate(Cow::Borrowed(word)),
+            context: Cow::Borrowed(context),
+        }
+    }
+    fn word(&self) -> &str {
+        match &self.word {
+            CandidateWord::InContext(range) => &self.context[range.clone()],
+            CandidateWord::Separate(word) => word,
+        }
+    }
+    fn converted(sample: &WordSample, mapping: Option<&[(char, char)]>) -> Self {
+        let context = to_ukrainian(&sample.physical_context, mapping);
+        let (body, boundary) = sample
+            .physical_context
+            .strip_suffix(' ')
+            .map_or((sample.physical_context.as_str(), false), |body| {
+                (body, true)
+            });
+        let word = if let Some(prefix) = body.strip_suffix(&sample.physical_word) {
+            // All supported maps convert one scalar to one scalar. Byte widths
+            // may differ, including a custom mapping of the final space.
+            let start = context
+                .char_indices()
+                .nth(prefix.chars().count())
+                .map_or(context.len(), |(index, _)| index);
+            let end = context.len()
+                - if boundary {
+                    context.chars().last().map_or(0, char::len_utf8)
+                } else {
+                    0
+                };
+            CandidateWord::InContext(start..end)
+        } else {
+            // Public samples may carry a context unrelated to the current word.
+            CandidateWord::Separate(Cow::Owned(to_ukrainian(&sample.physical_word, mapping)))
+        };
+        Self {
+            word,
+            context: Cow::Owned(context),
+        }
+    }
+}
+
+struct Candidates<'a> {
+    source: CandidateText<'a>,
+    target: CandidateText<'a>,
     direction: Direction,
     source_language: Language,
     target_language: Language,
 }
 
-impl Candidates {
-    fn new(sample: &WordSample, mapping: Option<&[(char, char)]>) -> Self {
-        let ukrainian_word = to_ukrainian(&sample.physical_word, mapping);
-        let ukrainian_context = to_ukrainian(&sample.physical_context, mapping);
+impl<'a> Candidates<'a> {
+    fn new(sample: &'a WordSample, mapping: Option<&[(char, char)]>) -> Self {
+        let english = CandidateText::borrowed(&sample.physical_word, &sample.physical_context);
+        let ukrainian = CandidateText::converted(sample, mapping);
         match sample.source_layout {
             InputLayout::English => Self {
-                source_word: sample.physical_word.clone(),
-                target_word: ukrainian_word,
-                source_context: sample.physical_context.clone(),
-                target_context: ukrainian_context,
+                source: english,
+                target: ukrainian,
                 direction: Direction::EnglishToUkrainian,
                 source_language: Language::English,
                 target_language: Language::Ukrainian,
             },
             InputLayout::Ukrainian => Self {
-                source_word: ukrainian_word,
-                target_word: sample.physical_word.clone(),
-                source_context: ukrainian_context,
-                target_context: sample.physical_context.clone(),
+                source: ukrainian,
+                target: english,
                 direction: Direction::UkrainianToEnglish,
                 source_language: Language::Ukrainian,
                 target_language: Language::English,
             },
         }
     }
+    fn source_word(&self) -> &str {
+        self.source.word()
+    }
+    fn target_word(&self) -> &str {
+        self.target.word()
+    }
+    fn source_context(&self) -> &str {
+        &self.source.context
+    }
+    fn target_context(&self) -> &str {
+        &self.target.context
+    }
 
-    fn preserving_terminal_delimiter(
+    fn preserving_terminal_delimiter<'b>(
         sample: &WordSample,
-        full: &Self,
+        full: &'b Self,
         mapping: Option<&[(char, char)]>,
-    ) -> Option<Self> {
+    ) -> Option<Candidates<'b>> {
         // If the same physical key is punctuation in the target layout too,
         // keep the ordinary physical conversion. The alternative exists for
         // punctuation-to-letter ambiguity such as `Jkmuf,` -> `Ольгаб`.
         if full
-            .target_word
+            .target_word()
             .chars()
             .last()
             .is_some_and(is_terminal_delimiter)
         {
             return None;
         }
-        let stem = full.source_word.trim_end_matches(is_terminal_delimiter);
-        let mut delimiters = &full.source_word[stem.len()..];
+        let stem = full.source_word().trim_end_matches(is_terminal_delimiter);
+        let mut delimiters = &full.source_word()[stem.len()..];
         if delimiters.is_empty() {
             return None;
         }
@@ -700,8 +833,8 @@ impl Candidates {
                 InputLayout::Ukrainian => probe.clone(),
             };
             if known(full.target_language, &normalize_word(&target)) {
-                let start = full.source_word.char_indices().rev().nth(count - 1)?.0;
-                delimiters = &full.source_word[start..];
+                let start = full.source_word().char_indices().rev().nth(count - 1)?.0;
+                delimiters = &full.source_word()[start..];
                 break;
             }
         }
@@ -733,11 +866,12 @@ impl Candidates {
         let target_word = format!("{physical_target_word}{delimiters}");
         let target_context = format!("{physical_target_context}{delimiters}{boundary}");
 
-        Some(Self {
-            source_word: full.source_word.clone(),
-            target_word,
-            source_context: full.source_context.clone(),
-            target_context,
+        Some(Candidates {
+            source: CandidateText::borrowed(full.source_word(), full.source_context()),
+            target: CandidateText {
+                word: CandidateWord::Separate(Cow::Owned(target_word)),
+                context: Cow::Owned(target_context),
+            },
             direction: full.direction,
             source_language: full.source_language,
             target_language: full.target_language,
@@ -745,10 +879,10 @@ impl Candidates {
     }
 
     fn context_pair(&self) -> CandidatePair<'_> {
-        self.text_pair(&self.source_context, &self.target_context)
+        self.text_pair(self.source_context(), self.target_context())
     }
 
-    fn text_pair<'a>(&self, source: &'a str, target: &'a str) -> CandidatePair<'a> {
+    fn text_pair<'b>(&self, source: &'b str, target: &'b str) -> CandidatePair<'b> {
         CandidatePair {
             source: LanguageText {
                 language: self.source_language,
@@ -839,14 +973,14 @@ fn trigger_decision(
     match action {
         TriggerAction::Keep => Some(AutoDecision::Reset),
         TriggerAction::Correct => {
-            let source = normalize_word(&candidates.source_word);
-            let target = normalize_word(&candidates.target_word);
+            let source = normalize_word(candidates.source_word());
+            let target = normalize_word(candidates.target_word());
             if target.is_empty() || source == target {
                 return Some(AutoDecision::Reset);
             }
             Some(AutoDecision::Correct(AutoCorrection {
-                expected_source: candidates.source_context.clone(),
-                replacement: candidates.target_context.clone(),
+                expected_source: candidates.source_context().to_owned(),
+                replacement: candidates.target_context().to_owned(),
                 direction: candidates.direction,
             }))
         }
@@ -895,7 +1029,7 @@ static SIGNED_NGRAM_V1: NgramModel<'static> = NgramModel {
 /// sum (model score x n-gram weight), the maximum achievable magnitude, and the
 /// n-gram count. Multiplying `raw` by the language sign reproduces the previous
 /// per-language accumulation exactly.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct TokenContribution {
     raw: i64,
     maximum: i64,
@@ -909,8 +1043,10 @@ thread_local! {
     /// scorer re-reads the whole accumulated context on every word boundary;
     /// memoizing each token turns that repeated work into cheap hash lookups
     /// instead of thousands of binary searches over the 174k-entry model.
-    static TOKEN_CONTRIBUTION: RefCell<HashMap<String, TokenContribution>> =
-        RefCell::new(HashMap::new());
+    static TOKEN_CONTRIBUTION: RefCell<token_cache::TokenCache> =
+        RefCell::new(token_cache::TokenCache::default());
+    static CONTEXT_SCORES: RefCell<score_state::ContextScores> =
+        RefCell::new(score_state::ContextScores::default());
 }
 
 impl NgramModel<'_> {
@@ -951,23 +1087,30 @@ impl NgramModel<'_> {
             Language::English => -1i64,
             Language::Ukrainian => 1i64,
         };
-        let mut evidence = 0i64;
-        let mut maximum = 0i64;
-        let mut grams = 0usize;
-        for token in language_tokens(text) {
-            let contribution = self.token_contribution(&token);
-            evidence += contribution.raw * language_sign;
-            maximum += contribution.maximum;
-            grams += contribution.grams;
-        }
+        let contribution = if std::ptr::eq(self.bytes.as_ptr(), LANGUAGE_MODEL.as_ptr()) {
+            CONTEXT_SCORES.with(|cache| cache.borrow_mut().contribution(self, language, text))
+        } else {
+            self.text_contribution(text)
+        };
         ModelEvidence {
-            coverage: if maximum == 0 {
+            coverage: if contribution.maximum == 0 {
                 0.0
             } else {
-                evidence as f32 / maximum as f32
+                (contribution.raw * language_sign) as f32 / contribution.maximum as f32
             },
-            grams,
+            grams: contribution.grams,
         }
+    }
+
+    fn text_contribution(&self, text: &str) -> TokenContribution {
+        let mut contribution = TokenContribution::default();
+        for token in language_tokens(text) {
+            let current = self.token_contribution(&token);
+            contribution.raw += current.raw;
+            contribution.maximum += current.maximum;
+            contribution.grams += current.grams;
+        }
+        contribution
     }
 
     /// Computes (or reuses) a token's language-independent contribution. Only
@@ -979,9 +1122,7 @@ impl NgramModel<'_> {
     fn token_contribution(&self, token: &str) -> TokenContribution {
         let cacheable = std::ptr::eq(self.bytes.as_ptr(), LANGUAGE_MODEL.as_ptr());
         if cacheable {
-            if let Some(cached) =
-                TOKEN_CONTRIBUTION.with(|cache| cache.borrow().get(token).copied())
-            {
+            if let Some(cached) = TOKEN_CONTRIBUTION.with(|cache| cache.borrow_mut().get(token)) {
                 return cached;
             }
         }
@@ -1001,11 +1142,7 @@ impl NgramModel<'_> {
         };
         if cacheable {
             TOKEN_CONTRIBUTION.with(|cache| {
-                let mut cache = cache.borrow_mut();
-                if cache.len() >= TOKEN_CACHE_CAPACITY {
-                    cache.clear();
-                }
-                cache.insert(token.to_owned(), contribution);
+                cache.borrow_mut().insert(token, contribution);
             });
         }
         contribution
@@ -1048,25 +1185,56 @@ fn language_likelihood(language: Language, text: &str) -> ModelEvidence {
     SIGNED_NGRAM_V1.score(language, text)
 }
 
-fn language_tokens(text: &str) -> Vec<String> {
+fn language_tokens(text: &str) -> impl Iterator<Item = Cow<'_, str>> {
     text.split_whitespace()
-        .map(|token| {
-            token
-                .chars()
-                .filter(|character| character.is_alphabetic() || is_apostrophe(*character))
-                .map(ascii_apostrophe)
-                .collect::<String>()
-                .to_lowercase()
-        })
+        .map(normalize_language_token)
         .filter(|token| !token.is_empty())
-        .collect()
+}
+
+fn lowercase_owned(mut text: String) -> String {
+    if text.is_ascii() {
+        text.make_ascii_lowercase();
+        text
+    } else {
+        match punto_trie::lowercase(&text) {
+            Cow::Borrowed(_) => text,
+            Cow::Owned(lower) => lower,
+        }
+    }
+}
+
+fn normalize_language_token(token: &str) -> Cow<'_, str> {
+    if token
+        .chars()
+        .all(|c| (c.is_alphabetic() || c == '\'') && !matches!(c, '’' | 'ʼ'))
+    {
+        return punto_trie::lowercase(token);
+    }
+    Cow::Owned(lowercase_owned(
+        token
+            .chars()
+            .filter(|character| character.is_alphabetic() || is_apostrophe(*character))
+            .map(ascii_apostrophe)
+            .collect(),
+    ))
 }
 
 fn for_each_ngram(word: &str, mut visit: impl FnMut(u128, usize)) {
-    let mut characters = Vec::with_capacity(word.chars().count() + 2);
-    characters.push('^');
-    characters.extend(word.to_lowercase().chars());
-    characters.push('$');
+    let lower = punto_trie::lowercase(word);
+    let count = lower.chars().count();
+    let mut local = ['\0'; 66];
+    let mut spill;
+    let characters = if count <= local.len() - 2 {
+        &mut local[..count + 2]
+    } else {
+        spill = vec!['\0'; count + 2];
+        spill.as_mut_slice()
+    };
+    characters[0] = '^';
+    for (index, character) in lower.chars().enumerate() {
+        characters[index + 1] = character;
+    }
+    characters[count + 1] = '$';
     for size in MIN_NGRAM..=MAX_NGRAM {
         for gram in characters.windows(size) {
             visit(ngram_key(gram), size - 1);
@@ -1098,12 +1266,15 @@ fn physical_layout_punctuation_evidence(source: &str, target: &str) -> usize {
         .count()
 }
 
-fn normalize_word(word: &str) -> String {
-    word.trim_matches(|character: char| !character.is_alphabetic() || is_apostrophe(character))
-        .chars()
-        .map(ascii_apostrophe)
-        .collect::<String>()
-        .to_lowercase()
+fn normalize_word(word: &str) -> Cow<'_, str> {
+    let trimmed =
+        word.trim_matches(|character: char| !character.is_alphabetic() || is_apostrophe(character));
+    if !trimmed.contains(['’', 'ʼ']) {
+        return punto_trie::lowercase(trimmed);
+    }
+    Cow::Owned(lowercase_owned(
+        trimmed.chars().map(ascii_apostrophe).collect(),
+    ))
 }
 
 /// ASCII `'`, the typographic `’` and macOS Ukrainian's modifier letter `ʼ`
@@ -1214,8 +1385,8 @@ fn terminal_delimiter_is_likely<S: CandidateScorer + ?Sized>(
     policy: &AutoCorrectPolicy,
     scorer: &S,
 ) -> bool {
-    let source_word = normalize_word(&candidates.source_word);
-    let target_word = normalize_word(&candidates.target_word);
+    let source_word = normalize_word(candidates.source_word());
+    let target_word = normalize_word(candidates.target_word());
     if target_word.chars().count() < policy.min_word_length
         || known(candidates.source_language, &source_word)
     {
@@ -1229,7 +1400,7 @@ fn terminal_delimiter_is_likely<S: CandidateScorer + ?Sized>(
     let target_model = evidence.target;
     let advantage = evidence.advantage();
     let (minimum_coverage, minimum_advantage, _) = model_thresholds(policy.sensitivity);
-    if is_title_case_word(&candidates.target_word) {
+    if is_title_case_word(candidates.target_word()) {
         target_model.coverage >= minimum_coverage.min(0.22)
             && advantage >= minimum_advantage.min(0.07)
     } else {
@@ -1252,8 +1423,8 @@ fn delimiter_reads_better_than_final_letter<S: CandidateScorer + ?Sized>(
         return true;
     }
     let word_coverage = |candidates: &Candidates| {
-        let source = normalize_word(&candidates.source_word);
-        let target = normalize_word(&candidates.target_word);
+        let source = normalize_word(candidates.source_word());
+        let target = normalize_word(candidates.target_word());
         scorer
             .compare(candidates.text_pair(&source, &target))
             .target
@@ -2312,3 +2483,133 @@ mod recall_benchmark;
 #[cfg(test)]
 #[path = "auto_correct_synthetic_tests.rs"]
 mod synthetic_typing_tests;
+
+#[cfg(test)]
+mod normalization_reference_tests {
+    use super::*;
+    fn reference_word(text: &str) -> String {
+        text.trim_matches(|c: char| !c.is_alphabetic() || is_apostrophe(c))
+            .chars()
+            .map(ascii_apostrophe)
+            .collect::<String>()
+            .to_lowercase()
+    }
+    fn reference_token(text: &str) -> String {
+        text.chars()
+            .filter(|c| c.is_alphabetic() || is_apostrophe(*c))
+            .map(ascii_apostrophe)
+            .collect::<String>()
+            .to_lowercase()
+    }
+    #[test]
+    fn borrowed_normalization_matches_original_unicode_transforms() {
+        let alphabet: Vec<_> = "aAZz ІЇЄҐΟΣΣΑİǅKµéé\u{301}\u{345}'’ʼ-._/123\t\n🤖"
+            .chars()
+            .collect();
+        let mut state = 31_u64;
+        for step in 0..4000 {
+            let mut text = String::new();
+            for _ in 0..step % 90 {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                text.push(alphabet[(state >> 32) as usize % alphabet.len()]);
+            }
+            assert_eq!(normalize_word(&text), reference_word(&text), "{text:?}");
+            assert_eq!(
+                normalize_language_token(&text),
+                reference_token(&text),
+                "{text:?}"
+            );
+        }
+        assert!(matches!(normalize_word("...привіт!"), Cow::Borrowed(_)));
+        assert!(matches!(
+            normalize_language_token("can't"),
+            Cow::Borrowed(_)
+        ));
+    }
+    #[test]
+    fn stack_and_spilled_ngrams_match_original_order_and_weights() {
+        for text in [
+            "".to_owned(),
+            "a".into(),
+            "ΟΣ İ Σ-Σ пʼять".into(),
+            "а".repeat(64),
+            "İ".repeat(64),
+            "A".repeat(65),
+            "є".repeat(1025),
+        ] {
+            let characters: Vec<_> = std::iter::once('^')
+                .chain(text.to_lowercase().chars())
+                .chain(std::iter::once('$'))
+                .collect();
+            let expected: Vec<_> = (MIN_NGRAM..=MAX_NGRAM)
+                .flat_map(|size| {
+                    characters
+                        .windows(size)
+                        .map(move |gram| (ngram_key(gram), size - 1))
+                })
+                .collect();
+            let mut actual = Vec::new();
+            for_each_ngram(&text, |gram, weight| actual.push((gram, weight)));
+            assert_eq!(actual, expected);
+        }
+    }
+}
+
+#[cfg(test)]
+mod candidate_view_tests {
+    use super::*;
+    #[test]
+    fn shared_word_ranges_equal_independent_conversion_for_all_sample_shapes() {
+        let maps = [
+            None,
+            Some(vec![]),
+            Some(vec![
+                ('a', '界'),
+                ('a', 'x'),
+                ('b', 'і'),
+                (' ', '🦀'),
+                ('é', 'Σ'),
+                ('Σ', 's'),
+            ]),
+        ];
+        for mapping in &maps {
+            for layout in [InputLayout::English, InputLayout::Ukrainian] {
+                for (word, context) in [
+                    ("", ""),
+                    ("", "prefix "),
+                    ("a", "a"),
+                    ("a", "a "),
+                    ("ab", "ab ab "),
+                    ("éΣ", "x éΣ"),
+                    ("a ", "a  "),
+                    ("missing", "other "),
+                    ("ghbdtn,", "nj ghbdtn, "),
+                    (" ", " "),
+                ] {
+                    let sample = WordSample::new(word, context, layout);
+                    let candidates = Candidates::new(&sample, mapping.as_deref());
+                    let uk_word = to_ukrainian(word, mapping.as_deref());
+                    let uk_context = to_ukrainian(context, mapping.as_deref());
+                    let expected = match layout {
+                        InputLayout::English => {
+                            (word, uk_word.as_str(), context, uk_context.as_str())
+                        }
+                        InputLayout::Ukrainian => {
+                            (uk_word.as_str(), word, uk_context.as_str(), context)
+                        }
+                    };
+                    assert_eq!(
+                        (
+                            candidates.source_word(),
+                            candidates.target_word(),
+                            candidates.source_context(),
+                            candidates.target_context()
+                        ),
+                        expected,
+                        "{word:?}/{context:?}"
+                    );
+                }
+            }
+        }
+    }
+}

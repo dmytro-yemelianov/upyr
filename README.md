@@ -180,6 +180,24 @@ Upyr does not translate words. It reconstructs the characters produced by the sa
 4. Deterministic triggers, exact dictionaries, technical-token guards, exceptions, and a compact language model score the pair.
 5. Only a candidate that clears the selected confidence policy is applied. Upyr replaces the text, switches the OS input source when configured, and, by default, attempts to restore the clipboard.
 
+With layout switching enabled, a clear wrong-layout prefix can be corrected
+while you are still typing: `сщте` becomes `cont`, then you can finish
+`continue` in English. This starts at four letters (or your higher configured
+minimum) and uses the complete 4,511-entry early-trigger table recovered from
+Punto Switcher for Windows 4.4.2.334, plus persistent substring/prefix rules
+from its full table. For example, `dbgh` becomes `випр` while typing
+`виправлення`. A [generated EN/UK physical-key lexicon](docs/prefix-lexicon.md)
+protects known word continuations and requires support for the target language.
+Known word beginnings,
+exceptions and keep rules are protected. Prefixes without sufficient rule and lexical evidence wait
+for the normal word boundary. Only the current prefix is replaced; earlier
+words stay intact.
+All 37,612 original `ps.dat` rules are preserved, including the 9,383 exceptions
+used to protect unfinished words. An EN/UK evidence check prevents Russian-only
+rules from misclassifying Ukrainian prefixes. The import is versioned and
+[reproducible](docs/punto-early-rules.md). User `prefix* correct` rules also apply during typing, while
+exact, suffix and any-position rules wait for a boundary. `keep` rules win.
+
 On macOS, Copy/Paste delays yield to the application event loop so Globe taps
 and menu actions can still run. A temporary activity guard cancels a pending
 replacement if input or focus changes; it observes activity without recording
@@ -188,9 +206,22 @@ tracking for the next word, and preserves anything copied meanwhile.
 Automatic correction uses AppKit's main-thread global event monitor and the
 event's rendered characters, avoiding background Carbon layout queries.
 
-The trigger layer covers high-certainty words that the statistical policy deliberately skips, especially short words. Built-in rules are exact physical-key matches today; the parser also supports leading/trailing `*` patterns (`word*`, `*word`, `*word*`) after the Punto reverse-engineering pass showed that Punto for Windows treats its `A` tag as an any-position wildcard. Upyr uses the finding as a rule-shape hint only; it does not ship Punto's rule data.
+The finished-word trigger layer covers high-certainty words that the statistical
+policy deliberately skips, especially short words. These Upyr rules support
+exact physical-key matches and leading/trailing `*` patterns (`word*`, `*word`,
+`*word*`). They are separate from the imported early-trigger table.
 
 The embedded model is a **signed character n-gram index**, not a general language model. It contains 173,964 packed 2–5-character records in about 2.8 MiB. Each record stores a character-sequence key and one signed confidence byte: negative for English, positive for Ukrainian. Evidence from the typed candidate is accumulated locally and looked up with binary search.
+
+A separate [short-word context index](docs/context-correction.md) recognizes
+frequent adjacent word pairs. An unresolved short word can wait for the next
+word: `nj vb` becomes `то ми`, and `Ш have` becomes `I have`, including after a
+manual layout switch between those words. While that short word is pending,
+early correction waits for the next word boundary. Edits cover at most three
+words and 64 characters, including in opt-in terminal mode, with undo.
+Known source words, `vs`, short Latin identifiers, exceptions and Keep rules
+are protected. Isolated ambiguous tokens remain unchanged. This is local
+corpus evidence, not semantic sentence understanding.
 
 The index is generated from these pinned, checksum-verified Leipzig Corpora Collection inputs, each distributed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/):
 
@@ -315,7 +346,8 @@ slash_command_apps = ["com.superset.desktop"]
 ```
 
 This supports normal text entry in Codex/Claude terminal prompts in Superset.
-After Space, Upyr replaces only a single word it just tracked in the same
+After Space, or during a word with a clear wrong-layout prefix, Upyr replaces
+only the single word or prefix it just tracked in the same
 focused window: it selects the destination layout, sends the exact number of
 Backspaces and emits Unicode text. It never sends Enter or word-kill shortcuts.
 The clipboard is untouched. Cursor/control keys, clicks, scrolling or a changed

@@ -5,6 +5,11 @@ use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
+mod prepared;
+#[cfg(feature = "engine-bench")]
+#[doc(hidden)]
+pub use prepared::benchmark;
+
 /// The common US-QWERTY positions covered by the initial layout.
 const ENGLISH_LOWER: &str = "qwertyuiop[]asdfghjkl;'zxcvbnm,./`\\";
 const UKRAINIAN_LOWER: &str = "йцукенгшщзхїфівапролджєячсмитьбю.'ґ";
@@ -115,29 +120,87 @@ pub fn convert_with_mapping(
     mapping: &[(char, char)],
 ) -> Conversion {
     let direction = resolve_direction(input, requested);
-    // Installed mappings are small (<= ~68 entries). A linear scan keeps the
-    // typing hot path allocation-free instead of building and hashing a lookup
-    // table on every conversion (the built-in mapping, by contrast, is cached).
-    let text: String = input
-        .chars()
-        .map(|character| {
-            mapping
-                .iter()
-                .find_map(|(english, ukrainian)| match direction {
-                    Direction::EnglishToUkrainian if character == *english => Some(*ukrainian),
-                    Direction::UkrainianToEnglish if character == *ukrainian => Some(*english),
-                    Direction::Smart => unreachable!("smart direction is resolved before mapping"),
-                    _ => None,
-                })
-                .unwrap_or(character)
-        })
-        .collect();
+    if input.is_empty() {
+        return Conversion {
+            text: String::new(),
+            direction,
+            changed: false,
+        };
+    }
+    let text: String = prepared::with_prepared(mapping, |prepared| {
+        if let Some(prepared) = prepared {
+            let index = prepared.index(direction);
+            return input
+                .chars()
+                .map(|character| index.translate(character))
+                .collect();
+        }
+        input
+            .chars()
+            .map(|character| {
+                mapping
+                    .iter()
+                    .find_map(|(english, ukrainian)| match direction {
+                        Direction::EnglishToUkrainian if character == *english => Some(*ukrainian),
+                        Direction::UkrainianToEnglish if character == *ukrainian => Some(*english),
+                        Direction::Smart => {
+                            unreachable!("smart direction is resolved before mapping")
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(character)
+            })
+            .collect()
+    });
 
     Conversion {
         changed: text != input,
         text,
         direction,
     }
+}
+
+/// Appends converted text to an existing buffer without an intermediate string.
+/// Smart direction is resolved from `input` alone and returned to the caller.
+/// `None` uses the built-in mapping; `Some(&[])` leaves every character intact.
+/// Like [`convert_with_mapping`], the first matching custom pair wins.
+pub fn append_converted(
+    output: &mut String,
+    input: &str,
+    requested: Direction,
+    mapping: Option<&[(char, char)]>,
+) -> Direction {
+    let direction = resolve_direction(input, requested);
+    if let Some(mapping) = mapping {
+        if input.is_empty() {
+            return direction;
+        }
+        prepared::with_prepared(mapping, |prepared| {
+            if let Some(prepared) = prepared {
+                let index = prepared.index(direction);
+                output.extend(input.chars().map(|character| index.translate(character)));
+                return;
+            }
+            output.extend(input.chars().map(|character| {
+                mapping
+                    .iter()
+                    .find_map(|&(english, ukrainian)| match direction {
+                        Direction::EnglishToUkrainian if character == english => Some(ukrainian),
+                        Direction::UkrainianToEnglish if character == ukrainian => Some(english),
+                        _ => None,
+                    })
+                    .unwrap_or(character)
+            }));
+        });
+    } else {
+        let table = builtin_mapping(direction);
+        output.extend(
+            input
+                .chars()
+                .map(|character| table.get(&character).copied().unwrap_or(character)),
+        );
+    }
+    direction
 }
 
 /// Resolves smart mode using the dominant script in the selected text.
@@ -170,6 +233,44 @@ fn is_ukrainian_letter(character: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn appending_matches_independent_conversion_in_both_directions() {
+        let builtin = default_physical_mapping();
+        let custom = [('a', '🦀'), ('a', 'x'), ('b', '🦀'), (' ', '_'), ('і', 'i')];
+        let unicode: String = (0..=0x10ffff)
+            .step_by(257)
+            .filter_map(char::from_u32)
+            .collect();
+        let text = format!(
+            "{ENGLISH_LOWER}{ENGLISH_UPPER}{ENGLISH_SHIFTED_DIGITS}\n{UKRAINIAN_LOWER}{UKRAINIAN_UPPER}{UKRAINIAN_SHIFTED_DIGITS} a’b σΣ ß 🚀 {unicode}"
+        );
+        for input in ["", "ghbdsn", "руддщ", "a....", "ф....", text.as_str()] {
+            for requested in [
+                Direction::Smart,
+                Direction::EnglishToUkrainian,
+                Direction::UkrainianToEnglish,
+            ] {
+                for mapping in [
+                    None,
+                    Some(&[][..]),
+                    Some(builtin.as_slice()),
+                    Some(custom.as_slice()),
+                ] {
+                    let expected = match mapping {
+                        Some(pairs) => convert_with_mapping(input, requested, pairs),
+                        None => convert(input, requested),
+                    };
+                    for prefix in ["", "не враховуй цей префікс у Smart: "] {
+                        let mut output = prefix.to_owned();
+                        let direction = append_converted(&mut output, input, requested, mapping);
+                        assert_eq!(output, format!("{prefix}{}", expected.text));
+                        assert_eq!(direction, expected.direction);
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn converts_mistyped_ukrainian() {

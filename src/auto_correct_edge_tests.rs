@@ -29,8 +29,6 @@ fn sample(case: &Case, prefix: &str) -> WordSample {
     let context = format!("{prefix}{} ", case.physical);
     WordSample {
         inner: upyr_core::WordSample::new(&case.physical, &context, layout),
-        physical_word: case.physical.clone(),
-        source_layout: layout,
         visible_runs: vec![LayoutRun {
             layout,
             physical: context,

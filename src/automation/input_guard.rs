@@ -418,6 +418,13 @@ impl InputGuard {
         if self.window.is_some() && front_window(&self.application) != self.window {
             return false;
         }
+        // While all keyboard input is held, a user cannot move to another
+        // field with Tab; pointer changes separately invalidate the guard.
+        // Electron may rebuild its AX text element during the edit itself.
+        // Keep the stable app/window identity and verify the selected text.
+        if self.activity.hold.active() {
+            return true;
+        }
         let same_element = self.element.as_ref().is_none_or(|original| {
             focused_element().is_some_and(|current| unsafe { CFEqual(original.0, current.0) != 0 })
         });
@@ -440,6 +447,22 @@ impl InputGuard {
             && self.has_target_focus()
             && unsafe { CGEventSourceFlagsState(0) } & (MODIFIERS & !(1 << 16)) == 0
             && input_counts() == self.input_counts
+    }
+
+    /// A terminal edit that has not started may be retried with the next
+    /// tracked key. Only keyboard input may have advanced: a click, modifier
+    /// change, scroll or focus change must discard the old word instead.
+    pub fn typing_overtook(&self) -> bool {
+        let current = input_counts();
+        self.terminal
+            && self.has_target_focus()
+            && !self.activity.hold.broken()
+            && current
+                .iter()
+                .zip(self.input_counts)
+                .enumerate()
+                .all(|(index, (now, before))| index == 2 || *now == before)
+            && unsafe { CGEventSourceFlagsState(0) } & (MODIFIERS & !(1 << 16)) == 0
     }
 
     pub fn has_target_focus(&self) -> bool {

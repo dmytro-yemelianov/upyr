@@ -160,6 +160,7 @@ mod tests {
     fn key(tracker: &mut SlashTracker, key: Keycode, layout: SystemLayout) -> bool {
         tracker.observe(
             AutoKeyEvent {
+                timestamp: None,
                 key,
                 shifted: false,
             },
@@ -292,6 +293,7 @@ mod tests {
                 _ => panic!("unexpected generator alphabet"),
             };
             AutoKeyEvent {
+                timestamp: None,
                 key,
                 shifted: c.is_ascii_uppercase() || c == '_',
             }

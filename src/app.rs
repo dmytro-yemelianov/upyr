@@ -115,6 +115,9 @@ struct App {
     gesture: Option<ModifierGestureMonitor>,
     auto_monitor: Option<AutoCorrectMonitor>,
     auto_tracker: AutoWordTracker,
+    /// Events dispatched before monitor suspension but handled during the edit.
+    #[cfg(target_os = "macos")]
+    deferred_auto_keys: Option<Vec<AutoKeyEvent>>,
     #[cfg(target_os = "macos")]
     auto_target: Option<FocusTarget>,
     #[cfg(target_os = "macos")]
@@ -150,6 +153,18 @@ struct PendingConversion {
     /// For an undo: the text as typed that it restores, and how the user
     /// asked for it.
     reverted: Option<(String, crate::learning::Revert)>,
+}
+
+#[cfg(target_os = "macos")]
+impl PendingConversion {
+    fn take_undo(&mut self) -> Option<UndoRecord> {
+        let mut record = self.undo_candidate.take()?;
+        if let Some((original, corrected)) = self.task.automatic_edit() {
+            record.original = original.to_owned();
+            record.corrected = corrected.to_owned();
+        }
+        Some(record)
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -289,6 +304,8 @@ pub fn run(config: Config, hotkey_override: Option<String>) -> Result<()> {
         auto_monitor,
         auto_tracker: AutoWordTracker::default(),
         #[cfg(target_os = "macos")]
+        deferred_auto_keys: Some(Vec::new()),
+        #[cfg(target_os = "macos")]
         auto_target: None,
         #[cfg(target_os = "macos")]
         slash_tracker: crate::slash_commands::SlashTracker::default(),
@@ -328,6 +345,9 @@ fn create_auto_monitor(
     event_proxy: &EventLoopProxy<AppEvent>,
 ) -> Result<Option<AutoCorrectMonitor>> {
     crate::feedback::prewarm_sound_pack(&config.sounds);
+    if config.auto_correct {
+        crate::auto_correct::prepare();
+    }
     let proxy = event_proxy.clone();
     let sound_proxy = event_proxy.clone();
     let monitor = AutoCorrectMonitor::start(
@@ -484,7 +504,7 @@ impl App {
             .as_ref()
             .map_or(0, |monitor| monitor.generation());
         self.auto_generation = self.auto_generation.wrapping_add(1);
-        self.auto_tracker.clear();
+        self.auto_tracker.manual_layout_switch(selected.layout);
         if self.paused || !self.config.globe_switch.enabled {
             return;
         }
@@ -666,24 +686,50 @@ impl App {
             undo_candidate,
             reverted,
         };
+        self.processing = true;
+        self.set_auto_suspended(true);
         if self.conversion.is_some() {
             // The previous paste has committed and only clipboard cleanup is
-            // pending. Keep one guarded request; further input invalidates it.
+            // pending. This request already holds the target's input: keep it
+            // and defer subsequent keys rather than replacing its live hold.
             self.queued_conversion = Some(pending);
             return;
         }
-        self.processing = true;
-        self.set_auto_suspended(true);
-        self.reset_auto_context();
         self.conversion = Some(pending);
         self.advance_conversion(std::time::Instant::now());
     }
 
     #[cfg(target_os = "macos")]
-    fn finish_editing(&mut self) {
+    fn finish_editing(&mut self, preserve_context: bool) {
         self.processing = false;
-        self.reset_auto_context();
-        self.set_auto_suspended(false);
+        if !preserve_context {
+            self.reset_auto_context();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn resume_auto_keys(&mut self) {
+        if self.processing {
+            return;
+        }
+        let deferred = self
+            .deferred_auto_keys
+            .replace(Vec::new())
+            .unwrap_or_else(|| {
+                vec![AutoKeyEvent {
+                    timestamp: None,
+                    key: device_query::Keycode::Escape,
+                    shifted: false,
+                }]
+            });
+        for event in deferred {
+            // These preceded any AutoKey still waiting in the event loop.
+            // Re-queueing them would put later keys ahead of this prefix.
+            self.handle_auto_key(event);
+        }
+        if !self.processing {
+            self.set_auto_suspended(false);
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -699,8 +745,9 @@ impl App {
             }
         }
         if self.processing {
-            self.finish_editing();
+            self.finish_editing(false);
         }
+        self.resume_auto_keys();
     }
 
     #[cfg(target_os = "macos")]
@@ -713,9 +760,9 @@ impl App {
         match pending.task.poll(now) {
             Ok(ConversionProgress::Waiting) => self.conversion = Some(pending),
             Ok(ConversionProgress::Committed(outcome)) => {
-                self.finish_editing();
+                self.finish_editing(false);
                 if matches!(outcome, SelectionOutcome::Converted { .. }) {
-                    self.undo_record = pending.undo_candidate.take();
+                    self.undo_record = pending.take_undo();
                     self.learn_from(&pending);
                 }
                 self.report_conversion(outcome, automatic);
@@ -723,10 +770,13 @@ impl App {
             }
             Ok(ConversionProgress::Finished(outcome)) => {
                 if !committed {
-                    self.finish_editing();
+                    self.finish_editing(
+                        pending.task.retry_tracking()
+                            || matches!(outcome, Some(SelectionOutcome::TextMismatch)),
+                    );
                     if let Some(outcome) = outcome {
                         if matches!(outcome, SelectionOutcome::Converted { .. }) {
-                            self.undo_record = pending.undo_candidate.take();
+                            self.undo_record = pending.take_undo();
                             self.learn_from(&pending);
                         }
                         self.report_conversion(outcome, automatic);
@@ -735,7 +785,7 @@ impl App {
             }
             Err(error) => {
                 if !committed {
-                    self.finish_editing();
+                    self.finish_editing(false);
                     self.play_error_sound();
                 }
                 error!(%error, "conversion phase failed");
@@ -743,17 +793,18 @@ impl App {
         }
         if self.conversion.is_none() {
             if let Some(pending) = self.queued_conversion.take() {
-                let valid_generation = pending.automatic_generation.is_none_or(|generation| {
-                    generation == self.auto_generation && self.config.auto_correct && !self.paused
-                });
+                let valid_generation = pending
+                    .automatic_generation
+                    .is_none_or(|_| self.config.auto_correct && !self.paused);
                 if valid_generation {
-                    self.processing = true;
-                    self.set_auto_suspended(true);
-                    self.reset_auto_context();
                     self.conversion = Some(pending);
+                } else {
+                    self.finish_editing(false);
                 }
             }
         }
+        // Publish the completed task before replay can start another one.
+        self.resume_auto_keys();
     }
 
     #[cfg(target_os = "macos")]
@@ -1034,12 +1085,27 @@ impl App {
     }
 
     fn handle_auto_key(&mut self, event: AutoKeyEvent) {
+        #[cfg(target_os = "macos")]
+        if self.processing && !self.paused && self.config.auto_correct {
+            if let Some(events) = &mut self.deferred_auto_keys {
+                if events.len() < 256 {
+                    events.push(event);
+                } else {
+                    self.deferred_auto_keys = None;
+                }
+            }
+            return;
+        }
         self.auto_generation = self.auto_generation.wrapping_add(1);
+        #[cfg(target_os = "macos")]
+        crate::automation::set_typing_timestamp(event.timestamp);
         if self.paused || self.processing || !self.config.auto_correct {
             #[cfg(target_os = "macos")]
             self.slash_tracker.invalidate();
             return;
         }
+        #[cfg(target_os = "macos")]
+        crate::automation::warm_typing_target();
         #[cfg(target_os = "macos")]
         if self.auto_correct_paused_here() {
             self.auto_tracker.clear();
@@ -1102,6 +1168,9 @@ impl App {
         let Some(sample) = self.auto_tracker.observe(event) else {
             #[cfg(target_os = "macos")]
             self.refresh_line_break(event.key);
+            if AutoWordTracker::can_begin(event.key) {
+                self.correct_partial_word();
+            }
             return;
         };
         #[cfg(target_os = "macos")]
@@ -1124,6 +1193,26 @@ impl App {
             AutoDecision::Reset => {
                 self.auto_tracker.clear();
             }
+        }
+    }
+
+    fn correct_partial_word(&mut self) {
+        #[cfg(target_os = "macos")]
+        if crate::automation::caps_lock_on() {
+            return;
+        }
+        if let AutoDecision::Correct(correction) =
+            self.auto_tracker.evaluate_current_partial(&self.config)
+        {
+            // Already on the application's event loop: start the hold before
+            // another queued key can overtake this recognized prefix.
+            #[cfg(target_os = "macos")]
+            self.apply_auto_correction(self.auto_generation, correction);
+            #[cfg(not(target_os = "macos"))]
+            let _ = self.event_proxy.send_event(AppEvent::ApplyAutoCorrection {
+                generation: self.auto_generation,
+                correction,
+            });
         }
     }
 

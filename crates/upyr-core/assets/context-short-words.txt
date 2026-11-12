@@ -1,0 +1,3 @@
+# Function words eligible for delayed context correction (one to three letters).
+english a i am an and are as at be but by can did do for had has he her him his how if in is it its may me my no nor not of off on or our out she so the to too up us was we who why yes yet you
+ukrainian а аби або але без би бо був б ви від він всі все де для до є її їх і із й їй їм же ж за з із ми між на нам нас не ні ну по про під при раз сам та так те ти то тут у уже хай хто це цю ця цей чи що ще як я

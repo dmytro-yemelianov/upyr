@@ -1,0 +1,35 @@
+{
+  "format": "UPYRLP1",
+  "sources": {
+    "english": {
+      "url": "https://downloads.wortschatz-leipzig.de/corpora/eng_news_2023_1M.tar.gz",
+      "sha256": "c8a5a5e72897aa5e367b0319c1884831c02aaf29bf81342de31ca1b1cc8f3e4c",
+      "archive": "eng_news_2023_1M.tar.gz"
+    },
+    "ukrainian": {
+      "url": "https://downloads.wortschatz-leipzig.de/corpora/ukr_news_2023_1M.tar.gz",
+      "sha256": "0901bff8b3fdb3a8c657137754b4214b8ea6f241572d3ff9b2ae718487412383",
+      "archive": "ukr_news_2023_1M.tar.gz"
+    },
+    "english_dictionary": {
+      "url": "https://raw.githubusercontent.com/freebsd/freebsd-src/4a65e12dfbaba7193e37fcd2e14fbc20776a78b9/share/dict/web2",
+      "sha256": "92165d95d72a67377e80052b1b9c3d63a4ac402ccd71690c89d949e809738238",
+      "archive": "freebsd-web2"
+    }
+  },
+  "normalization": "casefold; normalize apostrophes; split hyphens; alphabet-filter; length 2..48; all positive frequencies",
+  "physical_keys": {
+    "english": "qwertyuiop[]asdfghjkl;'zxcvbnm,./`\\",
+    "ukrainian": "йцукенгшщзхїфівапролджєячсмитьбю.'ґ"
+  },
+  "evaluation_inputs_in_training": false,
+  "input_words": {
+    "english": 439289,
+    "ukrainian": 306516
+  },
+  "trie_nodes": 1932187,
+  "states": 311394,
+  "edges": 765685,
+  "bytes": 4308336,
+  "sha256": "4272f5f1b50e8b4a294ceb3e1f9f83e930c5b1e38ec570b797606219572941a6"
+}

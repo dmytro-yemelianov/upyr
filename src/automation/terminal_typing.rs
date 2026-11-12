@@ -1,4 +1,4 @@
-//! Opt-in terminal/TUI edits of a single freshly tracked word. No clipboard,
+//! Opt-in terminal/TUI edits of freshly tracked words. No clipboard,
 //! word-kill shortcuts, shell commands, or Enter events are used.
 
 pub(super) struct Plan<'a> {
@@ -15,6 +15,39 @@ pub(super) fn plan_with_mapping<'a>(
     replacement: &'a str,
     mapping: Option<&[(char, char)]>,
 ) -> Option<Plan<'a>> {
+    // Contextual repair is limited to two short pending words and one anchor.
+    // Every changed word must be an exact keyboard-position conversion; no
+    // punctuation, new separators, or arbitrary phrase replacement is allowed.
+    if expected.ends_with(' ')
+        && upyr_core::contextual_edit_is_bounded(expected, replacement, mapping)
+    {
+        return Some(Plan {
+            backspaces: expected.chars().count(),
+            replacement,
+        });
+    }
+    // A mid-word edit is an exact positional layout conversion of a bounded
+    // alphabetic prefix. Never admit arbitrary unfinished replacements here.
+    if !expected.ends_with(' ') && !replacement.ends_with(' ') {
+        let length = expected.chars().count();
+        if (4..=64).contains(&length)
+            && replacement.chars().count() == length
+            && expected != replacement
+            && expected.chars().all(char::is_alphabetic)
+            && replacement.chars().all(char::is_alphabetic)
+            && [
+                upyr_core::Direction::EnglishToUkrainian,
+                upyr_core::Direction::UkrainianToEnglish,
+            ]
+            .into_iter()
+            .any(|direction| match mapping {
+                Some(mapping) => upyr_core::convert_with_mapping(expected, direction, mapping).text,
+                None => upyr_core::convert(expected, direction).text,
+            } == replacement)
+        {
+            return Some(Plan { backspaces: length, replacement });
+        }
+    }
     // Command prefixes are corrected before Space so command menus can open.
     // This path accepts only the bounded, tracked single-token namespace.
     #[cfg(any(target_os = "macos", test))]
@@ -132,6 +165,7 @@ mod native {
         fn CGEventSetFlags(event: Event, flags: u64);
         fn CGEventKeyboardSetUnicodeString(event: Event, length: usize, text: *const u16);
         fn CGEventSetIntegerValueField(event: Event, field: u32, value: i64);
+        fn CGEventPostToPid(pid: i32, event: Event);
     }
     #[link(name = "CoreFoundation", kind = "framework")]
     unsafe extern "C" {
@@ -170,6 +204,21 @@ mod native {
 
     impl Prepared {
         pub fn new(plan: &Plan<'_>) -> Result<Self> {
+            Self::unicode(plan, false)
+        }
+
+        /// Replace an already verified, held selection without a pasteboard.
+        pub fn selection(text: &str) -> Result<Self> {
+            Self::unicode(
+                &Plan {
+                    backspaces: 0,
+                    replacement: text,
+                },
+                true,
+            )
+        }
+
+        fn unicode(plan: &Plan<'_>, selection: bool) -> Result<Self> {
             let source = Owned::new(unsafe { CGEventSourceCreate(-1) })?;
             unsafe { CGEventSourceSetLocalEventsSuppressionInterval(source.0, 0.0) };
             let mut events = Vec::new();
@@ -202,7 +251,16 @@ mod native {
                     events.push(event);
                 }
             }
-            Self::with_trigger(source, events, Vec::new())
+            let mut fallback = Vec::new();
+            if selection {
+                for down in [true, false] {
+                    let event =
+                        Owned::new(unsafe { CGEventCreateKeyboardEvent(source.0, 124, down) })?;
+                    unsafe { CGEventSetFlags(event.0.cast_mut(), 0) };
+                    fallback.push(event);
+                }
+            }
+            Self::with_trigger(source, events, fallback)
         }
 
         /// Cmd+V as one uninterrupted batch, shaped like hardware input:
@@ -233,6 +291,27 @@ mod native {
         pub fn right_arrows(count: usize) -> Result<Self> {
             let strokes = right_arrow_strokes(count);
             Self::keystrokes(&strokes, &strokes)
+        }
+
+        /// Select only inside the held target process. Posting Shift through
+        /// HID changes the global modifier state and can taint characters in
+        /// physical keys created concurrently, even after Shift is released.
+        pub fn select_characters(count: usize, target_pid: i32) -> Result<()> {
+            let shift = 1 << 17;
+            let mut strokes = Vec::with_capacity(count * 2 + 2);
+            strokes.push(Keystroke::modifier(56, shift));
+            for _ in 0..count {
+                strokes.push(Keystroke::key(123, true, shift));
+                strokes.push(Keystroke::key(123, false, shift));
+            }
+            strokes.push(Keystroke::modifier(56, 0));
+            let prepared = Self::keystrokes(&strokes, &[])?;
+            // The active process hold queues every foreign key. Our own
+            // selection events pass, in order, before the release trigger.
+            for event in &prepared.events {
+                unsafe { CGEventPostToPid(target_pid, event.0.cast_mut()) };
+            }
+            Ok(())
         }
 
         fn keystrokes(strokes: &[Keystroke], fallback: &[Keystroke]) -> Result<Self> {
@@ -293,14 +372,19 @@ mod native {
             target_pid: i32,
             target_window: i64,
             stamp: [u32; 6],
+            after_key: Option<u64>,
             on_ready: impl FnOnce() -> bool,
         ) -> Result<bool> {
-            batch::post(self, target_pid, target_window, stamp, on_ready)
+            batch::post(self, target_pid, target_window, stamp, after_key, on_ready)
         }
     }
 
     pub(in crate::automation) fn warm_target(pid: i32) -> Result<()> {
         batch::warm(pid)
+    }
+
+    pub(in crate::automation) fn input_source_changed(source: Option<String>) {
+        batch::input_source_changed(source);
     }
 
     /// Holds the target's keyboard input behind a GUI selection edit until
@@ -384,11 +468,60 @@ pub(crate) use native::{
     HeldLineBreak, HoldSignal, arm_line_break, disarm_line_break, release_held,
 };
 #[cfg(target_os = "macos")]
-pub(super) use native::{Prepared, hold_target, warm_target};
+pub(super) use native::{Prepared, hold_target, input_source_changed, warm_target};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contextual_edits_and_undo_are_exact_and_bounded() {
+        for (source, target) in [
+            ("nj vb ", "то ми "),
+            ("Ш рфму ", "I have "),
+            ("Ш have ", "I have "),
+            ("nj vb тепер ", "то ми тепер "),
+        ] {
+            let forward = plan(source, target).unwrap();
+            assert_eq!(forward.backspaces, source.chars().count());
+            assert_eq!(plan_undo(target, source).unwrap().replacement, source);
+            assert!(plan_undo(target.trim_end(), source.trim_end()).is_some());
+        }
+        for (source, target) in [
+            ("Ш have ", "I delete "),
+            ("Ш have ", "I have\n"),
+            ("Ш  have ", "I  have "),
+            ("Ш have a question ", "I have a question "),
+            ("hello world ", "руддщ цщкдв "),
+            ("Ш have", "I have"),
+            ("Ш have ", "I have"),
+            ("Ш have ", "I hаve "),
+        ] {
+            assert!(plan(source, target).is_none(), "{source:?} -> {target:?}");
+        }
+    }
+
+    #[test]
+    fn partial_word_edits_and_undo_are_exact_and_bounded() {
+        for (source, target) in [("сщте", "cont"), ("ghbd", "прив"), ("Сщте", "Cont")] {
+            let edit = plan(source, target).unwrap();
+            assert_eq!(edit.backspaces, 4);
+            assert_eq!(edit.replacement, target);
+            assert_eq!(plan_undo(target, source).unwrap().replacement, source);
+            let shorter_source: String = source.chars().take(3).collect();
+            let shorter_target: String = target.chars().take(3).collect();
+            assert!(plan_undo(&shorter_target, &shorter_source).is_some());
+        }
+        for (source, target) in [
+            ("сщте", "test"),
+            ("сщте ", "cont"),
+            ("сщте", "cont "),
+            ("сщте\n", "cont\n"),
+            ("сщ", "co"),
+        ] {
+            assert!(plan(source, target).is_none(), "{source:?} -> {target:?}");
+        }
+    }
 
     #[test]
     fn control_and_format_characters_cannot_enter_either_side_of_an_edit() {
