@@ -36,6 +36,13 @@ use crate::{
 
 #[cfg(any(target_os = "macos", test))]
 mod flag_choices;
+mod navigation;
+#[cfg(not(target_os = "macos"))]
+use navigation::{
+    CONTEXT_HELP, CORRECTION_DESCRIPTION, CORRECTION_FOOTNOTE, CORRECTION_TITLE, CORRECTION_TOGGLE,
+    MIDWORD_HELP,
+};
+use navigation::{SEARCH_PARAMETERS, SettingsTab};
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -371,79 +378,6 @@ fn packaged_macos_bundle() -> Result<Option<PathBuf>> {
     Ok(bundle.is_dir().then_some(bundle))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SettingsTab {
-    General,
-    Automatic,
-    Exceptions,
-    Shortcuts,
-    Feedback,
-    Advanced,
-    About,
-}
-
-impl SettingsTab {
-    #[cfg(not(target_os = "macos"))]
-    const ALL: [Self; 7] = [
-        Self::General,
-        Self::Automatic,
-        Self::Exceptions,
-        Self::Shortcuts,
-        Self::Feedback,
-        Self::Advanced,
-        Self::About,
-    ];
-
-    const fn label(self) -> &'static str {
-        match self {
-            Self::General => "General",
-            Self::Automatic => "Automatic",
-            Self::Exceptions => "Exceptions",
-            Self::Shortcuts => "Shortcuts",
-            Self::Feedback => "Feedback",
-            Self::Advanced => "Advanced",
-            Self::About => "About",
-        }
-    }
-
-    const fn command(self) -> &'static str {
-        match self {
-            Self::General => "general",
-            Self::Automatic => "automatic",
-            Self::Exceptions => "exceptions",
-            Self::Shortcuts => "shortcuts",
-            Self::Feedback => "feedback",
-            Self::Advanced => "advanced",
-            Self::About => "about",
-        }
-    }
-
-    fn from_command(command: &str) -> Option<Self> {
-        match command {
-            "general" => Some(Self::General),
-            "automatic" => Some(Self::Automatic),
-            "exceptions" => Some(Self::Exceptions),
-            "shortcuts" => Some(Self::Shortcuts),
-            "feedback" => Some(Self::Feedback),
-            "advanced" => Some(Self::Advanced),
-            "about" => Some(Self::About),
-            _ => None,
-        }
-    }
-
-    const fn cli_argument(self) -> Option<&'static str> {
-        match self {
-            Self::About => Some("--about"),
-            Self::General
-            | Self::Automatic
-            | Self::Exceptions
-            | Self::Shortcuts
-            | Self::Feedback
-            | Self::Advanced => None,
-        }
-    }
-}
-
 fn requested_tab() -> SettingsTab {
     if env::args_os().any(|argument| argument == "--about") {
         SettingsTab::About
@@ -458,186 +392,6 @@ enum ShortcutSlot {
     Selection,
     PreviousWord,
 }
-
-struct SearchParameter {
-    tab: SettingsTab,
-    label: &'static str,
-    terms: &'static str,
-}
-
-const SEARCH_PARAMETERS: &[SearchParameter] = &[
-    #[cfg(target_os = "macos")]
-    SearchParameter {
-        tab: SettingsTab::General,
-        label: "Globe key switching",
-        terms: "globe fn instant keyboard layout switcher clean tap",
-    },
-    SearchParameter {
-        tab: SettingsTab::General,
-        label: "Conversion direction",
-        terms: "smart english ukrainian language mapping",
-    },
-    SearchParameter {
-        tab: SettingsTab::General,
-        label: "Switch OS layout",
-        terms: "input source follow converted text",
-    },
-    SearchParameter {
-        tab: SettingsTab::General,
-        label: "Restore clipboard",
-        terms: "pasteboard copy contents",
-    },
-    SearchParameter {
-        tab: SettingsTab::General,
-        label: "Launch at login",
-        terms: "autostart startup boot",
-    },
-    SearchParameter {
-        tab: SettingsTab::Automatic,
-        label: "Automatic correction",
-        terms: "auto fix after space detection",
-    },
-    SearchParameter {
-        tab: SettingsTab::Automatic,
-        label: "Sensitivity",
-        terms: "confidence conservative balanced aggressive",
-    },
-    SearchParameter {
-        tab: SettingsTab::Automatic,
-        label: "Minimum word length",
-        terms: "characters threshold",
-    },
-    SearchParameter {
-        tab: SettingsTab::Automatic,
-        label: "Correction delay",
-        terms: "space milliseconds timing",
-    },
-    SearchParameter {
-        tab: SettingsTab::Exceptions,
-        label: "Never correct list",
-        terms: "exceptions dictionary words ignore exclude table add remove",
-    },
-    SearchParameter {
-        tab: SettingsTab::Shortcuts,
-        label: "Convert selection shortcut",
-        terms: "hotkey record key combination",
-    },
-    #[cfg(target_os = "macos")]
-    SearchParameter {
-        tab: SettingsTab::Automatic,
-        label: "Correct words in terminals",
-        terms: "terminal iterm ghostty kitty warp alacritty wezterm termius shell typing backspace",
-    },
-    #[cfg(target_os = "macos")]
-    SearchParameter {
-        tab: SettingsTab::Automatic,
-        label: "Slash commands in Superset",
-        terms: "slash command prefix terminal cli tui",
-    },
-    SearchParameter {
-        tab: SettingsTab::Shortcuts,
-        label: "Fix previous word shortcut",
-        terms: "hotkey record backspace key combination",
-    },
-    #[cfg(target_os = "macos")]
-    SearchParameter {
-        tab: SettingsTab::Shortcuts,
-        label: "Undo auto-correction",
-        terms: "undo restore last correction original text layout hotkey command option z скасувати",
-    },
-    SearchParameter {
-        tab: SettingsTab::Shortcuts,
-        label: "Modifier gesture",
-        terms: "double control shift trigger",
-    },
-    SearchParameter {
-        tab: SettingsTab::Shortcuts,
-        label: "Gesture action",
-        terms: "selection previous word",
-    },
-    SearchParameter {
-        tab: SettingsTab::Shortcuts,
-        label: "Gesture timeout",
-        terms: "double press milliseconds",
-    },
-    SearchParameter {
-        tab: SettingsTab::Feedback,
-        label: "Language indicator",
-        terms: "flag floating cursor pointer overlay english ukrainian",
-    },
-    SearchParameter {
-        tab: SettingsTab::Feedback,
-        label: "Indicator duration",
-        terms: "flag overlay milliseconds timing",
-    },
-    SearchParameter {
-        tab: SettingsTab::Feedback,
-        label: "Indicator style",
-        terms: "letters flag both language display shows preview globe",
-    },
-    #[cfg(target_os = "macos")]
-    SearchParameter {
-        tab: SettingsTab::Feedback,
-        label: "All country flags",
-        terms: "countries territories regions gallery collection catalogue picker choose assign override automatic revert",
-    },
-    SearchParameter {
-        tab: SettingsTab::Feedback,
-        label: "Sound feedback",
-        terms: "audio effects enable disable",
-    },
-    SearchParameter {
-        tab: SettingsTab::Feedback,
-        label: "Sound volume",
-        terms: "audio loud quiet percent preview",
-    },
-    #[cfg(target_os = "macos")]
-    SearchParameter {
-        tab: SettingsTab::Feedback,
-        label: "Headphone limit",
-        terms: "headphones headset airpods quiet volume output gain навушники гучність",
-    },
-    SearchParameter {
-        tab: SettingsTab::Feedback,
-        label: "Sound pack",
-        terms: "theme original arcade pfxr anime reactions audio",
-    },
-    SearchParameter {
-        tab: SettingsTab::Feedback,
-        label: "Keyboard sounds",
-        terms: "typing clicks keys space enter escape tab option command control shift caps delete backspace",
-    },
-    SearchParameter {
-        tab: SettingsTab::Feedback,
-        label: "Event sounds",
-        terms: "automatic correction manual conversion layout switch pause resume error preview",
-    },
-    SearchParameter {
-        tab: SettingsTab::Advanced,
-        label: "Copy delay",
-        terms: "clipboard milliseconds timing",
-    },
-    SearchParameter {
-        tab: SettingsTab::Advanced,
-        label: "Paste delay",
-        terms: "clipboard milliseconds timing",
-    },
-    SearchParameter {
-        tab: SettingsTab::Advanced,
-        label: "Clipboard restore delay",
-        terms: "pasteboard milliseconds timing",
-    },
-    SearchParameter {
-        tab: SettingsTab::About,
-        label: "Version and license",
-        terms: "about release semver copyright mit",
-    },
-    SearchParameter {
-        tab: SettingsTab::About,
-        label: "Privacy and implementation",
-        terms: "local only no tracking telemetry analytics n-gram model rust security source",
-    },
-];
 
 #[cfg(not(target_os = "macos"))]
 struct SettingsApp {
@@ -894,15 +648,8 @@ impl SettingsApp {
     }
 
     fn draw_automatic(&mut self, ui: &mut egui::Ui) {
-        section_heading(
-            ui,
-            "Automatic correction",
-            "Fix high-confidence wrong-layout text immediately after Space.",
-        );
-        ui.checkbox(
-            &mut self.config.auto_correct,
-            "Correct confidently recognized text after Space",
-        );
+        section_heading(ui, CORRECTION_TITLE, CORRECTION_DESCRIPTION);
+        ui.checkbox(&mut self.config.auto_correct, CORRECTION_TOGGLE);
         ui.small(
             "Opt-in: a short input prefix is kept only in memory, cleared at safe boundaries, and never logged.",
         );
@@ -911,6 +658,12 @@ impl SettingsApp {
             egui::Color32::from_rgb(190, 125, 35),
             "macOS requires Accessibility access. Upyr checks existing access first and offers one restart after permission is granted.",
         );
+        ui.add_space(8.0);
+        ui.group(|ui| {
+            ui.label(MIDWORD_HELP);
+            ui.add_space(4.0);
+            ui.label(CONTEXT_HELP);
+        });
         ui.add_space(8.0);
         ui.add_enabled_ui(self.config.auto_correct, |ui| {
             egui::Grid::new("automatic-correction-grid")
@@ -940,7 +693,7 @@ impl SettingsApp {
                             .range(2..=32),
                     );
                     ui.end_row();
-                    ui.label("Delay after Space");
+                    ui.label("Pause after Space").on_hover_text("This delay applies after Space; a clear prefix can switch immediately during typing.");
                     ui.horizontal(|ui| {
                         ui.add(
                             egui::DragValue::new(&mut self.config.auto_correct_delay_ms)
@@ -951,6 +704,7 @@ impl SettingsApp {
                     ui.end_row();
                 });
         });
+        ui.small(CORRECTION_FOOTNOTE);
     }
 
     fn draw_exceptions(&mut self, ui: &mut egui::Ui) {
@@ -1297,8 +1051,7 @@ impl SettingsApp {
         section_heading(ui, "Search results", "Choose a setting to open its tab.");
         let mut found = 0;
         for parameter in SEARCH_PARAMETERS {
-            let haystack = format!("{} {}", parameter.label, parameter.terms).to_lowercase();
-            if !haystack.contains(&query) {
+            if !parameter.matches(&query) {
                 continue;
             }
             found += 1;

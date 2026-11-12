@@ -8,6 +8,10 @@ change between minor releases while the version is below 1.0.
 
 ### Added
 
+- Settings: the Correction tab explains switching during a word and short-word
+  context. Search understands queries such as `mid word`, `short context` and
+  `контекст`; native macOS and egui share the navigation and descriptions.
+
 - Bounded short-word context correction: `nj vb` → `то ми` and `Ш have` →
   `I have` use a static adjacent-word index. Pending short words can survive a
   layout change between words; early correction waits for the next boundary.

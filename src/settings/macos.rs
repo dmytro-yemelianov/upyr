@@ -27,8 +27,13 @@ use upyr_audio::KeyCue;
 use super::{
     ACTIVATION_POLL_INTERVAL, APP_VERSION, ActivationInbox, IMPLEMENTATION_SUMMARY,
     PRIVACY_SUMMARY, PROJECT_WEBSITE_URL, REPOSITORY_URL, SEARCH_PARAMETERS, SettingsTab,
-    autostart_attention, flag_choices::FlagChoices, normalize_exceptions, parse_exceptions,
-    pretty_hotkey, sensitivity_label, sync_launch_at_login,
+    autostart_attention,
+    flag_choices::FlagChoices,
+    navigation::{
+        CONTEXT_HELP, CORRECTION_DESCRIPTION, CORRECTION_FOOTNOTE, CORRECTION_TITLE,
+        CORRECTION_TOGGLE, MIDWORD_HELP,
+    },
+    normalize_exceptions, parse_exceptions, pretty_hotkey, sensitivity_label, sync_launch_at_login,
 };
 use crate::{
     autostart,
@@ -285,15 +290,11 @@ define_class!(
                 self.set_status(true, "");
                 return;
             }
-            let result = SEARCH_PARAMETERS.iter().find(|parameter| {
-                format!("{} {}", parameter.label, parameter.terms)
-                    .to_lowercase()
-                    .contains(&query)
-            });
+            let result = SEARCH_PARAMETERS.iter().find(|parameter| parameter.matches(&query));
             if let Some(parameter) = result {
                 self.controls()
                     .tabs
-                    .selectTabViewItemAtIndex(tab_index(parameter.tab));
+                    .selectTabViewItemAtIndex(parameter.tab.index());
                 self.set_status(
                     true,
                     &format!("{}  ›  {}", parameter.tab.label(), parameter.label),
@@ -756,9 +757,7 @@ impl NativeController {
     }
 
     fn activate_tab(&self, tab: SettingsTab) {
-        self.controls()
-            .tabs
-            .selectTabViewItemAtIndex(tab_index(tab));
+        self.controls().tabs.selectTabViewItemAtIndex(tab.index());
         self.controls().window.deminiaturize(None);
         self.controls().window.makeKeyAndOrderFront(None);
         #[allow(deprecated)]
@@ -836,7 +835,7 @@ impl NativeController {
             repair_autostart,
             remove_autostart,
         ) = make_general_page(self, mtm);
-        add_tab(&tabs, "General", &general, mtm);
+        add_tab(&tabs, SettingsTab::General, &general, mtm);
         let AutomaticControls {
             page: automatic,
             enabled: auto_correct,
@@ -846,13 +845,13 @@ impl NativeController {
             terminal_correction,
             slash_commands,
         } = make_automatic_page(mtm);
-        add_tab(&tabs, "Automatic", &automatic, mtm);
+        add_tab(&tabs, SettingsTab::Automatic, &automatic, mtm);
         let ExceptionsControls {
             page: exceptions_page,
             container: exceptions_container,
             new_word: exceptions_new_word,
         } = make_exceptions_page(self, mtm);
-        add_tab(&tabs, "Exceptions", &exceptions_page, mtm);
+        add_tab(&tabs, SettingsTab::Exceptions, &exceptions_page, mtm);
         let (
             shortcuts,
             selection_shortcut,
@@ -862,7 +861,7 @@ impl NativeController {
             gesture_action,
             gesture_timeout,
         ) = make_shortcuts_page(self, mtm);
-        add_tab(&tabs, "Shortcuts", &shortcuts, mtm);
+        add_tab(&tabs, SettingsTab::Shortcuts, &shortcuts, mtm);
         let FeedbackControls {
             page: feedback,
             show_indicator,
@@ -881,11 +880,11 @@ impl NativeController {
             audio_output_status,
             sound_events,
         } = make_feedback_page(self, mtm);
-        add_tab(&tabs, "Feedback", &feedback, mtm);
+        add_tab(&tabs, SettingsTab::Feedback, &feedback, mtm);
         let (advanced, copy_delay, paste_delay, restore_delay) = make_advanced_page(mtm);
-        add_tab(&tabs, "Advanced", &advanced, mtm);
+        add_tab(&tabs, SettingsTab::Advanced, &advanced, mtm);
         let about = make_about_page(self, mtm);
-        add_tab(&tabs, "About", &about, mtm);
+        add_tab(&tabs, SettingsTab::About, &about, mtm);
         content.addSubview(&tabs);
 
         let status = label("", rect(24.0, 60.0, 672.0, 40.0), mtm);
@@ -1448,7 +1447,7 @@ pub(super) fn run(
     controller
         .controls()
         .tabs
-        .selectTabViewItemAtIndex(tab_index(initial_tab));
+        .selectTabViewItemAtIndex(initial_tab.index());
     if let Some(problem) = problem {
         controller.set_status(false, &problem);
     }
@@ -1556,56 +1555,55 @@ fn make_general_page(
 #[allow(clippy::type_complexity)]
 fn make_automatic_page(mtm: MainThreadMarker) -> AutomaticControls {
     let page = page(mtm);
-    page_header(
-        &page,
-        "Automatic correction",
-        "Opt-in, local recognition after Space. Typed prefixes are never logged.",
-        mtm,
-    );
-    let enabled = checkbox(
-        "Correct confidently recognized text after Space",
-        rect(24.0, 346.0, 470.0, 26.0),
-        mtm,
-    );
+    page_header(&page, CORRECTION_TITLE, CORRECTION_DESCRIPTION, mtm);
+    let enabled = checkbox(CORRECTION_TOGGLE, rect(24.0, 346.0, 610.0, 26.0), mtm);
     page.addSubview(&enabled);
-    page.addSubview(&label("Sensitivity", rect(28.0, 298.0, 180.0, 24.0), mtm));
+    page.addSubview(&multiline_label(
+        MIDWORD_HELP,
+        rect(28.0, 292.0, 610.0, 42.0),
+        mtm,
+    ));
+    page.addSubview(&multiline_label(
+        CONTEXT_HELP,
+        rect(28.0, 248.0, 610.0, 38.0),
+        mtm,
+    ));
+    page.addSubview(&label("Sensitivity", rect(28.0, 210.0, 180.0, 24.0), mtm));
     let sensitivity = popup(
         &[
             sensitivity_label(AutoCorrectSensitivity::Conservative),
             sensitivity_label(AutoCorrectSensitivity::Balanced),
             sensitivity_label(AutoCorrectSensitivity::Aggressive),
         ],
-        rect(252.0, 294.0, 220.0, 28.0),
+        rect(252.0, 206.0, 220.0, 28.0),
         mtm,
     );
     page.addSubview(&sensitivity);
-    let minimum = numeric_row(&page, "Minimum word length", 250.0, mtm);
-    let delay = numeric_row(&page, "Delay after Space (ms)", 206.0, mtm);
-    page.addSubview(&label(
-        "Never-correct words moved to the Exceptions tab.",
-        rect(28.0, 158.0, 400.0, 24.0),
-        mtm,
-    ));
-    page.addSubview(&label(
-        "macOS Accessibility access is checked before input monitoring starts.",
-        rect(28.0, 60.0, 590.0, 24.0),
-        mtm,
-    ));
+    let minimum = numeric_row(&page, "Minimum word length", 170.0, mtm);
+    let delay = numeric_row(&page, "Pause after Space (ms)", 132.0, mtm);
+    delay.setToolTip(Some(&NSString::from_str(
+        "This delay applies after Space; a clear prefix can switch immediately during typing.",
+    )));
     let terminal_correction = checkbox(
-        "Correct words in terminals (Terminal, iTerm2, Ghostty, kitty, Warp…)",
-        rect(24.0, 124.0, 610.0, 26.0),
+        "Allow correction in terminals",
+        rect(24.0, 94.0, 610.0, 26.0),
         mtm,
     );
     terminal_correction.setToolTip(Some(&NSString::from_str(
-        "Terminals do not paste reliably, so Upyr deletes the word with Backspace and types the replacement, holding your next keys until it is done.",
+        "Opt in for Terminal, iTerm2, Ghostty, kitty and Warp. Upyr holds the next keys while replacing the tracked text; it never sends Enter.",
     )));
     page.addSubview(&terminal_correction);
     let slash_commands = checkbox(
         "Correct freshly typed /commands in Superset",
-        rect(24.0, 92.0, 610.0, 26.0),
+        rect(24.0, 62.0, 610.0, 26.0),
         mtm,
     );
     page.addSubview(&slash_commands);
+    page.addSubview(&multiline_label(
+        CORRECTION_FOOTNOTE,
+        rect(28.0, 14.0, 610.0, 38.0),
+        mtm,
+    ));
     AutomaticControls {
         page,
         enabled,
@@ -2148,9 +2146,9 @@ fn page_header(page: &NSView, title: &str, description: &str, mtm: MainThreadMar
     page.addSubview(&label(description, rect(24.0, 378.0, 610.0, 22.0), mtm));
 }
 
-fn add_tab(tabs: &NSTabView, title: &str, page: &NSView, _mtm: MainThreadMarker) {
+fn add_tab(tabs: &NSTabView, tab: SettingsTab, page: &NSView, _mtm: MainThreadMarker) {
     let item = unsafe { NSTabViewItem::initWithIdentifier(NSTabViewItem::alloc(), None) };
-    item.setLabel(&NSString::from_str(title));
+    item.setLabel(&NSString::from_str(tab.label()));
     item.setView(Some(page));
     tabs.addTabViewItem(&item);
 }
@@ -2162,7 +2160,8 @@ fn label(value: &str, frame: NSRect, mtm: MainThreadMarker) -> Retained<NSTextFi
 }
 
 fn multiline_label(value: &str, frame: NSRect, mtm: MainThreadMarker) -> Retained<NSTextField> {
-    let label = label(value, frame, mtm);
+    let label = NSTextField::wrappingLabelWithString(&NSString::from_str(value), mtm);
+    label.setFrame(frame);
     label.setMaximumNumberOfLines(3);
     label.setUsesSingleLineMode(false);
     label
@@ -2247,18 +2246,6 @@ fn parse_number(field: &NSTextField, label: &str, min: u64, max: u64) -> Result<
 
 fn rect(x: f64, y: f64, width: f64, height: f64) -> NSRect {
     NSRect::new(NSPoint::new(x, y), NSSize::new(width, height))
-}
-
-fn tab_index(tab: SettingsTab) -> isize {
-    match tab {
-        SettingsTab::General => 0,
-        SettingsTab::Automatic => 1,
-        SettingsTab::Exceptions => 2,
-        SettingsTab::Shortcuts => 3,
-        SettingsTab::Feedback => 4,
-        SettingsTab::Advanced => 5,
-        SettingsTab::About => 6,
-    }
 }
 
 fn shortcuts_equal(left: &str, right: &str) -> bool {
