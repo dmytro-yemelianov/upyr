@@ -8,7 +8,7 @@ Specification: [pixel-settings-parity.md](../specs/pixel-settings-parity.md).
 - [x] P3 — Add flag selection/preview using existing bundled images and rules.
 - [x] P4 — Verify control coverage, persistence and recorder behavior; run
   focused tests, formatting, cross-platform Clippy and release build.
-- [ ] P5 — Inspect the isolated GUI, install with backup and record evidence.
+- [x] P5 — Inspect the isolated GUI, install with backup and record evidence.
 
 Work in this order. Do not alter engine behavior or language assets. Do not
 toggle real login items or play sound previews as part of verification.
@@ -44,4 +44,12 @@ egui content on this Mac; semantic/input coverage comes from headless egui
 tests. A full OS screen-reader audit and live audio/startup mutation tests
 were not performed.
 
-Installation evidence follows below.
+Implementation `4ea5cf6` was installed in `/Applications/Upyr.app`; the prior
+app is retained under `.stos/install-settings-parity-20261112/previous/Upyr.app`.
+All three prepared binary hashes matched the installation, and the background
+app restarted. Both installed help entry points and an isolated TUI save passed.
+The user's config hash and launch-at-login status remained unchanged.
+
+Release binary sizes before local packaging: CLI 19,594,400 bytes, settings
+6,883,024 bytes, background 14,483,744 bytes. Detailed local evidence is in
+`.stos/settings-parity/`. No engine or language-model data changed.
