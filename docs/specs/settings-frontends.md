@@ -9,8 +9,13 @@ Implement the shared-state/separate-renderer approach reviewed in
 GUI and a local terminal interface. Deliver working Correction and Exceptions
 screens, not a replacement for every native settings page.
 
-The existing default settings window remains available. `upyr settings --pixel`
-and `upyr-settings --pixel` open the optional GUI; `--tui` opens a local terminal
+The tray's Settings action opens the pixel-style GUI. Repeating it focuses the
+existing pixel window. A Full Settings button opens the full desktop editor,
+asking before discarding unsaved edits and releasing the instance guard before
+launching the replacement window. Repair/startup flows and About still open the
+full desktop editor. `upyr settings` without flags also opens the full editor.
+`upyr settings --pixel` and `upyr-settings --pixel` open the pixel GUI;
+`--tui` opens a local terminal
 editor. These flags are mutually exclusive. Help must work without opening a
 window or touching a configuration file. The new front ends show their limited
 scope and explain how to open the full settings window.
@@ -86,6 +91,8 @@ front ends do not modify login items, input sources or permissions directly.
 - AC7: TUI replay edits, saves, reloads and refuses implicit dirty discard; control text cannot inject ANSI.
 - AC8: existing settings tests, full workspace tests, formatting, Clippy and engine contract pass.
 - AC9: user configuration is unchanged by verification; GUI verification uses an isolated config.
+- AC10: tray Settings opens pixel style; a second activation focuses it; Full
+  Settings transitions safely to the full editor without losing dirty edits.
 
 No latency, memory or binary-size improvement is claimed. Record build size and
 smoke-test evidence. Windows/Linux CI remains configured; local results must

@@ -19,6 +19,17 @@ scope deviation and its evidence here before treating the task as complete.
 
 ## Evidence
 
+## Menu integration follow-up
+
+The first implementation left the tray action on the native launcher. The user
+expects the new style from Settings in the menu, so AC10 now covers that route.
+
+- [ ] M1 — Route tray Settings to pixel; preserve full settings for repair/About.
+- [ ] M2 — Handle repeat activation and a guarded Full Settings transition.
+- [ ] M3 — Test activation/discard behavior, verify the menu flow and install.
+
+## Initial implementation evidence
+
 2026-11-12, macOS arm64 / Rust 1.88. The spec and initial plan were committed
 first as `8e86198`.
 
