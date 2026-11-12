@@ -2,6 +2,8 @@
 #![allow(dead_code)]
 #![cfg(not(test))]
 
+// This standalone adapter includes platform-specific public re-exports.
+#[allow(unused_imports)]
 #[path = "../src/auto_correct.rs"]
 mod auto_correct;
 use device_query::Keycode;

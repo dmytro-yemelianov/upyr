@@ -1,6 +1,8 @@
 //! Offline Space/Enter and cache-pressure probes; no desktop input is sent.
 #![cfg(not(test))]
 #![allow(dead_code)]
+// This standalone adapter includes platform-specific public re-exports.
+#[allow(unused_imports)]
 #[path = "../src/auto_correct.rs"]
 mod auto_correct;
 use device_query::Keycode;
@@ -533,6 +535,7 @@ fn main() {
             }
         });
         report("context_scoring", times, sum, mem);
+        #[cfg(target_os = "macos")]
         return;
     }
     #[cfg(target_os = "macos")]

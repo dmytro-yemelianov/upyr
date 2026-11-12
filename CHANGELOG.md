@@ -8,6 +8,13 @@ change between minor releases while the version is below 1.0.
 
 ### Added
 
+- Optional `upyr settings --pixel` and `--tui` editors for Correction and
+  Exceptions, sharing a staged draft, validation and concurrent-config merge
+  with the existing Save flow. Invalid edits remain visible; failed saves keep
+  them, and closing or reloading a dirty editor requires explicit discard.
+  The GUI uses scalable retro styling with Unicode fields and semantic labels;
+  the local TUI accepts line commands without SSH or raw keyboard mode.
+
 - Settings: the Correction tab explains switching during a word and short-word
   context. Search understands queries such as `mid word`, `short context` and
   `контекст`; native macOS and egui share the navigation and descriptions.

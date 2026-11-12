@@ -1,6 +1,6 @@
 # Settings front ends v1
 
-Status: implementation in progress. Owner: Upyr. Date: 2026-11-12.
+Status: implemented; verification is recorded in the plan. Owner: Upyr. Date: 2026-11-12.
 
 ## Goal and scope
 
@@ -50,7 +50,8 @@ minimum length, Space delay, and the shared mid-word/context explanations.
 Exceptions supports adding, editing and deleting Unicode rows, including long
 values in a scrolling area. Save, Revert and Reload are explicit actions. Show
 unsaved state, save errors and successful save status. Confirm discarding dirty
-state on Reload/close; Revert is an explicit discard action. Disable Save while
+state on Reload/close, including text pending in the Add words field. Save also
+includes that pending text; Revert is an explicit discard action. Disable Save while
 fields are invalid. Keyboard Tab/Shift+Tab, selection, paste and ordinary text
 editing use egui semantics. Scale and scroll instead of clipping on small windows.
 

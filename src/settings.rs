@@ -1,5 +1,4 @@
 use std::{
-    collections::HashSet,
     env,
     fs::{self, OpenOptions},
     io::Write,
@@ -12,7 +11,7 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 #[cfg(not(target_os = "macos"))]
-use std::time::Instant;
+use std::{collections::HashSet, time::Instant};
 
 #[cfg(not(target_os = "macos"))]
 use anyhow::anyhow;
@@ -34,9 +33,16 @@ use crate::{
     layout::Direction,
 };
 
+mod draft;
 #[cfg(any(target_os = "macos", test))]
 mod flag_choices;
 mod navigation;
+mod persistence;
+mod pixel;
+mod tui;
+#[cfg(any(target_os = "macos", test))]
+use draft::normalize_exceptions;
+use draft::parse_exceptions;
 #[cfg(not(target_os = "macos"))]
 use navigation::{
     CONTEXT_HELP, CORRECTION_DESCRIPTION, CORRECTION_FOOTNOTE, CORRECTION_TITLE, CORRECTION_TOGGLE,
@@ -176,20 +182,76 @@ impl ActivationInbox {
     }
 }
 
+/// Optional editors use the same configuration and settings-instance guard.
+#[derive(Debug, Clone, Default, clap::Args)]
+pub struct SettingsOptions {
+    /// Open the pixel-style Correction and Exceptions editor.
+    #[arg(long, conflicts_with_all = ["tui", "about"])]
+    pub pixel: bool,
+    /// Open a local line-oriented terminal settings editor.
+    #[arg(long, conflicts_with = "about")]
+    pub tui: bool,
+    #[arg(long, hide = true)]
+    pub about: bool,
+}
+
 pub fn run() -> Result<()> {
-    let requested_tab = requested_tab();
+    run_with(SettingsOptions {
+        about: requested_tab() == SettingsTab::About,
+        ..Default::default()
+    })
+}
+
+pub fn run_with(options: SettingsOptions) -> Result<()> {
+    anyhow::ensure!(
+        !(options.pixel && options.tui) && !(options.about && (options.pixel || options.tui)),
+        "Choose one settings interface"
+    );
+    let requested_tab = if options.about {
+        SettingsTab::About
+    } else {
+        SettingsTab::General
+    };
+    let frontend = if options.pixel {
+        "pixel"
+    } else if options.tui {
+        "tui"
+    } else {
+        "native"
+    };
     let instance_key = settings_instance_key()?;
     let instance = SingleInstance::new(&instance_key)
         .context("failed to create the settings single-instance guard")?;
+    let activation = ActivationInbox::open()?;
+    let mode_path = activation.directory.join("frontend");
     if !instance.is_single() {
-        return ActivationInbox::open()?.send(requested_tab);
+        let current = fs::read_to_string(&mode_path).unwrap_or_else(|_| "native".into());
+        anyhow::ensure!(
+            frontend == "native" && current == "native",
+            "Settings is already open in {current} mode. Close that editor before choosing another interface."
+        );
+        return activation.send(requested_tab);
+    }
+    fs::write(&mode_path, frontend).context("could not record settings interface")?;
+    struct FrontendLease(PathBuf);
+    impl Drop for FrontendLease {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+    let _frontend_lease = FrontendLease(mode_path);
+    if options.tui {
+        return tui::run();
+    }
+    if options.pixel {
+        return pixel::run();
     }
 
-    let activation = ActivationInbox::open()?;
-    // Settings is how a broken file gets fixed, so it opens on defaults.
+    // Keep the existing window available to inspect defaults. Saving still
+    // requires a readable current file so concurrent edits are not lost.
     let (config, problem) = Config::load_or_default();
     let problem = problem.map(|problem| {
-        format!("Could not read the settings file ({problem}). These are the defaults; saving replaces the file.")
+        format!("Could not read the settings file ({problem}). Showing defaults; repair the file before saving.")
     });
     let autostart_status = autostart::status()?;
     let initial_tab = activation.drain()?.unwrap_or(requested_tab);
@@ -311,7 +373,14 @@ pub fn spawn_about() -> Result<()> {
 
 fn spawn_tab(tab: SettingsTab) -> Result<()> {
     if is_open() {
-        return ActivationInbox::open()?.send(tab);
+        let inbox = ActivationInbox::open()?;
+        let current = fs::read_to_string(inbox.directory.join("frontend"))
+            .unwrap_or_else(|_| "native".into());
+        anyhow::ensure!(
+            current == "native",
+            "Settings is already open in {current} mode. Close that editor to open the full settings window."
+        );
+        return inbox.send(tab);
     }
 
     let argument = tab.cli_argument();
@@ -463,16 +532,13 @@ impl SettingsApp {
     }
 
     fn save(&mut self) {
-        // Rows are editable in place; re-split them so an edit such as
-        // "two words" saves as two exceptions instead of failing validation.
-        self.config.auto_correct_exceptions =
-            normalize_exceptions(&self.config.auto_correct_exceptions);
-        // Keep changes made elsewhere while this window was open.
-        let config = Config::for_settings_save(&self.loaded, self.config.clone());
-        if let Err(error) = config.write(true) {
-            self.status = Some((false, format!("Could not save settings: {error:#}")));
-            return;
-        }
+        let config = match persistence::save_edits(&self.loaded, self.config.clone()) {
+            Ok(config) => config,
+            Err(error) => {
+                self.status = Some((false, format!("Could not save settings: {error:#}")));
+                return;
+            }
+        };
         self.loaded = config.clone();
         self.config = config;
 
@@ -1362,33 +1428,6 @@ fn pretty_key(code: Code) -> String {
     }
 }
 
-/// Splits typed exceptions on commas and any whitespace, so "two words"
-/// becomes two single-word entries, the only kind validation accepts.
-fn parse_exceptions(source: &str) -> Vec<String> {
-    let mut seen = HashSet::new();
-    source
-        .split(|character: char| character == ',' || character.is_whitespace())
-        .filter(|word| !word.is_empty())
-        .filter(|word| seen.insert(word.to_lowercase()))
-        .map(str::to_owned)
-        .collect()
-}
-
-/// Re-parses exception rows after inline edits, so Save never meets a blank,
-/// duplicate or multi-word entry that configuration validation would reject.
-fn normalize_exceptions<I>(words: I) -> Vec<String>
-where
-    I: IntoIterator,
-    I::Item: AsRef<str>,
-{
-    let joined = words
-        .into_iter()
-        .map(|word| word.as_ref().to_owned())
-        .collect::<Vec<_>>()
-        .join("\n");
-    parse_exceptions(&joined)
-}
-
 fn sensitivity_label(value: AutoCorrectSensitivity) -> &'static str {
     match value {
         AutoCorrectSensitivity::Conservative => "Conservative",
@@ -1427,6 +1466,36 @@ fn direction_label(value: Direction) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_cli_flags_are_explicit_and_mutually_exclusive() {
+        use clap::Parser;
+        #[derive(Debug, Parser)]
+        struct Cli {
+            #[command(flatten)]
+            options: SettingsOptions,
+        }
+        assert!(
+            Cli::try_parse_from(["settings", "--pixel"])
+                .unwrap()
+                .options
+                .pixel
+        );
+        assert!(
+            Cli::try_parse_from(["settings", "--tui"])
+                .unwrap()
+                .options
+                .tui
+        );
+        assert!(Cli::try_parse_from(["settings", "--pixel", "--tui"]).is_err());
+        assert!(Cli::try_parse_from(["settings", "--pixel", "--about"]).is_err());
+        assert_eq!(
+            Cli::try_parse_from(["settings", "--help"])
+                .unwrap_err()
+                .kind(),
+            clap::error::ErrorKind::DisplayHelp
+        );
+    }
 
     #[test]
     fn exception_parser_trims_and_deduplicates_case_insensitively() {

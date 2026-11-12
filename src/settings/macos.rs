@@ -193,12 +193,13 @@ define_class!(
                     return;
                 }
             };
-            // Keep changes made elsewhere while this window was open.
-            let config = Config::for_settings_save(&self.ivars().config.borrow(), edited);
-            if let Err(error) = config.write(true) {
-                self.set_status(false, &format!("Could not save settings: {error:#}"));
-                return;
-            }
+            let config = match super::persistence::save_edits(&self.ivars().config.borrow(), edited) {
+                Ok(config) => config,
+                Err(error) => {
+                    self.set_status(false, &format!("Could not save settings: {error:#}"));
+                    return;
+                }
+            };
             self.ivars().flag_choices.borrow_mut().accept(config.globe_switch.layout_flags.clone());
             // Show the saved list: an edited "two words" row became two rows.
             self.rebuild_exception_rows(&config.auto_correct_exceptions);

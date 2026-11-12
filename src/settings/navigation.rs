@@ -5,7 +5,7 @@ pub(super) const CORRECTION_TITLE: &str = "Automatic correction";
 pub(super) const CORRECTION_DESCRIPTION: &str =
     "Fix the keyboard layout while typing or at a word boundary.";
 pub(super) const CORRECTION_TOGGLE: &str = "Correct the wrong keyboard layout automatically";
-pub(super) const MIDWORD_HELP: &str = "During a word: clear prefixes (сщте → cont) switch from 4 letters, or your higher minimum. Requires Switch OS layout in General.";
+pub(super) const MIDWORD_HELP: &str = "During a word: clear prefixes (сщте → cont) switch from 4 letters, or your higher minimum. Requires Switch OS layout.";
 pub(super) const CONTEXT_HELP: &str =
     "At a word boundary: short words can wait for context (nj vb → то ми; Ш have → I have).";
 pub(super) const CORRECTION_FOOTNOTE: &str =

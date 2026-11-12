@@ -281,7 +281,27 @@ upyr autostart enable
 upyr settings
 ```
 
-The settings app exposes General, Automatic, Exceptions, Shortcuts, Feedback, and Advanced tabs. Automatic sensitivity can be conservative, balanced, or aggressive; deliberate strings can be added on the Exceptions tab. Feedback includes three local sound packs: Upyr Original, Pocket Arcade, and the opt-in Anime Reactions pack. Every key cue and most event cues are synthesized locally (the Anime pack's six application-event cues are the one exception; see below); keyboard feedback crosses into the app as physical key categories only and never stores typed characters. Use `UPYR_CONFIG` to select a different config file.
+The settings app exposes General, Correction, Exceptions, Shortcuts, Feedback, Advanced, and About tabs. Automatic sensitivity can be conservative, balanced, or aggressive; deliberate strings can be added on the Exceptions tab. Feedback includes three local sound packs: Upyr Original, Pocket Arcade, and the opt-in Anime Reactions pack. Every key cue and most event cues are synthesized locally (the Anime pack's six application-event cues are the one exception; see below); keyboard feedback crosses into the app as physical key categories only and never stores typed characters. Use `UPYR_CONFIG` to select a different config file.
+
+Two optional local editors cover Correction and Exceptions:
+
+```sh
+upyr settings --pixel   # retro-style GUI with Unicode text fields
+upyr settings --tui     # line-oriented terminal UI; type help for commands
+```
+
+The standalone `upyr-settings` executable accepts the same flags. Close the
+current editor before selecting another interface. Both use the same draft,
+validation and merge-on-save logic as the full settings window. Save applies
+changes; Revert discards local edits; Reload reads the latest config. Invalid
+values remain editable and cannot be saved. GUI close/Reload asks before
+discarding unsaved changes; the TUI requires `quit!` or `reload!`. EOF never
+saves. The terminal interface uses no SSH server or raw/global keyboard hooks.
+Use the default window for shortcuts, flags, audio and startup controls.
+
+[Specification](docs/specs/settings-frontends.md) ·
+[Implementation and verification plan](docs/plans/settings-frontends.md)
+
 
 Two optional shortcuts act on the selection without switching layouts:
 `transliterate_hotkey` writes Ukrainian in Latin by the 2010 national system
