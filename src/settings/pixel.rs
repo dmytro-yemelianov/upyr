@@ -1,6 +1,6 @@
 //! Optional retro form renderer. Semantic egui widgets retain Unicode editing.
 use super::{
-    ACTIVATION_POLL_INTERVAL, ActivationInbox,
+    ACTIVATION_POLL_INTERVAL, ActivationInbox, SEARCH_PARAMETERS, SettingsApp, SettingsTab,
     draft::{SettingsAction, SettingsDraft},
     navigation::{CONTEXT_HELP, CORRECTION_FOOTNOTE, MIDWORD_HELP},
     persistence::{self, LocalStore, SettingsStore},
@@ -11,11 +11,8 @@ use anyhow::{Result, anyhow};
 use eframe::egui::{self, Color32, RichText};
 use std::{cell::Cell, rc::Rc, time::Instant};
 
-#[derive(Clone, Copy, PartialEq)]
-enum Section {
-    Correction,
-    Exceptions,
-}
+#[cfg(target_os = "macos")]
+pub(super) mod flags;
 #[derive(Clone, Copy)]
 enum Discard {
     Close,
@@ -23,8 +20,42 @@ enum Discard {
     FullSettings,
 }
 
+fn apply_style(ctx: &egui::Context) {
+    let mut style = (*ctx.style()).clone();
+    style.visuals = egui::Visuals::dark();
+    style.visuals.panel_fill = Color32::from_rgb(17, 24, 35);
+    style.visuals.selection.bg_fill = Color32::from_rgb(35, 79, 102);
+    style.visuals.selection.stroke.color = Color32::from_rgb(142, 224, 184);
+    style.visuals.window_corner_radius = egui::CornerRadius::ZERO;
+    for widget in [
+        &mut style.visuals.widgets.inactive,
+        &mut style.visuals.widgets.hovered,
+        &mut style.visuals.widgets.active,
+        &mut style.visuals.widgets.noninteractive,
+        &mut style.visuals.widgets.open,
+    ] {
+        widget.corner_radius = egui::CornerRadius::ZERO;
+    }
+    style.override_font_id = Some(egui::FontId::monospace(15.0));
+    style.spacing.item_spacing = egui::vec2(12.0, 10.0);
+    style.spacing.button_padding = egui::vec2(14.0, 8.0);
+    ctx.set_style(style);
+}
+
 pub(super) fn run(activation: ActivationInbox) -> Result<bool> {
     let config = Config::load()?;
+    let forms = SettingsApp::new(
+        config.clone(),
+        crate::autostart::status()?,
+        SettingsTab::General,
+        activation.clone(),
+    );
+    #[cfg(target_os = "macos")]
+    let forms = {
+        let mut forms = forms;
+        forms.flags.load();
+        forms
+    };
     let open_full_settings = Rc::new(Cell::new(false));
     let next_editor = Rc::clone(&open_full_settings);
     eframe::run_native(
@@ -36,29 +67,13 @@ pub(super) fn run(activation: ActivationInbox) -> Result<bool> {
             ..Default::default()
         },
         Box::new(move |cc| {
-            let mut style = (*cc.egui_ctx.style()).clone();
-            style.visuals = egui::Visuals::dark();
-            style.visuals.panel_fill = Color32::from_rgb(17, 24, 35);
-            style.visuals.selection.bg_fill = Color32::from_rgb(35, 79, 102);
-            style.visuals.selection.stroke.color = Color32::from_rgb(142, 224, 184);
-            style.visuals.window_corner_radius = egui::CornerRadius::ZERO;
-            for widget in [
-                &mut style.visuals.widgets.inactive,
-                &mut style.visuals.widgets.hovered,
-                &mut style.visuals.widgets.active,
-                &mut style.visuals.widgets.noninteractive,
-                &mut style.visuals.widgets.open,
-            ] {
-                widget.corner_radius = egui::CornerRadius::ZERO;
-            }
-            style.override_font_id = Some(egui::FontId::monospace(15.0));
-            style.spacing.item_spacing = egui::vec2(12.0, 10.0);
-            style.spacing.button_padding = egui::vec2(14.0, 8.0);
-            cc.egui_ctx.set_style(style);
+            apply_style(&cc.egui_ctx);
             cc.egui_ctx.enable_accesskit();
             Ok(Box::new(PixelSettings {
                 draft: SettingsDraft::new(config),
-                section: Section::Correction,
+                section: SettingsTab::General,
+                forms,
+                search: String::new(),
                 new_exception: String::new(),
                 status: String::new(),
                 confirm: None,
@@ -75,7 +90,9 @@ pub(super) fn run(activation: ActivationInbox) -> Result<bool> {
 
 struct PixelSettings {
     draft: SettingsDraft,
-    section: Section,
+    section: SettingsTab,
+    forms: SettingsApp,
+    search: String,
     new_exception: String,
     status: String,
     confirm: Option<Discard>,
@@ -117,7 +134,7 @@ impl PixelSettings {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
     fn dirty(&self) -> bool {
-        self.draft.dirty() || !self.new_exception.trim().is_empty()
+        self.draft.dirty() || !self.new_exception.trim().is_empty() || self.forms.startup_dirty()
     }
     fn stage_new_exceptions(&mut self) {
         let text = std::mem::take(&mut self.new_exception);
@@ -126,6 +143,9 @@ impl PixelSettings {
     fn revert(&mut self) {
         self.new_exception.clear();
         self.apply(SettingsAction::Revert);
+        self.forms.launch_at_login = self.forms.autostart_status.enabled;
+        self.forms.recording = None;
+        self.forms.shortcut_error = None;
     }
     fn apply(&mut self, action: SettingsAction) {
         self.status = match self.draft.apply(action) {
@@ -133,21 +153,30 @@ impl PixelSettings {
             Err(e) => format!("{e:#}"),
         };
     }
-    fn save(&mut self, store: &impl SettingsStore) {
+    fn save(&mut self, store: &impl SettingsStore) -> bool {
         self.stage_new_exceptions();
-        self.status = match persistence::save(&mut self.draft, store) {
+        let result = persistence::save(&mut self.draft, store);
+        let saved = result.is_ok();
+        self.status = match result {
             Ok(()) => "Saved. Upyr will reload these settings.".into(),
             Err(e) => format!("Save failed: {e:#}"),
         };
+        saved
     }
-    fn reload(&mut self, store: &impl SettingsStore) {
-        self.status = match persistence::reload(&mut self.draft, store) {
+    fn reload(&mut self, store: &impl SettingsStore) -> bool {
+        let result = persistence::reload(&mut self.draft, store);
+        let loaded = result.is_ok();
+        self.status = match result {
             Ok(()) => {
                 self.new_exception.clear();
+                self.forms.launch_at_login = self.forms.autostart_status.enabled;
+                self.forms.recording = None;
+                self.forms.shortcut_error = None;
                 "Reloaded from disk.".into()
             }
             Err(e) => format!("Reload failed: {e:#}"),
         };
+        loaded
     }
     fn correction(&mut self, ui: &mut egui::Ui) {
         ui.heading("CORRECTION");
@@ -212,6 +241,23 @@ impl PixelSettings {
             self.apply(SettingsAction::Delay(delay));
         }
         ui.small("Clear prefixes can switch immediately while typing.");
+        #[cfg(target_os = "macos")]
+        {
+            let mut terminal = super::macos::terminal_correction_enabled(&self.draft.edited);
+            if ui
+                .checkbox(&mut terminal, "Allow correction in terminals")
+                .changed()
+            {
+                super::macos::set_terminal_correction(&mut self.draft.edited, terminal);
+            }
+            let mut slash = super::macos::superset_slash_commands_enabled(&self.draft.edited);
+            if ui
+                .checkbox(&mut slash, "Correct freshly typed /commands in Superset")
+                .changed()
+            {
+                super::macos::set_superset_slash_commands(&mut self.draft.edited, slash);
+            }
+        }
         ui.separator();
         ui.label(CORRECTION_FOOTNOTE);
     }
@@ -262,8 +308,66 @@ impl PixelSettings {
     }
 }
 impl PixelSettings {
+    fn capture_shortcut(&mut self, ctx: &egui::Context) {
+        if self.confirm.is_none() && self.forms.recording.is_some() {
+            self.forms.config.clone_from(&self.draft.edited);
+            self.forms.capture_shortcut(ctx);
+            self.draft.edited.clone_from(&self.forms.config);
+            // A recorded Space/Enter must not also press a form button.
+            ctx.input_mut(|input| {
+                input.events.retain(|event| {
+                    !matches!(event, egui::Event::Key { .. } | egui::Event::Text(_))
+                })
+            });
+        }
+    }
+
+    fn other_page(&mut self, ui: &mut egui::Ui) {
+        self.forms.config.clone_from(&self.draft.edited);
+        match self.section {
+            SettingsTab::General => self.forms.draw_general(ui),
+            SettingsTab::Shortcuts => self.forms.draw_shortcuts(ui),
+            SettingsTab::Feedback => self.forms.draw_feedback(ui),
+            SettingsTab::Advanced => self.forms.draw_advanced(ui),
+            SettingsTab::About => self.forms.draw_about(ui),
+            SettingsTab::Automatic | SettingsTab::Exceptions => unreachable!(),
+        }
+        self.draft.edited.clone_from(&self.forms.config);
+        if let Some((_, message)) = self.forms.status.take() {
+            self.status = message;
+        }
+    }
+
+    fn reload_desktop(
+        &mut self,
+        store: &impl SettingsStore,
+        startup: Result<crate::autostart::AutostartStatus>,
+    ) {
+        // Read both sources before accepting either, so a failed OS status
+        // read cannot discard a pending launch-at-login choice.
+        match startup {
+            Ok(status) => {
+                if self.reload(store) {
+                    self.forms.launch_at_login = status.enabled;
+                    self.forms.autostart_status = status;
+                }
+            }
+            Err(error) => {
+                self.status =
+                    format!("Reload failed: could not read launch-at-login status: {error:#}")
+            }
+        }
+    }
+
     fn draw(&mut self, ctx: &egui::Context) {
         self.poll_activation(ctx);
+        self.capture_shortcut(ctx);
+        #[cfg(target_os = "macos")]
+        self.forms.flags.poll_preview(ctx);
+        #[cfg(target_os = "macos")]
+        if self.section == SettingsTab::Feedback && self.activation.is_some() {
+            self.forms.refresh_audio_status();
+        }
         if ctx.input(|i| i.viewport().close_requested()) && self.dirty() && !self.allow_close {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.confirm = Some(Discard::Close);
@@ -280,14 +384,29 @@ impl PixelSettings {
             });
             ui.add_enabled_ui(self.confirm.is_none(), |ui| {
                 ui.horizontal_wrapped(|ui| {
-                    ui.label("Correction & Exceptions");
-                    if ui.button("Full Settings…").clicked() {
+                    ui.label("All settings");
+                    if ui.button("Native interface…").clicked() {
                         self.request_full_settings(ctx);
                     }
                 });
-                ui.horizontal(|ui| {
-                    ui.selectable_value(&mut self.section, Section::Correction, "Correction");
-                    ui.selectable_value(&mut self.section, Section::Exceptions, "Exceptions");
+                let label = ui.label("Search settings");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.search)
+                        .id(egui::Id::new("pixel-search"))
+                        .desired_width(f32::INFINITY),
+                )
+                .labelled_by(label.id);
+                ui.horizontal_wrapped(|ui| {
+                    for tab in SettingsTab::ALL {
+                        if ui
+                            .selectable_label(self.section == tab, tab.label())
+                            .clicked()
+                        {
+                            self.section = tab;
+                            self.search.clear();
+                            self.forms.recording = None;
+                        }
+                    }
                 });
             });
         });
@@ -303,8 +422,12 @@ impl PixelSettings {
                     if ui
                         .add_enabled(validation.is_none(), egui::Button::new("Save"))
                         .clicked()
+                        && self.save(&LocalStore)
                     {
-                        self.save(&LocalStore);
+                        self.forms.save_startup();
+                        if let Some((_, message)) = self.forms.status.take() {
+                            self.status = message;
+                        }
                     }
                     if ui
                         .add_enabled(self.dirty(), egui::Button::new("Revert"))
@@ -316,18 +439,50 @@ impl PixelSettings {
                         if self.dirty() {
                             self.confirm = Some(Discard::Reload);
                         } else {
-                            self.reload(&LocalStore);
+                            self.reload_desktop(&LocalStore, crate::autostart::status());
                         }
+                    }
+                    if ui.button("Defaults").clicked() {
+                        self.apply(SettingsAction::Defaults);
+                        self.new_exception.clear();
+                        self.forms.recording = None;
+                        self.forms.shortcut_error = None;
+                        self.status = "Defaults staged. Choose Save to apply them.".into();
                     }
                 });
             });
         });
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add_enabled_ui(self.confirm.is_none(), |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| match self.section {
-                    Section::Correction => self.correction(ui),
-                    Section::Exceptions => self.exceptions(ui),
-                });
+                egui::ScrollArea::vertical()
+                    .id_salt(self.section.command())
+                    .show(ui, |ui| {
+                        if !self.search.trim().is_empty() {
+                            let mut count = 0;
+                            let query = self.search.clone();
+                            for item in SEARCH_PARAMETERS.iter().filter(|item| item.matches(&query))
+                            {
+                                count += 1;
+                                if ui
+                                    .button(format!("{} › {}", item.tab.label(), item.label))
+                                    .clicked()
+                                {
+                                    self.section = item.tab;
+                                    self.search.clear();
+                                    break;
+                                }
+                            }
+                            if count == 0 {
+                                ui.label("No settings match this search.");
+                            }
+                        } else {
+                            match self.section {
+                                SettingsTab::Automatic => self.correction(ui),
+                                SettingsTab::Exceptions => self.exceptions(ui),
+                                _ => self.other_page(ui),
+                            }
+                        }
+                    });
             });
         });
         if let Some(discard) = self.confirm {
@@ -345,7 +500,9 @@ impl PixelSettings {
                                 self.allow_close = true;
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                             }
-                            Discard::Reload => self.reload(&LocalStore),
+                            Discard::Reload => {
+                                self.reload_desktop(&LocalStore, crate::autostart::status());
+                            }
                             Discard::FullSettings => self.open_full_settings(ctx),
                         }
                     }
@@ -381,9 +538,25 @@ mod tests {
         }
     }
     fn app() -> PixelSettings {
+        let config = Config::default();
+        let forms = SettingsApp::new(
+            config.clone(),
+            crate::autostart::AutostartStatus {
+                enabled: false,
+                state: crate::autostart::AutostartState::Disabled,
+                location: String::new(),
+                detail: None,
+            },
+            SettingsTab::General,
+            ActivationInbox {
+                directory: std::env::temp_dir().join("unused-pixel-test-inbox"),
+            },
+        );
         PixelSettings {
-            draft: SettingsDraft::new(Config::default()),
-            section: Section::Correction,
+            draft: SettingsDraft::new(config),
+            forms,
+            search: String::new(),
+            section: SettingsTab::Automatic,
             new_exception: String::new(),
             status: String::new(),
             confirm: None,
@@ -424,7 +597,7 @@ mod tests {
         app.draft
             .apply(SettingsAction::AddExceptions("Ґанок".into()))
             .unwrap();
-        app.section = Section::Exceptions;
+        app.section = SettingsTab::Exceptions;
         let _ = ctx.run(input(vec![]), |ctx| app.draw(ctx));
         ctx.memory_mut(|m| m.request_focus(egui::Id::new(("pixel-exception", 0_usize))));
         let value = "Їжак Єва Іван Ґанок ".repeat(20);
@@ -502,7 +675,7 @@ mod tests {
     fn pending_exception_is_protected_and_saved_without_pressing_add() {
         let ctx = egui::Context::default();
         let mut app = app();
-        app.section = Section::Exceptions;
+        app.section = SettingsTab::Exceptions;
         let _ = ctx.run(input(vec![]), |ctx| app.draw(ctx));
         ctx.memory_mut(|m| m.request_focus(egui::Id::new("pixel-new-exception")));
         let _ = ctx.run(input(replace_text("Їжак, Єва їжак")), |ctx| {
@@ -569,7 +742,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut app = app();
         app.new_exception = "Їжак".into();
-        app.section = Section::Exceptions;
+        app.section = SettingsTab::Exceptions;
         app.activation = Some(inbox.clone());
         for _ in 0..2 {
             inbox.send(SettingsTab::General).unwrap();
@@ -579,7 +752,7 @@ mod tests {
             assert!(commands.contains(&egui::ViewportCommand::Minimized(false)));
             assert!(commands.contains(&egui::ViewportCommand::Focus));
             assert_eq!(app.new_exception, "Їжак");
-            assert!(matches!(app.section, Section::Exceptions));
+            assert!(matches!(app.section, SettingsTab::Exceptions));
             assert!(app.dirty());
             assert_eq!(inbox.drain().unwrap(), None);
         }
@@ -620,5 +793,239 @@ mod tests {
         let _ = ctx.run(input(vec![]), |ctx| clean.request_full_settings(ctx));
         assert!(clean.confirm.is_none());
         assert!(clean.open_full_settings.get());
+    }
+
+    #[test]
+    fn every_page_renders_at_small_size_and_search_preserves_the_draft() {
+        let ctx = egui::Context::default();
+        apply_style(&ctx);
+        ctx.enable_accesskit();
+        let mut app = app();
+        app.draft.edited.restore_clipboard = false;
+        for (tab, expected) in [
+            (SettingsTab::General, "Conversion direction"),
+            (SettingsTab::Automatic, "CORRECTION"),
+            (SettingsTab::Exceptions, "EXCEPTIONS"),
+            (SettingsTab::Shortcuts, "Convert selection"),
+            (SettingsTab::Feedback, "Visual feedback"),
+            (SettingsTab::Advanced, "Copy delay"),
+            (SettingsTab::About, "Private by construction"),
+        ] {
+            app.section = tab;
+            let _ = ctx.run(input(vec![]), |ctx| app.draw(ctx));
+            let out = ctx.run(input(vec![]), |ctx| app.draw(ctx));
+            let tree = out.platform_output.accesskit_update.unwrap();
+            assert!(
+                tree.nodes
+                    .iter()
+                    .any(|(_, n)| n.label() == Some(expected) || n.value() == Some(expected)),
+                "missing {expected}: {:?}",
+                tree.nodes
+                    .iter()
+                    .filter_map(|(_, n)| n.label())
+                    .collect::<Vec<_>>()
+            );
+            assert!(
+                ctx.used_size().x <= 481.0,
+                "{} overflows: {:?}",
+                tab.label(),
+                ctx.used_size()
+            );
+            assert!(!app.draft.edited.restore_clipboard);
+        }
+        app.search = "copy delay".into();
+        let out = ctx.run(input(vec![]), |ctx| app.draw(ctx));
+        let tree = out.platform_output.accesskit_update.unwrap();
+        let result = tree
+            .nodes
+            .iter()
+            .find(|(_, n)| n.label() == Some("Advanced › Copy delay"))
+            .unwrap()
+            .1
+            .bounds()
+            .unwrap();
+        let pos = egui::pos2(
+            ((result.x0 + result.x1) / 2.0) as f32,
+            ((result.y0 + result.y1) / 2.0) as f32,
+        );
+        for pressed in [true, false] {
+            let _ = ctx.run(
+                input(vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]),
+                |ctx| app.draw(ctx),
+            );
+        }
+        assert_eq!(app.section, SettingsTab::Advanced);
+        assert!(app.search.is_empty());
+        assert!(app.dirty());
+        assert!(!app.draft.edited.restore_clipboard);
+    }
+
+    #[test]
+    fn startup_edits_remain_dirty_on_failure_and_revert_without_os_effects() {
+        let mut app = app();
+        app.forms.launch_at_login = true;
+        assert!(app.dirty());
+        app.forms
+            .accept_startup_result(Err(anyhow!("simulated failure")));
+        assert!(app.forms.launch_at_login);
+        assert!(app.dirty());
+        app.revert();
+        assert!(!app.forms.launch_at_login);
+        assert!(!app.dirty());
+        app.forms.launch_at_login = true;
+        let mut enabled = app.forms.autostart_status.clone();
+        enabled.enabled = true;
+        enabled.state = crate::autostart::AutostartState::Enabled;
+        app.forms.accept_startup_result(Ok(enabled));
+        assert!(!app.dirty());
+        let store = Store {
+            config: RefCell::new(Config::default()),
+            fail: Cell::new(true),
+        };
+        app.forms.launch_at_login = false;
+        assert!(!app.save(&store));
+        assert!(!app.reload(&store));
+        assert!(!app.forms.launch_at_login);
+        assert!(app.dirty());
+        store.fail.set(false);
+        app.draft.edited.restore_clipboard = false;
+        app.reload_desktop(&store, Err(anyhow!("OS status unavailable")));
+        assert!(!app.forms.launch_at_login);
+        assert!(!app.draft.edited.restore_clipboard);
+        assert!(app.dirty());
+    }
+
+    #[test]
+    fn recorder_uses_physical_keys_rejects_conflicts_and_consumes_input() {
+        use super::super::ShortcutSlot;
+        use global_hotkey::hotkey::{Code, HotKey};
+        let ctx = egui::Context::default();
+        let mut app = app();
+        app.section = SettingsTab::Shortcuts;
+        app.forms.recording = Some(ShortcutSlot::PreviousWord);
+        let modifiers = egui::Modifiers {
+            alt: true,
+            command: true,
+            mac_cmd: cfg!(target_os = "macos"),
+            ctrl: !cfg!(target_os = "macos"),
+            ..Default::default()
+        };
+        let event = |key, physical_key| egui::Event::Key {
+            key,
+            physical_key: Some(physical_key),
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let previous = app.draft.edited.last_word_hotkey.clone();
+        let _ = ctx.run(
+            input(vec![event(egui::Key::Space, egui::Key::Space)]),
+            |ctx| {
+                app.draw(ctx);
+                assert!(!ctx.input(|i| {
+                    i.events
+                        .iter()
+                        .any(|e| matches!(e, egui::Event::Key { .. }))
+                }));
+            },
+        );
+        assert_eq!(app.draft.edited.last_word_hotkey, previous);
+        assert!(app.forms.shortcut_error.is_some());
+        let _ = ctx.run(
+            input(vec![event(egui::Key::Escape, egui::Key::Escape)]),
+            |ctx| app.draw(ctx),
+        );
+        assert!(app.forms.recording.is_none());
+        assert_eq!(app.draft.edited.last_word_hotkey, previous);
+        app.forms.recording = Some(ShortcutSlot::PreviousWord);
+        let _ = ctx.run(input(vec![event(egui::Key::Y, egui::Key::K)]), |ctx| {
+            app.draw(ctx)
+        });
+        let saved: HotKey = app.draft.edited.last_word_hotkey.parse().unwrap();
+        assert_eq!(saved.key, Code::KeyK);
+        assert!(app.forms.recording.is_none());
+        assert!(app.dirty());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn pixel_pages_include_the_native_macos_controls() {
+        let ctx = egui::Context::default();
+        apply_style(&ctx);
+        ctx.enable_accesskit();
+        let mut app = app();
+        let frame = || {
+            let mut input = input(vec![]);
+            input.screen_rect = Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(780.0, 1800.0),
+            ));
+            input
+        };
+        for (tab, expected) in [
+            (
+                SettingsTab::General,
+                vec![
+                    "Launch Upyr at login",
+                    "Tap Globe to switch keyboard layouts",
+                    "Restore clipboard contents after conversion",
+                ],
+            ),
+            (
+                SettingsTab::Automatic,
+                vec![
+                    "Allow correction in terminals",
+                    "Correct freshly typed /commands in Superset",
+                ],
+            ),
+            (
+                SettingsTab::Shortcuts,
+                vec![
+                    "Convert selection",
+                    "Fix previous word",
+                    "Undo auto-correction",
+                    "Modifier gesture",
+                    "Double-tap timeout",
+                ],
+            ),
+            (
+                SettingsTab::Feedback,
+                vec![
+                    "All Country Flags…",
+                    "Preview layout",
+                    "Headphone limit",
+                    "Enable sound feedback",
+                    "Sound pack",
+                    "Preview click",
+                    "Preview control",
+                ],
+            ),
+            (
+                SettingsTab::Advanced,
+                vec!["Copy delay", "Paste delay", "Clipboard restore delay"],
+            ),
+        ] {
+            app.section = tab;
+            let _ = ctx.run(frame(), |ctx| app.draw(ctx));
+            let out = ctx.run(frame(), |ctx| app.draw(ctx));
+            let tree = out.platform_output.accesskit_update.unwrap();
+            for text in expected {
+                assert!(
+                    tree.nodes
+                        .iter()
+                        .any(|(_, n)| n.label() == Some(text) || n.value() == Some(text)),
+                    "{} lacks {text}",
+                    tab.label()
+                );
+            }
+        }
     }
 }

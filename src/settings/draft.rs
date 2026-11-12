@@ -22,6 +22,7 @@ pub(super) enum SettingsAction {
     EditException(usize, String),
     RemoveException(usize),
     Revert,
+    Defaults,
 }
 
 impl SettingsDraft {
@@ -71,6 +72,11 @@ impl SettingsDraft {
                 self.edited.auto_correct_exceptions.remove(index);
             }
             SettingsAction::Revert => self.accept(self.base.clone()),
+            SettingsAction::Defaults => {
+                self.edited = Config::default();
+                self.minimum = self.edited.auto_correct_min_word_length.to_string();
+                self.delay = self.edited.auto_correct_delay_ms.to_string();
+            }
         }
         Ok(())
     }
@@ -171,5 +177,35 @@ mod tests {
         assert_eq!(merged.auto_correct_min_word_length, 5);
         a.accept(merged);
         assert!(!a.dirty());
+    }
+
+    #[test]
+    fn defaults_preserve_the_base_and_flag_removal_keeps_concurrent_layouts() {
+        let mut base = Config {
+            restore_clipboard: false,
+            ..Config::default()
+        };
+        base.globe_switch
+            .layout_flags
+            .insert("ABC".into(), "GB".into());
+        let mut draft = SettingsDraft::new(base.clone());
+        draft.edited.globe_switch.layout_flags.remove("ABC");
+        let mut current = base.clone();
+        current
+            .globe_switch
+            .layout_flags
+            .insert("other".into(), "Custom text".into());
+        let merged = draft.prepare_save(&current).unwrap();
+        assert!(!merged.globe_switch.layout_flags.contains_key("ABC"));
+        assert_eq!(
+            merged.globe_switch.layout_flags.get("other").unwrap(),
+            "Custom text"
+        );
+        draft.apply(SettingsAction::Defaults).unwrap();
+        assert_eq!(draft.candidate().unwrap(), Config::default());
+        assert!(draft.dirty());
+        draft.apply(SettingsAction::Revert).unwrap();
+        assert_eq!(draft.candidate().unwrap(), base);
+        assert!(!draft.dirty());
     }
 }

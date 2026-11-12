@@ -8,12 +8,17 @@ change between minor releases while the version is below 1.0.
 
 ### Added
 
+- Complete pixel settings: all seven pages and shared search, physical shortcut
+  recording, macOS Globe/terminal/Undo controls, flag gallery, sound previews,
+  headphone ceiling and startup actions. Edits share the existing draft and
+  merge/save host; failed startup changes stay pending for retry.
+
 - The tray's Settings action opens the pixel-style editor. Repeated activation
-  restores its window; Full Settings opens the complete editor after guarding
+  restores its window; Native interface opens the alternative editor after guarding
   unsaved changes.
 
-- Optional `upyr settings --pixel` and `--tui` editors for Correction and
-  Exceptions, sharing a staged draft, validation and concurrent-config merge
+- `upyr settings --pixel` opens the complete GUI; `--tui` opens a local editor
+  for Correction and Exceptions, sharing a staged draft, validation and concurrent-config merge
   with the existing Save flow. Invalid edits remain visible; failed saves keep
   them, and closing or reloading a dirty editor requires explicit discard.
   The GUI uses scalable retro styling with Unicode fields and semantic labels;

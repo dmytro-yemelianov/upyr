@@ -1,6 +1,6 @@
 # Complete pixel settings
 
-Status: implementation in progress. Date: 2026-11-12.
+Status: implemented; verification is recorded in the plan. Date: 2026-11-12.
 
 The two-page pixel prototype became the primary menu entry before it covered
 the existing settings. Bring every control in the native settings window into

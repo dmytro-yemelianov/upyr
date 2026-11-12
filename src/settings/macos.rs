@@ -2284,7 +2284,7 @@ fn known_terminals() -> impl Iterator<Item = &'static str> {
 }
 
 /// True when the "Correct words in terminals" checkbox should appear checked.
-fn terminal_correction_enabled(config: &Config) -> bool {
+pub(super) fn terminal_correction_enabled(config: &Config) -> bool {
     known_terminals().any(|terminal| {
         config
             .terminal_typing_apps
@@ -2296,7 +2296,7 @@ fn terminal_correction_enabled(config: &Config) -> bool {
 /// Applies the "Correct words in terminals" checkbox: checking opts every
 /// known terminal in; unchecking a previously checked box removes them again.
 /// Superset and hand-written entries are left to their own controls.
-fn set_terminal_correction(config: &mut Config, enabled: bool) {
+pub(super) fn set_terminal_correction(config: &mut Config, enabled: bool) {
     if enabled {
         for terminal in known_terminals() {
             if !config
@@ -2315,7 +2315,7 @@ fn set_terminal_correction(config: &mut Config, enabled: bool) {
 }
 
 /// True when the "Slash commands in Superset" checkbox should appear checked.
-fn superset_slash_commands_enabled(config: &Config) -> bool {
+pub(super) fn superset_slash_commands_enabled(config: &Config) -> bool {
     config
         .slash_command_apps
         .iter()
@@ -2327,7 +2327,7 @@ fn superset_slash_commands_enabled(config: &Config) -> bool {
 /// Superset to both lists and unchecking a previously checked box removes it
 /// from both. Other entries are preserved, and an unchanged unchecked box
 /// leaves a hand-written terminal-only Superset opt-in alone.
-fn set_superset_slash_commands(config: &mut Config, enabled: bool) {
+pub(super) fn set_superset_slash_commands(config: &mut Config, enabled: bool) {
     if enabled {
         for apps in [
             &mut config.slash_command_apps,

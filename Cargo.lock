@@ -3551,6 +3551,7 @@ dependencies = [
  "eframe",
  "enigo",
  "global-hotkey",
+ "image",
  "ksni",
  "macos-accessibility-client 0.0.2",
  "objc2 0.6.4",

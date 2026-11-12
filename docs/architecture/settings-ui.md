@@ -14,12 +14,19 @@ Use Pixel SSH's separation of application state and rendering as a direction
 for further settings work. An optional pixel interface and local terminal
 interface are feasible. Do not replace the current settings UI with the whole
 Pixel SSH application: its portfolio scenes are not a settings form framework.
-The v1 implementation now shares a pure draft/actions model for Correction and
+The v1 implementation shares a pure draft/actions model for Correction and
 Exceptions, and the save/validation/merge boundary used by the native and egui
 windows. `--pixel` selects a retro-style egui form; `--tui` selects a local
 line-oriented ANSI adapter. OS-specific previews and other native form controls
 remain in their existing hosts. See the [spec](../specs/settings-frontends.md)
 and [completed plan/evidence](../plans/settings-frontends.md).
+
+The [complete pixel settings update](../specs/pixel-settings-parity.md) reuses
+the existing egui form methods as view adapters over the shared draft and adds
+the macOS controls present in the native window. The pixel window exposes all
+seven pages and the shared search catalog. Startup preference state remains in
+the desktop host; config edits and per-source flag changes use the same staged
+save and merge. The TUI still covers Correction and Exceptions.
 
 The reviewed repository is `dmytro-yemelianov/pixel-ssh`, clean local revision
 `a74e1a5ea71794332280776fce52dd0d3bc2e44b` (2026-11-12 review).
@@ -44,13 +51,13 @@ and attribution records must accompany any future asset reuse.
 2. **Done:** pure `SettingsDraft` + `SettingsAction`, with validation, dirty state,
    normalization and a shared host that reads, merges and atomically saves config.
    Native/egui forms adapt their collected config to this same save operation.
-3. **Done:** optional pixel-style Correction and Exceptions forms using egui,
-   with Unicode editing, named fields, scrolling and dirty-discard confirmation.
+3. **Done:** pixel-style forms for all seven pages using egui, with shared search,
+   Unicode editing, shortcut recording, scrolling and dirty-discard confirmation.
    This is an independent form renderer, not Pixel SSH's indexed framebuffer.
 4. **Done:** local line-oriented ANSI/TUI adapter over the same draft and host;
    terminal editing/paste remain with the shell and terminal, without raw mode.
 
-Further screens, bitmap fonts or effects are separate extensions. They should
+Bitmap fonts or effects are separate extensions. They should
 preserve the native form controls' usability and semantics before replacing them.
 
 A complete migration is justified when the shared model eliminates duplicated

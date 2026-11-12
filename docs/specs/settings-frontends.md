@@ -2,6 +2,9 @@
 
 Status: implemented; verification is recorded in the plan. Owner: Upyr. Date: 2026-11-12.
 
+The initial two-page GUI scope below is superseded by
+[complete pixel settings](pixel-settings-parity.md). The TUI keeps the v1 scope.
+
 ## Goal and scope
 
 Implement the shared-state/separate-renderer approach reviewed in

@@ -10,24 +10,20 @@ use std::{
 
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-#[cfg(not(target_os = "macos"))]
 use std::{collections::HashSet, time::Instant};
 
 #[cfg(not(target_os = "macos"))]
 use anyhow::anyhow;
 use anyhow::{Context, Result, bail};
-#[cfg(not(target_os = "macos"))]
 use eframe::egui;
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use single_instance::SingleInstance;
-#[cfg(not(target_os = "macos"))]
 use upyr_audio::KeyCue;
 
 use crate::{
     autostart,
     config::{AutoCorrectSensitivity, Config, config_path},
 };
-#[cfg(not(target_os = "macos"))]
 use crate::{
     config::{GestureAction, IndicatorStyle, ModifierGesture, SoundEvent, SoundPack},
     layout::Direction,
@@ -43,7 +39,6 @@ mod tui;
 #[cfg(any(target_os = "macos", test))]
 use draft::normalize_exceptions;
 use draft::parse_exceptions;
-#[cfg(not(target_os = "macos"))]
 use navigation::{
     CONTEXT_HELP, CORRECTION_DESCRIPTION, CORRECTION_FOOTNOTE, CORRECTION_TITLE, CORRECTION_TOGGLE,
     MIDWORD_HELP,
@@ -185,7 +180,7 @@ impl ActivationInbox {
 /// Optional editors use the same configuration and settings-instance guard.
 #[derive(Debug, Clone, Default, clap::Args)]
 pub struct SettingsOptions {
-    /// Open the pixel-style Correction and Exceptions editor.
+    /// Open the complete pixel-style settings editor.
     #[arg(long, conflicts_with_all = ["tui", "about"])]
     pub pixel: bool,
     /// Open a local line-oriented terminal settings editor.
@@ -472,14 +467,14 @@ fn requested_tab() -> SettingsTab {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ShortcutSlot {
     Selection,
     PreviousWord,
+    #[cfg(target_os = "macos")]
+    Undo,
 }
 
-#[cfg(not(target_os = "macos"))]
 struct SettingsApp {
     config: Config,
     /// The configuration as loaded or last saved, the base of a save's merge.
@@ -495,9 +490,12 @@ struct SettingsApp {
     search: String,
     recording: Option<ShortcutSlot>,
     shortcut_error: Option<String>,
+    #[cfg(target_os = "macos")]
+    flags: pixel::flags::FlagPicker,
+    #[cfg(target_os = "macos")]
+    audio_status: Option<(Instant, String)>,
 }
 
-#[cfg(not(target_os = "macos"))]
 impl SettingsApp {
     fn new(
         config: Config,
@@ -520,6 +518,10 @@ impl SettingsApp {
             search: String::new(),
             recording: None,
             shortcut_error: None,
+            #[cfg(target_os = "macos")]
+            flags: pixel::flags::FlagPicker::default(),
+            #[cfg(target_os = "macos")]
+            audio_status: None,
         }
     }
 
@@ -558,8 +560,23 @@ impl SettingsApp {
         };
         self.loaded = config.clone();
         self.config = config;
+        self.save_startup();
+    }
 
-        match sync_launch_at_login(self.launch_at_login) {
+    fn startup_dirty(&self) -> bool {
+        self.launch_at_login != self.autostart_status.enabled
+    }
+
+    fn save_startup(&mut self) {
+        if !self.startup_dirty() {
+            self.status = Some((true, "Saved. Upyr will reload these settings.".into()));
+            return;
+        }
+        self.accept_startup_result(sync_launch_at_login(self.launch_at_login));
+    }
+
+    fn accept_startup_result(&mut self, result: Result<autostart::AutostartStatus>) {
+        match result {
             Ok(status) => {
                 self.launch_at_login = status.enabled;
                 self.autostart_status = status;
@@ -572,13 +589,11 @@ impl SettingsApp {
                 });
             }
             Err(error) => {
-                if let Ok(status) = autostart::status() {
-                    self.launch_at_login = status.enabled;
-                    self.autostart_status = status;
-                }
                 self.status = Some((
                     false,
-                    format!("Settings saved, but launch at login was not changed: {error:#}"),
+                    format!(
+                        "Settings saved, but launch at login failed: {error:#}. Your choice is kept; Save retries it."
+                    ),
                 ));
             }
         }
@@ -660,19 +675,18 @@ impl SettingsApp {
         }
 
         let value = HotKey::new(Some(modifiers), code).to_string();
-        let other = match slot {
-            ShortcutSlot::Selection => &self.config.last_word_hotkey,
-            ShortcutSlot::PreviousWord => &self.config.hotkey,
-        };
-        if shortcuts_equal(&value, other) {
-            self.shortcut_error =
-                Some("That shortcut is already assigned to the other action.".to_owned());
+        let mut candidate = self.config.clone();
+        match slot {
+            ShortcutSlot::Selection => candidate.hotkey = value,
+            ShortcutSlot::PreviousWord => candidate.last_word_hotkey = value,
+            #[cfg(target_os = "macos")]
+            ShortcutSlot::Undo => candidate.undo_hotkey = value,
+        }
+        if let Err(error) = candidate.validate() {
+            self.shortcut_error = Some(format!("{error:#}"));
             return;
         }
-        match slot {
-            ShortcutSlot::Selection => self.config.hotkey = value,
-            ShortcutSlot::PreviousWord => self.config.last_word_hotkey = value,
-        }
+        self.config = candidate;
         self.recording = None;
         self.shortcut_error = None;
     }
@@ -714,10 +728,18 @@ impl SettingsApp {
             &mut self.config.restore_clipboard,
             "Restore clipboard contents after conversion",
         );
+        #[cfg(target_os = "macos")]
+        {
+            ui.checkbox(
+                &mut self.config.globe_switch.enabled,
+                "Tap Globe to switch keyboard layouts",
+            );
+            ui.small("Keeps fn shortcuts. Restores macOS handling when paused or quit.");
+        }
         ui.checkbox(&mut self.launch_at_login, "Launch Upyr at login");
         if let Some(attention) = autostart_attention(&self.autostart_status) {
             ui.colored_label(egui::Color32::from_rgb(180, 105, 20), attention);
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if self.autostart_status.state == autostart::AutostartState::Stale
                     && ui.button("Repair Entry").clicked()
                 {
@@ -777,7 +799,7 @@ impl SettingsApp {
                     );
                     ui.end_row();
                     ui.label("Pause after Space").on_hover_text("This delay applies after Space; a clear prefix can switch immediately during typing.");
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.add(
                             egui::DragValue::new(&mut self.config.auto_correct_delay_ms)
                                 .range(10..=250),
@@ -822,7 +844,7 @@ impl SettingsApp {
         }
 
         ui.add_space(10.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.new_exception)
                     .desired_width(260.0)
@@ -861,6 +883,12 @@ impl SettingsApp {
         self.shortcut_row(ui, "Convert selection", ShortcutSlot::Selection);
         ui.add_space(8.0);
         self.shortcut_row(ui, "Fix previous word", ShortcutSlot::PreviousWord);
+        #[cfg(target_os = "macos")]
+        {
+            ui.add_space(8.0);
+            self.shortcut_row(ui, "Undo auto-correction", ShortcutSlot::Undo);
+            ui.small("Undo is available for 30 seconds, until further input or navigation.");
+        }
         if let Some(error) = &self.shortcut_error {
             ui.add_space(6.0);
             ui.colored_label(egui::Color32::from_rgb(190, 55, 55), error);
@@ -907,7 +935,7 @@ impl SettingsApp {
                     });
                 ui.end_row();
                 ui.label("Double-tap timeout");
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.add(
                         egui::DragValue::new(&mut self.config.modifier_gesture_timeout_ms)
                             .range(150..=2_000),
@@ -923,17 +951,21 @@ impl SettingsApp {
         let value = match slot {
             ShortcutSlot::Selection => self.config.hotkey.clone(),
             ShortcutSlot::PreviousWord => self.config.last_word_hotkey.clone(),
+            #[cfg(target_os = "macos")]
+            ShortcutSlot::Undo => self.config.undo_hotkey.clone(),
         };
         ui.label(egui::RichText::new(label).strong());
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let text = if active {
                 "Press shortcut…  (Esc to cancel)".to_owned()
             } else {
-                pretty_hotkey(&value).unwrap_or_else(|| value.clone())
+                text_hotkey(&value).unwrap_or_else(|| value.clone())
             };
             let response = ui.add_sized(
                 [310.0, 38.0],
-                egui::Button::new(egui::RichText::new(text).monospace()).selected(active),
+                egui::Button::new(egui::RichText::new(text).monospace())
+                    .wrap()
+                    .selected(active),
             );
             if response.clicked() {
                 self.recording = Some(slot);
@@ -943,6 +975,8 @@ impl SettingsApp {
             let default_value = match slot {
                 ShortcutSlot::Selection => default.hotkey,
                 ShortcutSlot::PreviousWord => default.last_word_hotkey,
+                #[cfg(target_os = "macos")]
+                ShortcutSlot::Undo => default.undo_hotkey,
             };
             if ui
                 .add_enabled(value != default_value, egui::Button::new("Reset"))
@@ -951,6 +985,8 @@ impl SettingsApp {
                 match slot {
                     ShortcutSlot::Selection => self.config.hotkey = default_value,
                     ShortcutSlot::PreviousWord => self.config.last_word_hotkey = default_value,
+                    #[cfg(target_os = "macos")]
+                    ShortcutSlot::Undo => self.config.undo_hotkey = default_value,
                 }
                 self.recording = None;
                 self.shortcut_error = None;
@@ -971,6 +1007,21 @@ impl SettingsApp {
         );
     }
 
+    #[cfg(target_os = "macos")]
+    fn refresh_audio_status(&mut self) {
+        if self
+            .audio_status
+            .as_ref()
+            .is_none_or(|(at, _)| at.elapsed() >= Duration::from_secs(1))
+        {
+            let route = crate::audio_output::current();
+            self.audio_status = Some((
+                Instant::now(),
+                format!("{} · {}", route.name, route.kind.label()),
+            ));
+        }
+    }
+
     fn draw_feedback(&mut self, ui: &mut egui::Ui) {
         section_heading(
             ui,
@@ -982,7 +1033,7 @@ impl SettingsApp {
             "Show a temporary language flag next to the pointer",
         );
         ui.add_enabled_ui(self.config.show_layout_indicator, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label("Visible for");
                 ui.add(
                     egui::DragValue::new(&mut self.config.layout_indicator_duration_ms)
@@ -990,7 +1041,7 @@ impl SettingsApp {
                 );
                 ui.label("ms");
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label("Shows");
                 egui::ComboBox::from_id_salt("indicator-style")
                     .selected_text(self.config.indicator_style.label())
@@ -1006,17 +1057,33 @@ impl SettingsApp {
             });
         });
         ui.add_space(18.0);
+        #[cfg(target_os = "macos")]
+        self.flags.show(ui, &mut self.config, &mut self.status);
         section_heading(
             ui,
             "Sound feedback",
             "Choose which Upyr actions play a subtle confirmation sound.",
         );
         ui.checkbox(&mut self.config.sounds.enabled, "Enable sound feedback");
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label("Volume");
             ui.add(egui::Slider::new(&mut self.config.sounds.volume_percent, 0..=100).suffix("%"));
         });
-        ui.horizontal(|ui| {
+        #[cfg(target_os = "macos")]
+        {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Headphone limit");
+                ui.add(
+                    egui::Slider::new(&mut self.config.sounds.headphone_volume_percent, 0..=30)
+                        .suffix("%"),
+                );
+            });
+            if let Some((_, text)) = &self.audio_status {
+                ui.small(text);
+            }
+            ui.small("Quiet limit for headphones and unrecognized outputs. Does not change system volume.");
+        }
+        ui.horizontal_wrapped(|ui| {
             ui.label("Sound pack");
             egui::ComboBox::from_id_salt("sound-pack")
                 .selected_text(self.config.sounds.pack.label())
@@ -1028,7 +1095,7 @@ impl SettingsApp {
         });
         ui.small(self.config.sounds.pack.description());
         ui.add_space(6.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.checkbox(
                 &mut self.config.sounds.key_clicks,
                 "Keyboard sounds (control-key reactions in Anime pack)",
@@ -1155,7 +1222,6 @@ impl SettingsApp {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
 impl eframe::App for SettingsApp {
     fn update(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_activation(context);
@@ -1250,14 +1316,12 @@ impl eframe::App for SettingsApp {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
 fn section_heading(ui: &mut egui::Ui, title: &str, description: &str) {
     ui.label(egui::RichText::new(title).size(18.0).strong());
     ui.label(egui::RichText::new(description).weak());
     ui.add_space(2.0);
 }
 
-#[cfg(not(target_os = "macos"))]
 fn timing_row(ui: &mut egui::Ui, label: &str, value: &mut u64, min: u64, max: u64) {
     ui.label(label);
     ui.add(egui::DragValue::new(value).range(min..=max));
@@ -1265,7 +1329,6 @@ fn timing_row(ui: &mut egui::Ui, label: &str, value: &mut u64, min: u64, max: u6
     ui.end_row();
 }
 
-#[cfg(not(target_os = "macos"))]
 fn hotkey_modifiers(modifiers: egui::Modifiers) -> Modifiers {
     let mut result = Modifiers::empty();
     if modifiers.shift {
@@ -1283,7 +1346,6 @@ fn hotkey_modifiers(modifiers: egui::Modifiers) -> Modifiers {
     result
 }
 
-#[cfg(not(target_os = "macos"))]
 #[allow(clippy::too_many_lines)]
 fn egui_key_to_code(key: egui::Key) -> Option<Code> {
     Some(match key {
@@ -1377,12 +1439,41 @@ fn egui_key_to_code(key: egui::Key) -> Option<Code> {
     })
 }
 
-#[cfg(not(target_os = "macos"))]
-fn shortcuts_equal(left: &str, right: &str) -> bool {
-    match (left.parse::<HotKey>(), right.parse::<HotKey>()) {
-        (Ok(left), Ok(right)) => left == right,
-        _ => left.eq_ignore_ascii_case(right),
+/// Plain key names remain readable in the bundled egui monospace font.
+fn text_hotkey(value: &str) -> Option<String> {
+    let hotkey = value.parse::<HotKey>().ok()?;
+    let mut parts = Vec::new();
+    for (modifier, name) in [
+        (Modifiers::CONTROL, "Ctrl"),
+        (
+            Modifiers::ALT,
+            if cfg!(target_os = "macos") {
+                "Option"
+            } else {
+                "Alt"
+            },
+        ),
+        (Modifiers::SHIFT, "Shift"),
+        (
+            Modifiers::SUPER,
+            if cfg!(target_os = "macos") {
+                "Cmd"
+            } else {
+                "Super"
+            },
+        ),
+    ] {
+        if hotkey.mods.contains(modifier) {
+            parts.push(name.to_owned());
+        }
     }
+    let key = hotkey.key.to_string();
+    let key = key
+        .strip_prefix("Key")
+        .or_else(|| key.strip_prefix("Digit"))
+        .unwrap_or(&key);
+    parts.push(key.to_owned());
+    Some(parts.join(" + "))
 }
 
 pub(crate) fn pretty_hotkey(value: &str) -> Option<String> {
@@ -1453,7 +1544,6 @@ fn sensitivity_label(value: AutoCorrectSensitivity) -> &'static str {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
 fn gesture_label(value: ModifierGesture) -> &'static str {
     match value {
         ModifierGesture::Disabled => "Disabled",
@@ -1463,7 +1553,6 @@ fn gesture_label(value: ModifierGesture) -> &'static str {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
 fn gesture_action_label(value: GestureAction) -> &'static str {
     match value {
         GestureAction::PreviousWord => "Fix previous word",
@@ -1471,7 +1560,6 @@ fn gesture_action_label(value: GestureAction) -> &'static str {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
 fn direction_label(value: Direction) -> &'static str {
     match value {
         Direction::Smart => "Smart (detect script)",
@@ -1483,6 +1571,18 @@ fn direction_label(value: Direction) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn egui_shortcut_labels_do_not_require_macos_symbol_glyphs() {
+        let label = text_hotkey("CmdOrCtrl+Alt+Backspace").unwrap();
+        assert!(label.is_ascii());
+        assert!(label.contains("Backspace"));
+        assert!(label.contains(if cfg!(target_os = "macos") {
+            "Cmd"
+        } else {
+            "Ctrl"
+        }));
+    }
 
     #[test]
     fn settings_cli_flags_are_explicit_and_mutually_exclusive() {
