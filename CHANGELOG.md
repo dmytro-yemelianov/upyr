@@ -6,6 +6,12 @@ change between minor releases while the version is below 1.0.
 
 ## [Unreleased]
 
+### Security
+
+- Update `rustix` 1.1.4 to 1.1.6 for
+  [RUSTSEC-2026-0486](https://rustsec.org/advisories/RUSTSEC-2026-0486.html),
+  fixing zero-length extended-attribute buffer handling in the dependency.
+
 ### Added
 
 - Complete pixel settings: all seven pages and shared search, physical shortcut
