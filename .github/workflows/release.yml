@@ -75,7 +75,7 @@ jobs:
     name: Package macOS
     timeout-minutes: 60
     needs: verify
-    runs-on: macos-14
+    runs-on: macos-15
     environment: release
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
