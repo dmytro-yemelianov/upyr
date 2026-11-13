@@ -35,3 +35,13 @@ are unchanged; this feature is initially an unreleased source change.
   installer checks still require Windows; the local Windows result is a cross-check.
 
 No release has been published and no installed application has been replaced.
+
+## Windows test delivery
+
+All 18 PR checks passed on bbe8af2. The subsequent request to install the new
+feature requires a downloadable installer. The release workflow refused PR
+branches under the existing `release` environment protection rules, which are
+unchanged. `windows-preview.yml` builds a separate CI test artifact without
+deployment, release publishing, environment access or secrets. It reuses the
+Windows packager, checks installation/config preservation, and includes source
+provenance, checksums and install instructions. Public 0.6.0 assets stay unchanged.
