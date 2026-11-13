@@ -33,7 +33,9 @@ Asset provenance and redistribution terms remain in
 
 The [manual, main-only FOSSA workflow](../.github/workflows/fossa.yml) and
 [project configuration](../.fossa.yml) are ready. The project has no confirmed
-FOSSA result yet. To connect it:
+FOSSA server result yet. CLI 3.20.10 has been checked locally in `--output` mode:
+the explicit target is the root Cargo workspace, including its members. Unrelated
+ignored checkouts/tooling are excluded. To connect it:
 
 1. Sign in to FOSSA and create a **Push Only** API token, as recommended for public
    repositories by the [official integration guide](https://docs.fossa.com/docs/integrations/github-actions).
