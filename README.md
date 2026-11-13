@@ -2,7 +2,7 @@
 
 [![GitHub release](https://img.shields.io/github/v/release/dmytro-yemelianov/upyr?include_prereleases&sort=date)](https://github.com/dmytro-yemelianov/upyr/releases)
 [![Crates.io](https://img.shields.io/crates/v/upyr.svg)](https://crates.io/crates/upyr)
-[![Release asset downloads](https://img.shields.io/github/downloads/dmytro-yemelianov/upyr/total?label=asset%20downloads)](https://github.com/dmytro-yemelianov/upyr/releases)
+[![Release asset downloads](https://img.shields.io/github/downloads/dmytro-yemelianov/upyr/total?label=downloads)](https://github.com/dmytro-yemelianov/upyr/releases)
 [![Documentation](https://img.shields.io/badge/docs-reference-blue.svg)](docs/reference.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-58d6a8.svg)](LICENSE)
 [![Rust: 1.87+](https://img.shields.io/badge/rust-1.87%2B-orange.svg)](docs/reference.md#build-and-run)
@@ -12,7 +12,6 @@
 [![Security checks](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml?query=branch%3Amain)
 [![Self-audit](https://github.com/dmytro-yemelianov/upyr/actions/workflows/self-audit.yml/badge.svg?branch=main)](docs/quality.md#readme-badges)
 [![Codecov: Linux workspace coverage](https://codecov.io/gh/dmytro-yemelianov/upyr/branch/main/graph/badge.svg)](https://app.codecov.io/gh/dmytro-yemelianov/upyr)
-[![Dependency licenses](https://github.com/dmytro-yemelianov/upyr/actions/workflows/licenses.yml/badge.svg?branch=main)](docs/quality-integrations.md#dependency-license-policy)
 [![FOSSA license scan](https://app.fossa.com/api/projects/custom%2B59498%2Fgithub.com%2Fdmytro-yemelianov%2Fupyr.svg?type=shield)](docs/quality-integrations.md#fossa-policy-review)
 
 **Fix English ↔ Ukrainian text typed on the wrong keyboard layout.**
