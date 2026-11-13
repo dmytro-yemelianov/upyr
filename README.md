@@ -6,11 +6,12 @@
 [![Documentation](https://img.shields.io/badge/docs-reference-blue.svg)](docs/reference.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-58d6a8.svg)](LICENSE)
 [![Rust: 1.87+](https://img.shields.io/badge/rust-1.87%2B-orange.svg)](docs/reference.md#build-and-run)
+[![Core line coverage: Linux, preview 0.6.0](docs/badges/core-coverage-preview-0.6.0-linux.svg "Linux core line coverage, preview 0.6.0; includes inline unit tests")](docs/quality.md#readme-badges)
 
 [![CI](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml?query=branch%3Amain)
 [![Security checks](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml?query=branch%3Amain)
 [![Self-audit](https://github.com/dmytro-yemelianov/upyr/actions/workflows/self-audit.yml/badge.svg?branch=main)](docs/quality.md#readme-badges)
-[![Core line coverage: Linux, preview 0.6.0](docs/badges/core-coverage-preview-0.6.0-linux.svg "Linux core line coverage, preview 0.6.0; includes inline unit tests")](docs/quality.md#readme-badges)
+[![Codecov: Linux workspace coverage](https://codecov.io/gh/dmytro-yemelianov/upyr/branch/main/graph/badge.svg)](https://app.codecov.io/gh/dmytro-yemelianov/upyr)
 [![Dependency licenses](https://github.com/dmytro-yemelianov/upyr/actions/workflows/licenses.yml/badge.svg?branch=main)](docs/quality-integrations.md#dependency-license-policy)
 
 **Fix English ↔ Ukrainian text typed on the wrong keyboard layout.**

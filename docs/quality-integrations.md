@@ -16,10 +16,13 @@ not evidence that one run exercised additional tests. Codecov comments and its
 additional coverage gates are disabled; the local core >= 90% gate remains in
 the self-audit.
 
-After the first successful publication, verify the processed commit and numeric
-badge at [Codecov](https://app.codecov.io/gh/dmytro-yemelianov/upyr). A successful
-upload alone does not establish that the service processed the report. An explicit
-retry accepts a successful `Self-audit` run ID through `workflow_dispatch`.
+The first publication was verified on 2026-11-13: Codecov processed commit
+[`fa637ca`](https://app.codecov.io/github/dmytro-yemelianov/upyr/commit/fa637cadbaacaf314a06b1d2c8c83a85cb094d3c)
+and reported **80.78%** (15,293 of 18,930 lines across 61 files), with a numeric
+badge and completed processing state. The live [dashboard](https://app.codecov.io/gh/dmytro-yemelianov/upyr)
+follows subsequent successful `main` audits. A successful upload alone does not
+establish that the service processed a report. An explicit retry accepts a
+successful `Self-audit` run ID through `workflow_dispatch`.
 
 ## Dependency license policy
 
