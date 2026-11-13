@@ -1,0 +1,21 @@
+# Dependency metadata policy, not a legal certification of the distribution.
+# Corpus, sounds, fonts and imported rule attribution remain in THIRD_PARTY_NOTICES.
+[licenses]
+version = 2
+confidence-threshold = 0.8
+allow = [
+    "Apache-2.0", "MIT", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0",
+    "ISC", "Zlib", "Unicode-3.0", "CC0-1.0", "Unlicense",
+]
+exceptions = [
+    # Existing eframe font bundle; redistribution notices are retained upstream.
+    { name = "epaint_default_fonts", version = "=0.32.3", allow = ["OFL-1.1", "Ubuntu-font-1.0"] },
+    # Existing directories dependency; unmodified MPL source is available on crates.io.
+    { name = "option-ext", version = "=0.2.0", allow = ["MPL-2.0"] },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

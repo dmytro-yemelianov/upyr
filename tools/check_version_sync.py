@@ -53,7 +53,8 @@ def main() -> int:
             )
 
     expected_text = {
-        "README.md": f"**Release status:** v{version} public preview.",
+        "README.md": f"**Source version:** v{version} preview.",
+        "docs/reference.md": f"**Source version:** v{version} preview.",
         "CHANGELOG.md": f"## [{version}]",
         "site/index.html": f"Public preview · v{version}",
         "site/app.js": f'heroEyebrow: "Публічна попередня версія · v{version}"',

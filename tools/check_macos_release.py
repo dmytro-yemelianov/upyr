@@ -81,7 +81,10 @@ def main() -> None:
         config.chmod(0o600)
         original = config.read_bytes()
         run(['ditto', str(previous), str(install)])
-        assert 'Config schema: 6' in doctor(install, config)
+        previous_report = doctor(install, config)
+        assert previous_version.replace('upyr ', 'Upyr ') in previous_report
+        assert 'Automatic correction: enabled (Aggressive, minimum 5 characters)' in previous_report
+        assert config.read_bytes() == original
         staged = root / 'Upyr-next.app'
         run(['ditto', str(app), str(staged)])
         install.rename(root / 'Upyr-previous.app')
