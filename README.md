@@ -60,6 +60,8 @@ Ukrainian is the default UI language. Select
 **Основні → Мова інтерфейсу → English** to change it.
 **Native interface…** opens the alternative desktop window.
 
+<a href="site/assets/upyr-settings-pixel-uk.webp"><img src="site/assets/upyr-settings-pixel-uk.webp" width="640" alt="Upyr pixel settings in Ukrainian, showing correction controls"></a>
+
 [Configuration, custom rules and terminal options](docs/reference.md#configuration)
 
 ## Package-manager installs

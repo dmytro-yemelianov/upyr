@@ -16,7 +16,7 @@ CSS_PATH = ROOT / "site" / "styles.css"
 MODEL_PATH = ROOT / "crates" / "upyr-core" / "assets" / "models" / "language.ngm"
 ENGLISH_DICTIONARY_PATH = ROOT / "crates" / "upyr-core" / "assets" / "dictionaries" / "english.txt"
 UKRAINIAN_DICTIONARY_PATH = ROOT / "crates" / "upyr-core" / "assets" / "dictionaries" / "ukrainian.txt"
-SCREENSHOT_PATH = ROOT / "site" / "assets" / "upyr-settings-feedback.webp"
+SCREENSHOT_PATH = ROOT / "site" / "assets" / "upyr-settings-pixel-uk.webp"
 
 MODEL_MAGIC = b"UPYRLM1\0"
 MODEL_HEADER_SIZE = 12
@@ -109,7 +109,7 @@ class SettingsImageParser(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = {name: value or "" for name, value in attrs}
-        if tag == "img" and values.get("src") == "assets/upyr-settings-feedback.webp":
+        if tag == "img" and values.get("src") == "assets/upyr-settings-pixel-uk.webp":
             self.matches.append(values)
 
 
@@ -143,15 +143,15 @@ def check_screenshot(html: str) -> None:
         fail(f"missing {SCREENSHOT_PATH.relative_to(ROOT)}")
     data = SCREENSHOT_PATH.read_bytes()
     dimensions = webp_dimensions(data)
-    if dimensions != (1440, 1360):
-        fail(f"settings screenshot is {dimensions[0]}×{dimensions[1]}; expected 1440×1360")
+    if dimensions != (898, 779):
+        fail(f"settings screenshot is {dimensions[0]}×{dimensions[1]}; expected 898×779")
     parser = SettingsImageParser()
     parser.feed(html)
     if len(parser.matches) != 1:
         fail("site must render exactly one settings screenshot")
     image = parser.matches[0]
-    if image.get("width") != "1440" or image.get("height") != "1360":
-        fail("settings screenshot markup must match its intrinsic 1440×1360 dimensions")
+    if image.get("width") != "898" or image.get("height") != "779":
+        fail("settings screenshot markup must match its intrinsic 898×779 dimensions")
 
 
 def check_sound_packs(html: str) -> None:
