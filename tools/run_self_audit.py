@@ -50,6 +50,20 @@ def capture(command: list[str]) -> str:
     return subprocess.check_output(command, cwd=ROOT, text=True, timeout=60).strip()
 
 
+def host_info() -> dict:
+    model = platform.processor()
+    try:
+        if platform.system() == "Darwin":
+            model = capture(["sysctl", "-n", "machdep.cpu.brand_string"])
+        elif platform.system() == "Linux":
+            match = re.search(r"(?m)^model name\s*:\s*(.+)$", Path("/proc/cpuinfo").read_text())
+            model = match.group(1) if match else model
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return dict(system=platform.system(), release=platform.release(), machine=platform.machine(),
+                processor=model, logical_cpus=os.cpu_count())
+
+
 def identity() -> dict:
     names = capture(["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"])
     hasher = hashlib.sha256()
@@ -163,6 +177,7 @@ def markdown(report: dict) -> str:
              "| Check | Result | Evidence |", "| --- | --- | --- |"]
     for check in report["checks"]:
         lines.append(f"| {check['name']} | {check['status']} | `{check['log']}` |")
+    for check in report["checks"]:
         if check.get("error"):
             lines.append("")
             lines.append(f"Failure in {check['name']}: `{check['error'].replace('`', chr(39))}`")
@@ -194,6 +209,7 @@ def markdown(report: dict) -> str:
             lines.append(f"| {c['check']} | {c['actual']} | {c['relation']} {c['limit']} |")
     if "latency" in metrics:
         lines += ["", "## Observed mapping latency", "", "Synthetic calls; no desktop input. Host-dependent, not a timing gate.", "",
+                  f"CPU: {report['host']['processor'] or 'unavailable'}; logical CPUs: {report['host']['logical_cpus']}.", "",
                   "| Workload | Samples | p50 ns | p95 ns | p99 ns |", "| --- | ---: | ---: | ---: | ---: |"]
         for r in metrics["latency"]:
             lines.append(f"| {r['workload']} | {r['samples']} | {r['p50_ns']} | {r['p95_ns']} | {r['p99_ns']} |")
@@ -211,10 +227,14 @@ def main() -> int:
     out = args.output.resolve()
     if out.exists() and any(out.iterdir()):
         parser.error("output directory must be empty: never reuse stale audit evidence")
+    if out.is_relative_to(ROOT):
+        ignored = subprocess.run(["git", "check-ignore", "--quiet", "--no-index", "--",
+                                  out.relative_to(ROOT).as_posix() + "/"], cwd=ROOT, check=False)
+        if ignored.returncode:
+            parser.error("output inside the worktree must be git-ignored (for example target/audit-new)")
     out.mkdir(parents=True, exist_ok=True)
     report = dict(schema_version=1, status="running", source=identity(),
-                  host=dict(system=platform.system(), release=platform.release(), machine=platform.machine(),
-                            processor=platform.processor(), logical_cpus=os.cpu_count()),
+                  host=host_info(),
                   run_url=(f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/"
                            f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
                            if os.environ.get("GITHUB_RUN_ID") else None),
@@ -266,7 +286,7 @@ def main() -> int:
             license_expressions=dict(collections.Counter(p.get("license") or "UNKNOWN" for p in packages)))
 
     execute("dependencies", ["cargo", "metadata", "--format-version", "1", "--locked"], raw="metadata.json", validate=metadata)
-    execute("licenses-sources", ["cargo", "deny", "--locked", "--format", "json", "check", "licenses", "sources"])
+    execute("licenses-sources", ["cargo", "deny", "--workspace", "--all-features", "--locked", "--format", "json", "check", "licenses", "sources"])
     execute("rustsec", ["cargo", "audit", "--json"], raw="rustsec.json",
             validate=lambda stdout, stderr: report["metrics"].update(rustsec=audit_metrics(json.loads(stdout))))
     execute("formatting", ["cargo", "fmt", "--all", "--", "--check"])

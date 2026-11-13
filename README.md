@@ -14,7 +14,8 @@ Upyr runs locally in your menu bar or system tray, with no account or telemetry.
 [Full reference](docs/reference.md) ·
 [Report an issue](https://github.com/dmytro-yemelianov/upyr/issues/new/choose)
 
-**Release status:** v0.6.0 public preview. macOS is the primary desktop target;
+**Source version:** v0.6.0 preview. [Published downloads](https://github.com/dmytro-yemelianov/upyr/releases)
+can lag the source version. macOS is the primary desktop target;
 Windows and Linux/X11 are previews. Current macOS preview bundles are ad-hoc
 signed and not notarized. See [installation notes](docs/reference.md#install-on-macos)
 for details.

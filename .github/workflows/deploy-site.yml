@@ -34,6 +34,8 @@ on:
       - "CHANGELOG.md"
       - ".github/workflows/deploy-site.yml"
   workflow_dispatch:
+  release:
+    types: [published]
 
 permissions: {}
 
@@ -53,6 +55,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          ref: ${{ github.event_name == 'release' && 'main' || github.ref }}
       - name: Install Rust and WASM target
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
@@ -84,8 +87,27 @@ jobs:
         run: python3 -m unittest tools.test_check_site_content tools.test_check_privacy
       - name: Verify non-tracking site resources
         run: python3 tools/check_privacy.py
+      - name: Require published packages before advertising this version
+        id: published
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/upyr-releases.json"
+          python3 - <<'PY'
+          import json, os, tomllib
+          from pathlib import Path
+          version = tomllib.loads(Path('Cargo.toml').read_text())['workspace']['package']['version']
+          tags = {'v' + version, 'preview-' + version, 'macos-preview-' + version}
+          releases = json.loads((Path(os.environ['RUNNER_TEMP']) / 'upyr-releases.json').read_text())
+          ready = any(not r['draft'] and r['tag_name'] in tags for r in releases)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'ready={str(ready).lower()}\n')
+          if not ready:
+              print(f'Keep the current public site until {version} packages are published.')
+          PY
       - name: Deploy to Cloudflare Pages
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: steps.published.outputs.ready == 'true' && (github.ref == 'refs/heads/main' || github.event_name == 'release')
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

@@ -99,6 +99,15 @@ class SelfAuditTests(unittest.TestCase):
         self.assertIn("&lt;&amp;", svg)
         self.assertNotIn("<&", svg)
 
+    def test_unignored_in_tree_output_is_rejected_before_measurement(self):
+        with patch.object(sys, "argv", ["audit", "--output", str(audit.ROOT / "audit-unignored-output")]), \
+                patch.object(audit.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)) as run, \
+                patch.object(audit, "identity") as identity, \
+                contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            audit.main()
+        identity.assert_not_called()
+        self.assertEqual(run.call_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

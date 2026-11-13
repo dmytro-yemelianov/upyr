@@ -257,8 +257,8 @@ jobs:
           Copy-Item tests/fixtures/config/published-v6.toml $env:UPYR_CONFIG
           $before = (Get-FileHash $env:UPYR_CONFIG).Hash
           $installer = Get-ChildItem dist/*-setup.exe | Select-Object -First 1
-          $args = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$install`"")
-          $process = Start-Process -FilePath $installer.FullName -ArgumentList $args -Wait -PassThru
+          $installerArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$install`"")
+          $process = Start-Process -FilePath $installer.FullName -ArgumentList $installerArgs -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
           foreach ($binary in @('upyr.exe', 'upyr-background.exe', 'upyr-settings.exe')) {
             if (-not (Test-Path (Join-Path $install $binary))) { throw "Missing $binary" }
@@ -387,6 +387,9 @@ jobs:
               assert hashlib.sha256(path.read_bytes()).hexdigest() == expected, name
           PY
           tar -czf dist/self-audit.tar.gz -C self-audit .
+          cp self-audit/report.md dist/self-audit.md
+          cp self-audit/report.json dist/self-audit.json
+          cp self-audit/self-audit.svg self-audit/core-coverage.svg dist/
       - name: Generate SHA-256 checksums
         run: |
           cd dist

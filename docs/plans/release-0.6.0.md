@@ -15,3 +15,17 @@ Spec: [release-0.6.0.md](../specs/release-0.6.0.md).
 
 Completion evidence belongs in the release's validation report and PR, so this
 preparation plan does not require another source commit after publication.
+
+Before publishing the draft, generate and attach the downloaded-package report:
+
+```sh
+python3 tools/check_macos_release.py --app /path/to/downloaded/Upyr.app \
+  --previous-app /path/to/published-0.5.0/Upyr.app \
+  --output target/release-validation-0.6.0.json
+gh release upload preview-0.6.0 target/release-validation-0.6.0.json
+```
+
+Verify downloaded checksums and the completed Windows/Linux installation jobs
+as well. Publish only after that report is attached. The site deployment checks
+for a published version matching Cargo and retries on the release publication
+event, so merging preparation does not advertise a draft as downloadable.

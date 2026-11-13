@@ -9,7 +9,8 @@ It is not an independent certification, a compliance seal or a single quality sc
 
 Open a run's summary for the measurements; download its `self-audit-<commit>`
 artifact for `report.md`, `report.json`, raw logs, coverage HTML and reusable SVG
-badges. The preview release includes the evidence for its exact source commit.
+badges. The preview release includes the evidence for its exact source commit,
+with public `self-audit.md`, `self-audit.json` and SVG downloads plus the full archive.
 CI artifacts expire after 90 days; release attachments retain the release snapshot.
 
 ## What is measured
@@ -63,7 +64,8 @@ cargo +1.95.0 install cargo-deny --version 0.19.8 --locked
 RUSTUP_TOOLCHAIN=1.95.0 python3 tools/run_self_audit.py --output target/audit-new
 ```
 
-Use a fresh output directory each time. No desktop input or real user config is
+Use a fresh output directory each time; inside the checkout it must be ignored
+by Git so generated evidence is not mistaken for source changes. No desktop input or real user config is
 needed. The runner preserves failed checks and partial evidence; a failed setup
 or canceled CI job is not a completed assessment. The workflow badge reflects the
 workflow result, not a vulnerability guarantee or a percentage.
