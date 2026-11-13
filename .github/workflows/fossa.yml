@@ -1,0 +1,36 @@
+name: FOSSA policy review
+
+# Opt-in until the maintainer connects the FOSSA project and its policy.
+# Never expose the upload credential to pull requests or arbitrary branches.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Require the FOSSA account connection
+        env:
+          FOSSA_API_KEY: ${{ secrets.FOSSA_API_KEY }}
+        run: |
+          if test -z "$FOSSA_API_KEY"; then
+            echo '::error::Add a FOSSA push-only API key as the repository secret FOSSA_API_KEY; see docs/quality-integrations.md.'
+            exit 1
+          fi
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: 1.95.0
+      - name: Analyze dependencies and require the configured FOSSA policy
+        uses: fossas/fossa-action@29693cc50323968e039056be419b32989fc5880c # v2.0.0
+        with:
+          api-key: ${{ secrets.FOSSA_API_KEY }}
+          pinned-cli-version: v3.20.10
+          run-tests: true

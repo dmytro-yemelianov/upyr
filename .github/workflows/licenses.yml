@@ -1,0 +1,45 @@
+name: Dependency licenses
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: licenses-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Cargo license and source policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: 1.95.0
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - name: Install pinned policy checker
+        run: cargo install cargo-deny --version 0.19.8 --locked
+      - name: Check dependency metadata against deny.toml
+        run: |
+          set -o pipefail
+          cargo deny --workspace --all-features --locked check licenses sources 2>&1 | tee dependency-licenses.log
+      - name: Preserve policy results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-licenses-${{ github.sha }}
+          path: dependency-licenses.log
+          if-no-files-found: warn
+          retention-days: 90

@@ -1,0 +1,88 @@
+name: Codecov publication
+
+on:
+  workflow_run:
+    workflows: [Self-audit]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      audit_run_id:
+        description: Successful Self-audit run on main to publish
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: codecov-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event != 'pull_request' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - name: Verify the completed main-branch audit
+        id: audit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUDIT_RUN_ID: ${{ github.event.workflow_run.id || inputs.audit_run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          run_id = os.environ['AUDIT_RUN_ID']
+          if not run_id.isdecimal():
+              raise SystemExit('Expected a numeric audit run ID')
+          repo = os.environ['GITHUB_REPOSITORY']
+          run = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/actions/runs/{run_id}']))
+          if not (run['path'] == '.github/workflows/self-audit.yml'
+                  and run['head_branch'] == 'main'
+                  and run['head_repository']['full_name'] == repo
+                  and run['event'] in ('push', 'schedule', 'workflow_dispatch')
+                  and run['status'] == 'completed' and run['conclusion'] == 'success'
+                  and re.fullmatch(r'[0-9a-f]{40}', run['head_sha'])):
+              raise SystemExit('Refusing coverage from an untrusted or unsuccessful audit')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f"sha={run['head_sha']}\nrun_id={run_id}\n")
+          PY
+      - name: Check out the verified main commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ steps.audit.outputs.sha }}
+          persist-credentials: false
+      - name: Download its measurement evidence
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: self-audit-${{ steps.audit.outputs.sha }}
+          run-id: ${{ steps.audit.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: target/coverage-publication
+      - name: Verify source identity and LCOV evidence
+        env:
+          SOURCE_COMMIT: ${{ steps.audit.outputs.sha }}
+        run: python3 tools/coverage_upload.py target/coverage-publication --commit "$SOURCE_COMMIT"
+      - name: Publish Linux workspace coverage using OIDC
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          use_oidc: true
+          files: target/coverage-publication/coverage.lcov
+          disable_search: true
+          disable_file_fixes: true
+          disable_telem: true
+          plugins: noop
+          flags: linux
+          name: native-linux-workspace
+          override_commit: ${{ steps.audit.outputs.sha }}
+          override_branch: main
+          override_build: ${{ steps.audit.outputs.run_id }}
+          fail_ci_if_error: true

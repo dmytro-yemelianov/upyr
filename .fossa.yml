@@ -1,0 +1,15 @@
+version: 3
+
+project:
+  id: github.com/dmytro-yemelianov/upyr
+  name: Upyr
+  url: https://github.com/dmytro-yemelianov/upyr
+
+paths:
+  exclude:
+    - ./.git
+    - ./.stos
+    - ./target
+
+telemetry:
+  scope: "off"
