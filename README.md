@@ -10,7 +10,7 @@
 [![CI](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml?query=branch%3Amain)
 [![Security checks](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml?query=branch%3Amain)
 [![Self-audit](https://github.com/dmytro-yemelianov/upyr/actions/workflows/self-audit.yml/badge.svg?branch=main)](docs/quality.md#readme-badges)
-[![Core line coverage: Linux, preview 0.6.0](https://github.com/dmytro-yemelianov/upyr/releases/download/preview-0.6.0/core-coverage.svg "Linux core line coverage, preview 0.6.0; includes inline unit tests")](docs/quality.md#readme-badges)
+[![Core line coverage: Linux, preview 0.6.0](docs/badges/core-coverage-preview-0.6.0-linux.svg "Linux core line coverage, preview 0.6.0; includes inline unit tests")](docs/quality.md#readme-badges)
 [![Security policy](https://img.shields.io/badge/security-policy-blue.svg)](SECURITY.md)
 
 **Fix English ↔ Ukrainian text typed on the wrong keyboard layout.**

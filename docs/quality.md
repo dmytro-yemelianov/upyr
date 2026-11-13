@@ -35,7 +35,9 @@ checks. Each badge links to its source or the explanation here.
   [exact JSON report](https://github.com/dmytro-yemelianov/upyr/releases/download/preview-0.6.0/self-audit.json)
   or the coverage HTML in
   [the full evidence archive](https://github.com/dmytro-yemelianov/upyr/releases/download/preview-0.6.0/self-audit.tar.gz).
-  Move this badge to a new release only after verifying its published evidence.
+  The embedded SVG is a byte-for-byte copy of the release asset, served from the
+  repository so GitHub can display it inline. Move this badge to a new release
+  only after verifying its published evidence.
 
 There is no configured FOSSA or Codecov result and no completed ASVS L2 assessment
 for Upyr. Those labels are not interchangeable with the checks above.
