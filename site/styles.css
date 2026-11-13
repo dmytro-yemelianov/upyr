@@ -279,8 +279,7 @@ code {
 .hero {
   position: relative;
   isolation: isolate;
-  min-height: 860px;
-  padding: 178px 0 68px;
+  padding: 128px 0 48px;
   overflow: hidden;
 }
 
@@ -362,10 +361,10 @@ code {
 .hero h1 {
   max-width: 760px;
   margin: 0;
-  font-size: clamp(3.25rem, 6.3vw, 5.9rem);
+  font-size: clamp(3rem, 5vw, 4.6rem);
   font-weight: 750;
   letter-spacing: -0.068em;
-  line-height: 0.98;
+  line-height: 1.05;
   text-wrap: balance;
 }
 
@@ -646,7 +645,7 @@ code {
 .trust-strip {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  margin-top: 96px;
+  margin-top: 56px;
   padding: 18px 0;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
@@ -675,7 +674,7 @@ code {
 }
 
 .section {
-  padding: 120px 0;
+  padding: 88px 0;
 }
 
 .section-panel {
@@ -698,6 +697,7 @@ code {
   margin: 0 0 13px;
 }
 
+.section h1,
 .section h2,
 .download-card h2,
 .about-grid h2 {
@@ -2087,7 +2087,7 @@ code {
   }
 
   .hero {
-    padding-top: 150px;
+    padding-top: 120px;
   }
 
   .hero-grid {
@@ -2096,7 +2096,7 @@ code {
   }
 
   .hero h1 {
-    font-size: clamp(3rem, 7vw, 4.8rem);
+    font-size: clamp(2.8rem, 5vw, 4rem);
   }
 
   .pipeline {
@@ -2164,7 +2164,7 @@ code {
   }
 
   .hero {
-    padding-top: 132px;
+    padding-top: 112px;
   }
 
   .hero-grid {
@@ -2255,11 +2255,11 @@ code {
 
   .hero {
     min-height: 0;
-    padding: 116px 0 50px;
+    padding: 100px 0 40px;
   }
 
   .hero h1 {
-    font-size: clamp(2.75rem, 14vw, 4rem);
+    font-size: clamp(2.5rem, 10vw, 3.5rem);
     letter-spacing: -0.06em;
   }
 
@@ -2484,6 +2484,34 @@ code {
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015));
 }
 
+.demo-details,
+.install-details,
+.release-details {
+  margin-top: 24px;
+}
+
+.demo-details {
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.demo-details summary,
+.install-details summary,
+.release-details summary {
+  width: fit-content;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.demo-details[open] summary {
+  margin-bottom: 20px;
+}
+
+.live-demo > .demo-intense-button,
+.demo-details .live-demo-excluded {
+  margin-top: 20px;
+}
+
 .live-demo-controls {
   display: flex;
   flex-wrap: wrap;
@@ -2495,6 +2523,7 @@ code {
 
 .layout-toggle {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 4px;
   border: 1px solid var(--line);
@@ -2685,7 +2714,7 @@ code {
 }
 
 .live-demo-excluded input {
-  border-color: var(--danger);
+  border-color: var(--line);
 }
 
 @media (max-width: 860px) {
@@ -2699,6 +2728,7 @@ code {
 }
 
 @media (max-width: 480px) {
+  .live-demo { padding: 18px; }
   .live-demo-keyboard-wrap {
     padding: 14px;
   }
@@ -2825,6 +2855,7 @@ code {
 }
 
 .release-section code {
+  overflow-wrap: anywhere;
   padding: 0.1em 0.4em;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.08);

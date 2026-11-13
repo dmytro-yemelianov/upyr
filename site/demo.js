@@ -2,6 +2,8 @@ import init, { UpyrSession } from "./wasm/upyr_wasm.js";
 import { attach, isExcludedField } from "./upyr-web.js";
 import { buildKeyboard } from "./keyboard.js";
 
+const text = (english, ukrainian) => document.documentElement.lang === "uk" ? ukrainian : english;
+
 // A scripted sequence of physical-key codes that spells known EN/UK
 // wrong-layout pairs (see README and upyr-wasm's own tests), alternating
 // direction on every word so the layout visibly flips back and forth.
@@ -17,13 +19,13 @@ const INTENSE_SCRIPT = [
 function statusText(decision) {
   switch (decision.kind) {
     case "correct":
-      return `Checking ${decision.expectedSource.trim()} → ${decision.replacement.trim()}…`;
+      return text(`Checking ${decision.expectedSource.trim()} → ${decision.replacement.trim()}…`, `Перевіряємо ${decision.expectedSource.trim()} → ${decision.replacement.trim()}…`);
     case "suggest":
-      return `Would suggest ${decision.expectedSource.trim()} → ${decision.replacement.trim()}`;
+      return text(`Suggestion: ${decision.expectedSource.trim()} → ${decision.replacement.trim()}`, `Пропозиція: ${decision.expectedSource.trim()} → ${decision.replacement.trim()}`);
     case "wait":
-      return "Tracking…";
+      return text("Keep typing…", "Продовжуйте набирати…");
     case "reset":
-      return `Reset (${decision.reason})`;
+      return text("Ready for the next word.", "Готово до наступного слова.");
     default:
       return "";
   }
@@ -33,8 +35,8 @@ function appliedText(decision, applied) {
   const source = decision.expectedSource.trim();
   const replacement = decision.replacement.trim();
   return applied
-    ? `Corrected ${source} → ${replacement} (${decision.direction})`
-    : `Left ${source} unchanged: the text before the caret changed first`;
+    ? text(`Corrected ${source} → ${replacement}`, `Виправлено ${source} → ${replacement}`)
+    : text("Your text changed first; the edit was kept.", "Текст уже змінився; ваше редагування збережено.");
 }
 
 // A real keyboard reports the produced character in `event.key`, which shows
@@ -72,8 +74,13 @@ async function main() {
 
   const session = new UpyrSession({ mode: "auto", sourceLayout: "english" });
 
-  function setStatus(message) {
-    if (statusLine) statusLine.textContent = message;
+  let currentStatus = () => text(
+    "Only this field changes; your system keyboard layout stays the same.",
+    "Змінюється лише це поле; системна розкладка лишається тією самою."
+  );
+  function setStatus(render) {
+    currentStatus = render;
+    if (statusLine) statusLine.textContent = render();
   }
 
   function setLayout(layout, { manual } = {}) {
@@ -84,10 +91,11 @@ async function main() {
     }
     for (const button of manualButtons) {
       button.classList.toggle("is-active", button.dataset.manualLayout === layout);
+      button.setAttribute("aria-pressed", String(button.dataset.manualLayout === layout));
     }
     if (manual) {
       autoFollow = false;
-      if (autoButton) autoButton.classList.remove("is-active");
+      if (autoButton) { autoButton.classList.remove("is-active"); autoButton.setAttribute("aria-pressed", "false"); }
     }
   }
 
@@ -131,9 +139,9 @@ async function main() {
       const layout = layoutFromKeyEvent(event);
       if (layout && layout !== keyboard.getLayout()) setLayout(layout);
     },
-    onDecision: (decision) => setStatus(statusText(decision)),
+    onDecision: (decision) => setStatus(() => statusText(decision)),
     onApply: (decision, applied) => {
-      setStatus(appliedText(decision, applied));
+      setStatus(() => appliedText(decision, applied));
       // A real keyboard's OS input source stays put after a correction, so
       // its next keystrokes keep reporting their own layout instead.
       if (applied && onScreenKey && autoFollow && decision.targetLayout) {
@@ -145,12 +153,16 @@ async function main() {
   // Proves the field-exclusion contract live: this is a real password input,
   // and `attach` refuses it, exactly like docs/architecture/wasm-web-plan.md
   // requires ("never attach password... fields").
-  if (passwordField && excludedNote) {
-    const passwordSession = attach(passwordField, session);
-    excludedNote.textContent = passwordSession === null && isExcludedField(passwordField)
-      ? "Upyr never attaches to this field (type=\"password\")."
-      : "Warning: exclusion check failed.";
+  const passwordExcluded = !passwordField || (attach(passwordField, session) === null && isExcludedField(passwordField));
+  function renderLabels() {
+    if (statusLine) statusLine.textContent = currentStatus();
+    if (intenseButton) intenseButton.textContent = intenseRunning
+      ? text("Stop example", "Зупинити приклад") : text("Play example", "Запустити приклад");
+    if (excludedNote) excludedNote.textContent = passwordExcluded
+      ? text("Correction is disabled in password fields.", "Виправлення в полях пароля вимкнено.")
+      : text("Field exclusion check failed.", "Не вдалося перевірити виключення поля.");
   }
+  document.addEventListener("upyr-language-change", renderLabels);
 
   for (const button of manualButtons) {
     button.addEventListener("click", () => setLayout(button.dataset.manualLayout, { manual: true }));
@@ -160,15 +172,17 @@ async function main() {
     autoButton.addEventListener("click", () => {
       autoFollow = !autoFollow;
       autoButton.classList.toggle("is-active", autoFollow);
+      autoButton.setAttribute("aria-pressed", String(autoFollow));
     });
     autoButton.classList.toggle("is-active", autoFollow);
+    autoButton.setAttribute("aria-pressed", String(autoFollow));
   }
 
   function stopIntenseDemo() {
     intenseRunning = false;
     if (intenseTimer) window.clearTimeout(intenseTimer);
     intenseTimer = null;
-    if (intenseButton) intenseButton.textContent = "Play intense switching demo";
+    renderLabels();
   }
 
   async function runIntenseDemo() {
@@ -196,18 +210,20 @@ async function main() {
         return;
       }
       intenseRunning = true;
-      intenseButton.textContent = "Stop demo";
+      renderLabels();
       runIntenseDemo();
     });
   }
 
   setLayout("english");
-  setStatus("Type on the keyboard above, or your real keyboard, in the field below.");
+  renderLabels();
 }
 
 main().catch((error) => {
   console.error("Upyr live demo failed to start", error);
   const root = document.getElementById("live-demo");
   const statusLine = root && root.querySelector("[data-role='status']");
-  if (statusLine) statusLine.textContent = "Live demo unavailable in this browser.";
+  const showError = () => { if (statusLine) statusLine.textContent = text("Live demo unavailable in this browser.", "Демо недоступне в цьому браузері."); };
+  showError();
+  document.addEventListener("upyr-language-change", showError);
 });

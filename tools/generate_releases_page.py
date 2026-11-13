@@ -120,6 +120,7 @@ def render_release(release: Release) -> str:
     if release.tagline:
         parts.append(f'<p class="release-tagline">{render_inline(release.tagline)}</p>')
 
+    parts.append('<details class="release-details"><summary>Read changes</summary>')
     for title, items in release.sections:
         if not items:
             continue
@@ -131,6 +132,7 @@ def render_release(release: Release) -> str:
         parts.append("</ul>")
         parts.append("</div>")
 
+    parts.append('</details>')
     if release.url and not release.is_unreleased:
         parts.append('<div class="release-actions">')
         parts.append(
@@ -178,10 +180,9 @@ PAGE_TEMPLATE = """<!doctype html>
           <span>Upyr</span>
         </a>
         <nav class="nav" id="primary-nav" aria-label="Main navigation">
-          <a href="index.html#why">Why Upyr</a>
-          <a href="index.html#how">How it works</a>
-          <a href="index.html#privacy">Privacy</a>
-          <a href="index.html#platforms">Platforms</a>
+          <a href="how.html">How it works</a>
+          <a href="features.html">Features</a>
+          <a href="privacy.html">Privacy</a>
           <a href="releases.html" aria-current="page">Releases</a>
         </nav>
         <div class="header-actions">
@@ -208,7 +209,7 @@ PAGE_TEMPLATE = """<!doctype html>
           <div class="section-intro">
             <p class="kicker">Release history</p>
             <h1>Releases</h1>
-            <p>Generated from <a class="text-link" href="https://github.com/dmytro-yemelianov/upyr/blob/main/CHANGELOG.md">CHANGELOG.md</a>. Packaged binaries are signed, checksummed, and attested by the release workflow; see each release for platform downloads.</p>
+            <p>Downloads and changes for each version. Read the installation notes with your download, or browse the full <a class="text-link" href="https://github.com/dmytro-yemelianov/upyr/blob/main/CHANGELOG.md">changelog</a>.</p>
           </div>
           <div class="releases-list">
 {releases}
