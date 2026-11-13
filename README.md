@@ -1,6 +1,7 @@
 # Upyr
 
 [![CI](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml/badge.svg)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml)
+[![Self-audit](https://github.com/dmytro-yemelianov/upyr/actions/workflows/self-audit.yml/badge.svg?branch=main)](docs/quality.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-58d6a8.svg)](LICENSE)
 
 **Fix English ↔ Ukrainian text typed on the wrong keyboard layout.**
@@ -13,7 +14,7 @@ Upyr runs locally in your menu bar or system tray, with no account or telemetry.
 [Full reference](docs/reference.md) ·
 [Report an issue](https://github.com/dmytro-yemelianov/upyr/issues/new/choose)
 
-**Release status:** v0.5.0 public preview. macOS is the primary desktop target;
+**Release status:** v0.6.0 public preview. macOS is the primary desktop target;
 Windows and Linux/X11 are previews. Current macOS preview bundles are ad-hoc
 signed and not notarized. See [installation notes](docs/reference.md#install-on-macos)
 for details.
@@ -82,6 +83,7 @@ analytics or typing-history log. Learning saves rules and exceptions to your
 local config; clipboard restoration is enabled by default.
 
 [Privacy details](docs/reference.md#privacy-and-security) ·
+[Quality and self-audit](docs/quality.md) ·
 [Report a vulnerability](SECURITY.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## Build and run

@@ -6,13 +6,33 @@ change between minor releases while the version is below 1.0.
 
 ## [Unreleased]
 
+### Planned
+
+- Notarized Developer ID distribution for macOS.
+- Broader Windows and Linux desktop validation.
+- Browser adapter and npm delivery for `upyr-wasm`.
+
+## [0.6.0] - 2026-11-13
+
+Mid-word and short-context correction, a faster bounded engine, complete pixel
+settings in Ukrainian, and reproducible engineering self-audit reports.
+
 ### Security
+
+- Replace the yanked `async-executor` 1.14.0 with 1.14.1.
 
 - Update `rustix` 1.1.4 to 1.1.6 for
   [RUSTSEC-2026-0486](https://rustsec.org/advisories/RUSTSEC-2026-0486.html),
   fixing zero-length extended-attribute buffer handling in the dependency.
 
 ### Added
+
+- Reproducible self-audit: per-crate coverage, RustSec warnings, dependency
+  license/source policy, code checks, engine memory budgets and observed latency,
+  with commit-bound evidence and a compact README status badge.
+- Ukrainian is the default settings language; English remains selectable. The
+  pixel, native and terminal editors share the language preference.
+- A shorter bilingual website and README, with the full reference kept separately.
 
 - Complete pixel settings: all seven pages and shared search, physical shortcut
   recording, macOS Globe/terminal/Undo controls, flag gallery, sound previews,
@@ -115,12 +135,6 @@ change between minor releases while the version is below 1.0.
   shortcuts a correction posts reached it as the Windows key and Alt+Shift,
   opening the Start menu and switching its layout while you typed. The menu
   bar item shows correction as paused there.
-
-### Planned
-
-- Notarized Developer ID distribution for macOS.
-- Broader Windows and Linux desktop validation.
-- Browser adapter and npm delivery for `upyr-wasm`.
 
 ## [0.5.0] - 2026-11-08
 
@@ -502,7 +516,8 @@ Initial public preview.
 - Public preview artifacts may be explicitly marked unnotarized; users should
   check each release's signing status before installing.
 
-[Unreleased]: https://github.com/dmytro-yemelianov/upyr/compare/macos-preview-0.5.0...HEAD
+[Unreleased]: https://github.com/dmytro-yemelianov/upyr/compare/preview-0.6.0...HEAD
+[0.6.0]: https://github.com/dmytro-yemelianov/upyr/releases/tag/preview-0.6.0
 [0.5.0]: https://github.com/dmytro-yemelianov/upyr/releases/tag/macos-preview-0.5.0
 [0.4.1]: https://github.com/dmytro-yemelianov/upyr/releases/tag/macos-preview-0.4.1
 [0.4.0]: https://github.com/dmytro-yemelianov/upyr/releases/tag/macos-preview-0.4.0
