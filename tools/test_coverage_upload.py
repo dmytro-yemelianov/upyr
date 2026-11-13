@@ -60,7 +60,7 @@ class CoverageUploadTests(unittest.TestCase):
                   "evidence_sha256": {"coverage.lcov": hashlib.sha256(text.encode()).hexdigest()}}
         with tempfile.TemporaryDirectory() as scratch:
             root = Path(scratch)
-            (root / "coverage.lcov").write_text(text)
+            (root / "coverage.lcov").write_bytes(text.encode("utf-8"))
             def save():
                 (root / "report.json").write_text(json.dumps(report))
             save()
