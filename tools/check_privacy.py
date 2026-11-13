@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed when Upyr gains network, telemetry, or web tracking paths.
+"""Reject unapproved network, telemetry, or web tracking paths.
 
 This is intentionally a small, auditable guard rather than a claim that static
 analysis can prove a negative. It checks the dependency lock, native/WASM source,
@@ -44,6 +44,10 @@ PRE_RENDERED_AUDIO_SUFFIXES = {
 # offline by a manual, developer-run tool (tools/generate_event_sound_pack.py)
 # and bundled as static assets, never generated or fetched at runtime.
 ALLOWED_PRE_RENDERED_AUDIO_ROOT = ROOT / "assets" / "sounds" / "anime"
+# The sole desktop HTTP client is the explicit Settings > About update check.
+# It has no keyboard/config input and never runs on startup or on a schedule.
+MANUAL_UPDATE_MODULE = Path("src/settings/updates.rs")
+ALLOWED_NETWORK_CRATES = {"ureq"}
 
 NETWORK_CRATES = {
     "awc",
@@ -181,7 +185,7 @@ def sensitive_log_field(body: str) -> str | None:
 
 
 def check_dependencies(errors: list[str]) -> None:
-    forbidden = package_names() & (NETWORK_CRATES | TELEMETRY_CRATES)
+    forbidden = package_names() & ((NETWORK_CRATES - ALLOWED_NETWORK_CRATES) | TELEMETRY_CRATES)
     if forbidden:
         errors.append("forbidden network/telemetry crates in Cargo.lock: " + ", ".join(sorted(forbidden)))
 
@@ -193,12 +197,19 @@ def check_bundled_audio(errors: list[str]) -> None:
         )
 
 
+def approved_network_reference(relative: Path, label: str, symbol: str) -> bool:
+    return (relative == MANUAL_UPDATE_MODULE
+            and label == "HTTP client API" and symbol == "ureq::")
+
+
 def check_runtime_source(errors: list[str]) -> None:
     for path in rust_files():
         source = path.read_text(encoding="utf-8")
         relative = path.relative_to(ROOT)
         for label, pattern in SOURCE_PATTERNS.items():
             for match in pattern.finditer(source):
+                if approved_network_reference(relative, label, match.group(0)):
+                    continue
                 line = source.count("\n", 0, match.start()) + 1
                 errors.append(f"{relative}:{line}: {label}: {match.group(0)}")
 

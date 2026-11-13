@@ -27,12 +27,18 @@ asking for a security contact without including any vulnerability details.
 
 ## Privacy and non-tracking invariant
 
-The shipped application is designed to work entirely on the device:
+Text processing is designed to work entirely on the device:
 
 - It has no analytics, advertising, telemetry, crash-upload, account, or tracking
   service.
 - It does not transmit keyboard events, selected text, clipboard contents,
   configuration, or n-gram decisions.
+- The unreleased **Settings → About → Check for updates** action sends an
+  unauthenticated HTTPS GET to `api.github.com` only after a click. GitHub sees
+  the connection's IP address and an Upyr version User-Agent. The request has
+  no user content or device identifier, follows no redirects, and is bounded
+  by a 15-second timeout and a 2 MiB response limit. Opening a release link is a
+  separate browser action. No automatic checks, downloads or installation run.
 - Keyboard samples used for automatic correction remain transient in process
   memory. Logs contain outcomes and character counts, not the captured text.
 - The language detector uses an embedded, language-tagged character n-gram model;
@@ -66,7 +72,7 @@ Pull requests and the default branch are checked with:
 - GitHub dependency review for newly introduced vulnerable dependencies;
 - Clippy, formatting, unit/integration tests, and cross-platform builds;
 - a privacy-architecture guard that rejects common outbound network and tracking
-  integrations in application code;
+  integrations, with a narrow exception for the manual update-check module;
 - pinned GitHub Actions, least-privilege workflow tokens, release checksums,
   GitHub artifact provenance attestations, a CycloneDX SBOM, and keyless Cosign
   signatures.
@@ -75,8 +81,8 @@ Tagged macOS and Windows releases must use the configured platform signing
 identities; macOS packages are also notarized. Current `macos-preview-*`
 artifacts are intentionally marked as previews and are not Apple Developer ID
 signed or notarized, so Gatekeeper can report that Apple could not verify Upyr.
-Upyr has no automatic update checker; users should check GitHub Releases for a
-newer notarized build. Verification reduces risk but does not guarantee that the
+Upyr has no automatic update checker; users can check GitHub Releases manually,
+or use the update-check button when available in their build. Verification reduces risk but does not guarantee that the
 software is vulnerability-free.
 
 ### Verifying a release

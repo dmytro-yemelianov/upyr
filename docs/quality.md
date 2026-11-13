@@ -67,7 +67,7 @@ open controls; it does not claim an ASVS level pass.
 | Dependencies | RustSec known vulnerabilities = 0; every maintenance/yanked warning remains visible | Entire lockfile; database revision in raw report |
 | Licenses / sources | `cargo-deny` allowlist and version-scoped exceptions; crates.io sources only | Cargo dependency metadata, not asset rights |
 | Code checks | `rustfmt`, Clippy with warnings denied, rustdoc with warnings denied | Workspace; Clippy includes all targets/features |
-| Privacy | Offline runtime / non-tracking architecture guard and its regression tests | Source/dependency and website invariants |
+| Privacy | Non-tracking architecture guard and its regression tests; only the manual settings update check may use HTTP | Source/dependency and website invariants |
 | Correctness / memory | 18 portable engine oracle, allocation and memory-budget checks | Versioned synthetic fixtures; exact limits in report |
 | Latency | Mapping p50, p95, p99, max, sample count and allocations | Release build on the named host; observation, no timing gate |
 | Evidence integrity | Commit, dirty-tree flag, source/lockfile hashes, tool versions, commands and SHA-256 of evidence | Source changes during a run fail the audit |

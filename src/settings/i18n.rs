@@ -30,6 +30,29 @@ pub(super) fn translate(language: UiLanguage, text: &str) -> &str {
         "Feedback" => "Вигляд і звуки",
         "Advanced" => "Додатково",
         "About" => "Про програму",
+        "Check for updates" => "Перевірити оновлення",
+        "Open release" => "Відкрити реліз",
+        "Contacts GitHub only when you press the button. Installation stays manual." => {
+            "Звертається до GitHub лише після натискання. Встановлення — вручну."
+        }
+        "Checking for updates…" => "Перевіряємо оновлення…",
+        "No newer version is available for this platform." => {
+            "Для цієї платформи новішої версії немає."
+        }
+        " (preview)" => " (попередня версія)",
+        "GitHub's request limit was reached. Try again later." => {
+            "Досягнуто ліміту запитів GitHub. Спробуйте пізніше."
+        }
+        "Could not read the release information. Try again later." => {
+            "Не вдалося прочитати відомості про реліз. Спробуйте пізніше."
+        }
+        "No release for this platform was found." => "Релізу для цієї платформи не знайдено.",
+        "Could not reach GitHub. Check your connection and try again." => {
+            "Не вдалося з’єднатися з GitHub. Перевірте підключення та спробуйте ще раз."
+        }
+        "Could not start or finish the check. Try again." => {
+            "Не вдалося виконати перевірку. Спробуйте ще раз."
+        }
         "Core conversion, clipboard, and startup behavior." => {
             "Перетворення тексту, буфер обміну та запуск програми."
         }

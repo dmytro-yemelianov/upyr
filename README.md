@@ -49,7 +49,10 @@ are protected; ambiguous input can stay unchanged.
 3. Grant **Accessibility** access when prompted, then accept Upyr's restart offer.
 
 Requires macOS 11+; release bundles support Apple Silicon and Intel.
-Updates are available through Releases; the app does not check automatically.
+**Settings → About → Check for updates** checks GitHub only when clicked and
+links to a newer release for your platform, including previews. Installation
+stays manual; there are no automatic checks. This is an unreleased feature;
+published 0.6.0 builds still use the Releases page directly.
 
 ## Everyday controls
 
@@ -89,8 +92,9 @@ Or install from source with `cargo install upyr --locked`.
 
 ## Privacy and security
 
-Text processing stays on your device. The runtime has no network client,
-analytics or typing-history log. Learning saves rules and exceptions to your
+Text processing stays on your device, with no analytics or typing-history log.
+Only the optional update-check button contacts GitHub; it sends no typed text,
+clipboard contents or configuration. Learning saves rules and exceptions to your
 local config; clipboard restoration is enabled by default.
 
 [Privacy details](docs/reference.md#privacy-and-security) ·

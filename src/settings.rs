@@ -38,6 +38,7 @@ mod navigation;
 mod persistence;
 mod pixel;
 mod tui;
+mod updates;
 #[cfg(any(target_os = "macos", test))]
 use draft::normalize_exceptions;
 use draft::parse_exceptions;
@@ -493,6 +494,7 @@ struct SettingsApp {
     search: String,
     recording: Option<ShortcutSlot>,
     shortcut_error: Option<String>,
+    updates: updates::UpdateCheck,
     #[cfg(target_os = "macos")]
     flags: pixel::flags::FlagPicker,
     #[cfg(target_os = "macos")]
@@ -521,6 +523,7 @@ impl SettingsApp {
             search: String::new(),
             recording: None,
             shortcut_error: None,
+            updates: updates::UpdateCheck::default(),
             #[cfg(target_os = "macos")]
             flags: pixel::flags::FlagPicker::default(),
             #[cfg(target_os = "macos")]
@@ -1272,12 +1275,32 @@ impl SettingsApp {
     }
 
     fn draw_about(&mut self, ui: &mut egui::Ui) {
+        self.updates.poll();
         section_heading(
             ui,
             &format!("Upyr {APP_VERSION}"),
             tr("English ↔ Ukrainian keyboard layout correction."),
         );
         ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .add_enabled(
+                    !self.updates.is_checking(),
+                    egui::Button::new(tr("Check for updates")),
+                )
+                .clicked()
+            {
+                self.updates.start();
+            }
+            if let Some(url) = self.updates.state.release_url() {
+                ui.hyperlink_to(tr("Open release"), url);
+            }
+        });
+        ui.label(self.updates.state.message());
+        if self.updates.is_checking() {
+            ui.ctx().request_repaint_after(ACTIVATION_POLL_INTERVAL);
+        }
+        ui.add_space(14.0);
         ui.label(egui::RichText::new(tr("Private by construction")).strong());
         ui.label(tr(PRIVACY_SUMMARY));
         ui.add_space(14.0);

@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 from tools.check_privacy import (
     ALLOWED_PRE_RENDERED_AUDIO_ROOT,
     WEB_CODE_PATTERNS,
+    approved_network_reference,
     pre_rendered_audio_files,
     sensitive_log_field,
     validate_csp,
@@ -95,6 +96,22 @@ class BrowserPrivacyApiTests(unittest.TestCase):
     def test_rejects_webrtc_even_with_connect_src_none(self) -> None:
         pattern = WEB_CODE_PATTERNS["WebRTC API"]
         self.assertIsNotNone(pattern.search("new RTCPeerConnection()"))
+
+
+class ManualUpdateExceptionTests(unittest.TestCase):
+    def test_ureq_is_allowed_only_in_the_manual_update_module(self) -> None:
+        self.assertTrue(approved_network_reference(
+            Path("src/settings/updates.rs"), "HTTP client API", "ureq::"))
+        for path in ("src/app.rs", "src/settings.rs", "crates/upyr-core/src/lib.rs",
+                     "crates/upyr-wasm/src/lib.rs", "other/src/settings/updates.rs"):
+            self.assertFalse(approved_network_reference(Path(path), "HTTP client API", "ureq::"))
+
+    def test_exception_does_not_allow_other_clients_sockets_or_telemetry(self) -> None:
+        for label, symbol in (("HTTP client API", "reqwest::"),
+                              ("native socket API", "TcpStream"),
+                              ("telemetry SDK API", "sentry::")):
+            self.assertFalse(approved_network_reference(
+                Path("src/settings/updates.rs"), label, symbol))
 
 
 if __name__ == "__main__":
