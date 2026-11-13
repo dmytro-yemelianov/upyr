@@ -46,7 +46,7 @@ dashboard separates them into **14 license findings and 7 outdated dependencies*
 The [initial findings review](security/fossa-review-2026-11-13.md) records exact
 versions, source evidence, platform scope and remaining decisions.
 
-The [manual, main-only workflow](../.github/workflows/fossa.yml) now uses two pinned
+The [main-only workflow](../.github/workflows/fossa.yml) uses two pinned
 action invocations: first `fossa analyze`, then `fossa test` for the checked-out
 revision. The [action's `run-tests` option](https://github.com/fossas/fossa-action/tree/29693cc50323968e039056be419b32989fc5880c#run-tests)
 selects testing instead of analysis; the initial workflow mistakenly ran only the
@@ -56,9 +56,11 @@ open issues. Future revisions must be uploaded before their policy is checked.
 
 [CLI 3.20.10 and the project configuration](../.fossa.yml) target only the root
 Cargo workspace, including its members. Unrelated ignored checkouts/tooling are
-excluded. Missing authentication fails explicitly. Recurring scans remain off
-until the initial policy and findings are reviewed. The local `cargo-deny` policy
-does not configure FOSSA's account policy.
+excluded. Missing authentication fails explicitly. After verifying the initial
+result and reviewing its categories, scans run on pushes to `main`, weekly and
+by manual dispatch. Runs are serialized; pull requests and arbitrary branches
+never receive the credential. Open findings continue to fail the policy gate.
+The local `cargo-deny` policy does not configure FOSSA's account policy.
 
 To rotate the credential, create a **Push Only** token as recommended by the
 [official integration guide](https://docs.fossa.com/docs/integrations/github-actions)

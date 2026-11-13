@@ -87,5 +87,6 @@ upstream updates and binding/license scope before changing this dependency path.
   still need their specific follow-through. No global allow rule, ignore-all
   operation, paid-plan change or passing compliance claim was applied.
 
-Recurring FOSSA runs remain manual while these decisions are open. A later
+With the initial result and categories verified, FOSSA runs on main updates,
+weekly and by manual dispatch. Open decisions remain failed findings. A later
 passing result must link to the actual revision and any scoped policy decisions.

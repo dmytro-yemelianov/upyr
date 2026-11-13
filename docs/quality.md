@@ -32,7 +32,7 @@ then current engineering checks. Each badge links to its source or explanation.
 - **FOSSA license scan** follows the connected project's server-side license
   policy. It currently reports failing; the
   [findings review](security/fossa-review-2026-11-13.md) explains the evidence and
-  remaining decisions. The scan is manually triggered, the dashboard requires
+  remaining decisions. Scans run on main updates, weekly or manually; the dashboard requires
   authentication, and this license badge does not represent FOSSA's outdated
   dependency category or an unrestricted security scan.
 - **Codecov** shows processed Linux workspace coverage from successful `main`

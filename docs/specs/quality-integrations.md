@@ -21,9 +21,11 @@ Prepare FOSSA as an explicit, main-only scan with a push-only repository secret;
 missing authentication must fail with an actionable explanation, never pass.
 Do not show a FOSSA badge before its project and policy result exist.
 Use separate pinned action invocations for analysis and policy testing:
-`run-tests: true` selects only `fossa test`. Keep initial findings visible and
-review them before enabling recurring scans; do not waive issues to obtain a
-passing badge. A push-only key can return issue counts without issue details.
+`run-tests: true` selects only `fossa test`. Review the initial result and findings
+before enabling main/weekly scans; keep unresolved findings visible and do not
+waive issues to obtain a passing badge. Serialize scans and never pass credentials
+to PRs or arbitrary branches. A push-only key can return issue counts without
+issue details.
 
 Review ASVS 5.0 against the desktop application and public static WASM demo as
 separate surfaces. Record applicability, evidence and unverified controls. Do not
