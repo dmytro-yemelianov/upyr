@@ -1,0 +1,250 @@
+{
+  "reviewed_at": "2026-11-13T15:57:15.003910+00:00",
+  "latest_versions": {
+    "wayland-protocols-experimental": {
+      "latest": "20251230.0.3",
+      "versions": [
+        {
+          "num": "20251230.0.3",
+          "rust_version": "1.71",
+          "yanked": false,
+          "created_at": "2026-03-31T02:22:23.428498Z"
+        },
+        {
+          "num": "20251230.0.2",
+          "rust_version": "1.71",
+          "yanked": false,
+          "created_at": "2026-03-05T02:44:52.216815Z"
+        },
+        {
+          "num": "20251230.0.1",
+          "rust_version": "1.65",
+          "yanked": false,
+          "created_at": "2025-12-30T23:46:40.083828Z"
+        },
+        {
+          "num": "20250721.0.1",
+          "rust_version": "1.65",
+          "yanked": false,
+          "created_at": "2025-07-29T14:45:13.294296Z"
+        }
+      ]
+    },
+    "smithay-client-toolkit": {
+      "latest": "0.21.1",
+      "versions": [
+        {
+          "num": "0.21.1",
+          "rust_version": "1.86",
+          "yanked": false,
+          "created_at": "2026-07-23T15:30:54.187336Z"
+        },
+        {
+          "num": "0.21.0",
+          "rust_version": "1.86",
+          "yanked": false,
+          "created_at": "2026-07-20T16:05:56.206268Z"
+        },
+        {
+          "num": "0.20.0",
+          "rust_version": "1.65",
+          "yanked": false,
+          "created_at": "2025-08-08T20:51:28.245952Z"
+        },
+        {
+          "num": "0.19.2",
+          "rust_version": null,
+          "yanked": false,
+          "created_at": "2024-07-15T21:49:23.606060Z"
+        }
+      ]
+    },
+    "smithay-clipboard": {
+      "latest": "0.7.3",
+      "versions": [
+        {
+          "num": "0.7.3",
+          "rust_version": "1.85.0",
+          "yanked": false,
+          "created_at": "2025-11-02T20:12:35.216592Z"
+        },
+        {
+          "num": "0.7.2",
+          "rust_version": "1.65.0",
+          "yanked": false,
+          "created_at": "2024-07-16T21:16:41.617162Z"
+        },
+        {
+          "num": "0.7.1",
+          "rust_version": "1.65.0",
+          "yanked": false,
+          "created_at": "2024-02-20T01:47:53.499821Z"
+        },
+        {
+          "num": "0.7.0",
+          "rust_version": "1.65.0",
+          "yanked": false,
+          "created_at": "2023-10-10T17:39:31.178714Z"
+        }
+      ]
+    },
+    "wayland-protocols-plasma": {
+      "latest": "0.3.12",
+      "versions": [
+        {
+          "num": "0.3.12",
+          "rust_version": "1.71",
+          "yanked": false,
+          "created_at": "2026-03-31T02:22:39.323045Z"
+        },
+        {
+          "num": "0.3.11",
+          "rust_version": "1.71",
+          "yanked": false,
+          "created_at": "2026-03-05T02:45:07.726166Z"
+        },
+        {
+          "num": "0.3.10",
+          "rust_version": "1.65",
+          "yanked": false,
+          "created_at": "2025-12-30T23:46:16.177179Z"
+        },
+        {
+          "num": "0.3.9",
+          "rust_version": "1.65",
+          "yanked": false,
+          "created_at": "2025-07-29T14:47:15.658446Z"
+        }
+      ]
+    },
+    "winit": {
+      "latest": "0.30.13",
+      "versions": [
+        {
+          "num": "0.31.0-beta.4",
+          "rust_version": "1.86",
+          "yanked": false,
+          "created_at": "2026-10-24T07:19:41.119944Z"
+        },
+        {
+          "num": "0.31.0-beta.3",
+          "rust_version": "1.86",
+          "yanked": false,
+          "created_at": "2026-09-04T18:23:20.252485Z"
+        },
+        {
+          "num": "0.30.13",
+          "rust_version": "1.70.0",
+          "yanked": false,
+          "created_at": "2026-03-02T13:50:47.664884Z"
+        },
+        {
+          "num": "0.31.0-beta.2",
+          "rust_version": "1.85",
+          "yanked": false,
+          "created_at": "2025-11-16T08:24:44.676462Z"
+        }
+      ]
+    }
+  },
+  "source_files": [
+    {
+      "package": "smithay-client-toolkit",
+      "version": "0.19.2",
+      "path": "Cargo.toml",
+      "sha256": "171f33e042612d0dfd1b07c2d12843951a8e21e685e5ee436537aa648cd0ff34"
+    },
+    {
+      "package": "smithay-client-toolkit",
+      "version": "0.19.2",
+      "path": ".cargo_vcs_info.json",
+      "sha256": "eaa07f2af405f1488249cd1dc99f64a3c7d87b71dba647564cfff0f108721f87"
+    },
+    {
+      "package": "smithay-client-toolkit",
+      "version": "0.20.0",
+      "path": "Cargo.toml",
+      "sha256": "a08d8f42ff7f433c4bfb3dcf972cd42feeed49b57ef6a09bbd24fd60e35f1935"
+    },
+    {
+      "package": "smithay-client-toolkit",
+      "version": "0.20.0",
+      "path": ".cargo_vcs_info.json",
+      "sha256": "03483de02d12c4714ad31dc3ebba886088b1db0458c15d4336f5ea74802fe7e4"
+    },
+    {
+      "package": "smithay-clipboard",
+      "version": "0.7.3",
+      "path": "Cargo.toml",
+      "sha256": "9f7a1d198a1385bfe35775e3c8d335d93cc31ea8d2ce15f189bebb0c42a99c98"
+    },
+    {
+      "package": "smithay-clipboard",
+      "version": "0.7.3",
+      "path": ".cargo_vcs_info.json",
+      "sha256": "b2e4f63f101101fbe47f79e4bc4cc2fe549184a70be3af61db33be5beaa8e8d8"
+    },
+    {
+      "package": "wayland-protocols-experimental",
+      "version": "20250721.0.1",
+      "path": "Cargo.toml",
+      "sha256": "5f0b18bf8b1d025311af0a3fe85a0bdc1fe2acaa7bb33f131c9df460e85d68e2"
+    },
+    {
+      "package": "wayland-protocols-experimental",
+      "version": "20250721.0.1",
+      "path": ".cargo_vcs_info.json",
+      "sha256": "e5be096a2c2692e168aa74f237a34c5f9f93eca87251823eecc2f362dd8584d4"
+    },
+    {
+      "package": "wayland-protocols-plasma",
+      "version": "0.3.12",
+      "path": "Cargo.toml",
+      "sha256": "898c01b3c9c64bad9794bbd4701debc10922940ad9a2e7050bf522e17fed2ab1"
+    },
+    {
+      "package": "wayland-protocols-plasma",
+      "version": "0.3.12",
+      "path": ".cargo_vcs_info.json",
+      "sha256": "9cae85c08a4208d83e0586d1c0886f70fe63a97e9d6945207a33685dd6525e75"
+    },
+    {
+      "package": "wayland-protocols-plasma",
+      "version": "0.3.12",
+      "path": "src/lib.rs",
+      "sha256": "8086db9f35dcf1f20e0f82e076c7ab396acee173922e5c77b3363ba45f7534be"
+    },
+    {
+      "package": "wayland-protocols-plasma",
+      "version": "0.3.12",
+      "path": "plasma-wayland-protocols/src/protocols/blur.xml",
+      "sha256": "a8a8aaf9f9284d55960b0ca628469cd7c06646a5d69c5362a03a525f0ea773b7"
+    },
+    {
+      "package": "winit",
+      "version": "0.30.13",
+      "path": "Cargo.toml",
+      "sha256": "2aeb741d47b763ee198ca915c330a6bf0b1fc094dd69357e80278b7852289c61"
+    },
+    {
+      "package": "winit",
+      "version": "0.30.13",
+      "path": ".cargo_vcs_info.json",
+      "sha256": "b8b2549c91dbf3dc4087197a6be89ab5acb5511c2d1eadc7349c249f646047bb"
+    },
+    {
+      "package": "winit",
+      "version": "0.30.13",
+      "path": "src/platform_impl/linux/wayland/types/kwin_blur.rs",
+      "sha256": "6cbb4ce3e2484a01bacfa24a55ea3c1659503b18fc48e8f41f341d437f291ea4"
+    },
+    {
+      "package": "winit",
+      "version": "0.30.13",
+      "path": "src/platform_impl/linux/wayland/window/state.rs",
+      "sha256": "d09f9c19235a36d0a0068eb82428a27e3a4f318f31925368e573310ae791030a"
+    }
+  ],
+  "source_revision": "94b4d2813a932b31f9def2b2c5aaf22255e6c647",
+  "cargo_lock_sha256": "210c9588bf51f915e1a424d8391ff19661f6a233b23bfcd1165262c374fff7e8"
+}
