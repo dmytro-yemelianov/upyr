@@ -41,14 +41,18 @@ on 2026-11-13 checked the maintainer-uploaded `aaac395` revision and **failed wi
 details, so these findings require review in the authenticated
 [FOSSA report](https://app.fossa.com/projects/custom%2B59498%2Fgithub.com%2Fdmytro-yemelianov%2Fupyr/refs/branch/main/aaac395ecf16f9feb5f9c73c05d39a7bf6e72842).
 The public license-scan badge also reported `failing`. This does not establish
-that all 21 findings are vulnerabilities or license violations; their individual
-types and evidence have not yet been reviewed.
+that all 21 findings are vulnerabilities or license violations. The authenticated
+dashboard separates them into **14 license findings and 7 outdated dependencies**.
+The [initial findings review](security/fossa-review-2026-11-13.md) records exact
+versions, source evidence, platform scope and remaining decisions.
 
 The [manual, main-only workflow](../.github/workflows/fossa.yml) now uses two pinned
 action invocations: first `fossa analyze`, then `fossa test` for the checked-out
 revision. The [action's `run-tests` option](https://github.com/fossas/fossa-action/tree/29693cc50323968e039056be419b32989fc5880c#run-tests)
 selects testing instead of analysis; the initial workflow mistakenly ran only the
-test. Future revisions must be uploaded by CI before their policy result is checked.
+test. The corrected [main run](https://github.com/dmytro-yemelianov/upyr/actions/runs/43433033499)
+successfully uploaded `25d3d4e` and then failed its policy test with the same 21
+open issues. Future revisions must be uploaded before their policy is checked.
 
 [CLI 3.20.10 and the project configuration](../.fossa.yml) target only the root
 Cargo workspace, including its members. Unrelated ignored checkouts/tooling are

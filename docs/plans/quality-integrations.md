@@ -18,5 +18,8 @@ Spec: [quality-integrations.md](../specs/quality-integrations.md).
    workflow and run it on main after merging.
 3. Review the initial 21 findings in the authenticated project dashboard; the
    push-only key intentionally cannot retrieve their details.
-4. Publish the actual service status and enable recurring scans after the policy
-   and findings have been reviewed. Preserve failures and unresolved findings.
+4. Publish the actual service status with its findings review. Preserve failures
+   and unresolved findings; enable recurring scans after policy decisions.
+5. Preserve upstream font notices in the existing packaged notices file. Record
+   alternate-license and platform/asset scope evidence for exact crate versions;
+   keep Linux protocol licensing and the active outdated package open.

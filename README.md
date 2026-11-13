@@ -13,6 +13,7 @@
 [![Self-audit](https://github.com/dmytro-yemelianov/upyr/actions/workflows/self-audit.yml/badge.svg?branch=main)](docs/quality.md#readme-badges)
 [![Codecov: Linux workspace coverage](https://codecov.io/gh/dmytro-yemelianov/upyr/branch/main/graph/badge.svg)](https://app.codecov.io/gh/dmytro-yemelianov/upyr)
 [![Dependency licenses](https://github.com/dmytro-yemelianov/upyr/actions/workflows/licenses.yml/badge.svg?branch=main)](docs/quality-integrations.md#dependency-license-policy)
+[![FOSSA license scan](https://app.fossa.com/api/projects/custom%2B59498%2Fgithub.com%2Fdmytro-yemelianov%2Fupyr.svg?type=shield)](docs/quality-integrations.md#fossa-policy-review)
 
 **Fix English ↔ Ukrainian text typed on the wrong keyboard layout.**
 Upyr runs locally in your menu bar or system tray, with no account or telemetry.
