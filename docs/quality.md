@@ -13,6 +13,33 @@ badges. The preview release includes the evidence for its exact source commit,
 with public `self-audit.md`, `self-audit.json` and SVG downloads plus the full archive.
 CI artifacts expire after 90 days; release attachments retain the release snapshot.
 
+## README badges
+
+The README uses two short badge rows: distribution details, then engineering
+checks. Each badge links to its source or the explanation here.
+
+- **GitHub release** includes previews; **Crates.io** independently tracks the
+  published Cargo package. Their versions can differ.
+- **Asset downloads** counts GitHub release-asset downloads, including reports
+  and repeat downloads. It is not a count of users or installations.
+- **Documentation**, **MIT license**, **Rust minimum** and **Security policy**
+  are navigation or project metadata, not audit results.
+- **CI**, **Security** and **Self-audit** are live workflow statuses on `main`.
+  Self-audit includes the dependency license/source check; Security has the
+  separate scope listed below. Click through to inspect the commit and logs.
+- **Core lines** is a pinned release snapshot: **93.61%** on Linux for
+  [`preview-0.6.0`](https://github.com/dmytro-yemelianov/upyr/releases/tag/preview-0.6.0),
+  commit `b45f5aea30926e9989a451560ba4cbb1333b772f`. It includes inline unit tests,
+  covers `upyr-core` only and does not follow `main`. The corresponding workspace
+  value is 80.54%. See the
+  [exact JSON report](https://github.com/dmytro-yemelianov/upyr/releases/download/preview-0.6.0/self-audit.json)
+  or the coverage HTML in
+  [the full evidence archive](https://github.com/dmytro-yemelianov/upyr/releases/download/preview-0.6.0/self-audit.tar.gz).
+  Move this badge to a new release only after verifying its published evidence.
+
+There is no configured FOSSA or Codecov result and no completed ASVS L2 assessment
+for Upyr. Those labels are not interchangeable with the checks above.
+
 ## What is measured
 
 | Area | Measurement / acceptance criterion | Scope |

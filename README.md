@@ -1,8 +1,17 @@
 # Upyr
 
-[![CI](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml/badge.svg)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml)
-[![Self-audit](https://github.com/dmytro-yemelianov/upyr/actions/workflows/self-audit.yml/badge.svg?branch=main)](docs/quality.md)
+[![GitHub release](https://img.shields.io/github/v/release/dmytro-yemelianov/upyr?include_prereleases&sort=date)](https://github.com/dmytro-yemelianov/upyr/releases)
+[![Crates.io](https://img.shields.io/crates/v/upyr.svg)](https://crates.io/crates/upyr)
+[![Release asset downloads](https://img.shields.io/github/downloads/dmytro-yemelianov/upyr/total?label=asset%20downloads)](https://github.com/dmytro-yemelianov/upyr/releases)
+[![Documentation](https://img.shields.io/badge/docs-reference-blue.svg)](docs/reference.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-58d6a8.svg)](LICENSE)
+[![Rust: 1.87+](https://img.shields.io/badge/rust-1.87%2B-orange.svg)](docs/reference.md#build-and-run)
+
+[![CI](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/ci.yml?query=branch%3Amain)
+[![Security checks](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml?query=branch%3Amain)
+[![Self-audit](https://github.com/dmytro-yemelianov/upyr/actions/workflows/self-audit.yml/badge.svg?branch=main)](docs/quality.md#readme-badges)
+[![Core line coverage: Linux, preview 0.6.0](https://github.com/dmytro-yemelianov/upyr/releases/download/preview-0.6.0/core-coverage.svg "Linux core line coverage, preview 0.6.0; includes inline unit tests")](docs/quality.md#readme-badges)
+[![Security policy](https://img.shields.io/badge/security-policy-blue.svg)](SECURITY.md)
 
 **Fix English ↔ Ukrainian text typed on the wrong keyboard layout.**
 Upyr runs locally in your menu bar or system tray, with no account or telemetry.
