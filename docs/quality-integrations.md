@@ -32,25 +32,36 @@ committed lockfile. Its status covers Cargo license metadata and allowed sources
 Asset provenance and redistribution terms remain in
 [third-party notices](../THIRD_PARTY_NOTICES.md).
 
-## FOSSA activation
+## FOSSA policy review
 
-The [manual, main-only FOSSA workflow](../.github/workflows/fossa.yml) and
-[project configuration](../.fossa.yml) are ready. The project has no confirmed
-FOSSA server result yet. CLI 3.20.10 has been checked locally in `--output` mode:
-the explicit target is the root Cargo workspace, including its members. Unrelated
-ignored checkouts/tooling are excluded. To connect it:
+FOSSA is connected through the repository's push-only `FOSSA_API_KEY` secret.
+The first [CI policy check](https://github.com/dmytro-yemelianov/upyr/actions/runs/43431551894)
+on 2026-11-13 checked the maintainer-uploaded `aaac395` revision and **failed with
+21 issues**. Authentication succeeded. The push-only key cannot retrieve issue
+details, so these findings require review in the authenticated
+[FOSSA report](https://app.fossa.com/projects/custom%2B59498%2Fgithub.com%2Fdmytro-yemelianov%2Fupyr/refs/branch/main/aaac395ecf16f9feb5f9c73c05d39a7bf6e72842).
+The public license-scan badge also reported `failing`. This does not establish
+that all 21 findings are vulnerabilities or license violations; their individual
+types and evidence have not yet been reviewed.
 
-1. Sign in to FOSSA and create a **Push Only** API token, as recommended for public
-   repositories by the [official integration guide](https://docs.fossa.com/docs/integrations/github-actions).
-2. Add it as `FOSSA_API_KEY` in
-   [this repository's Actions secrets](https://github.com/dmytro-yemelianov/upyr/settings/secrets/actions).
-   Do not paste the key into chat, source files or PR comments.
-3. Run **FOSSA policy review** on `main`. The pinned action analyzes the dependency
-   graph, then requires `fossa test` to pass. Missing authentication is an explicit
-   error, not a skipped successful scan.
-4. Review the actual FOSSA project, selected policy and findings. Add its badge and
-   recurring triggers only after the project is accessible and the result is
-   verified. The local `cargo-deny` policy does not configure FOSSA's account policy.
+The [manual, main-only workflow](../.github/workflows/fossa.yml) now uses two pinned
+action invocations: first `fossa analyze`, then `fossa test` for the checked-out
+revision. The [action's `run-tests` option](https://github.com/fossas/fossa-action/tree/29693cc50323968e039056be419b32989fc5880c#run-tests)
+selects testing instead of analysis; the initial workflow mistakenly ran only the
+test. Future revisions must be uploaded by CI before their policy result is checked.
+
+[CLI 3.20.10 and the project configuration](../.fossa.yml) target only the root
+Cargo workspace, including its members. Unrelated ignored checkouts/tooling are
+excluded. Missing authentication fails explicitly. Recurring scans remain off
+until the initial policy and findings are reviewed. The local `cargo-deny` policy
+does not configure FOSSA's account policy.
+
+To rotate the credential, create a **Push Only** token as recommended by the
+[official integration guide](https://docs.fossa.com/docs/integrations/github-actions)
+and update `FOSSA_API_KEY` in
+[Actions secrets](https://github.com/dmytro-yemelianov/upyr/settings/secrets/actions).
+Do not paste the key into chat, source files or PR comments. Review issue details
+in the dashboard without expanding the CI credential's access.
 
 No new account, broad GitHub OAuth grant or paid subscription is created by these
 files. FOSSA covers its configured analysis and policy; it is not a blanket legal

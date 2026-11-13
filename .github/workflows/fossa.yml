@@ -1,6 +1,6 @@
 name: FOSSA policy review
 
-# Opt-in until the maintainer connects the FOSSA project and its policy.
+# Opt-in while the connected project's initial policy findings are reviewed.
 # Never expose the upload credential to pull requests or arbitrary branches.
 on:
   workflow_dispatch:
@@ -28,7 +28,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: 1.95.0
-      - name: Analyze dependencies and require the configured FOSSA policy
+      # run-tests switches the action to `fossa test`; it does not analyze first.
+      - name: Analyze and upload the current revision
+        uses: fossas/fossa-action@29693cc50323968e039056be419b32989fc5880c # v2.0.0
+        with:
+          api-key: ${{ secrets.FOSSA_API_KEY }}
+          pinned-cli-version: v3.20.10
+          branch: main
+          run-tests: false
+      - name: Require the configured FOSSA policy for this revision
         uses: fossas/fossa-action@29693cc50323968e039056be419b32989fc5880c # v2.0.0
         with:
           api-key: ${{ secrets.FOSSA_API_KEY }}
