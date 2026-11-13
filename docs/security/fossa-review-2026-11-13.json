@@ -1,0 +1,467 @@
+{
+  "schema_version": 1,
+  "review_date": "2026-11-13",
+  "source_commit": "25d3d4e75daf0730aa676f71d8045922ab870566",
+  "cargo_lock_sha256": "210c9588bf51f915e1a424d8391ff19661f6a233b23bfcd1165262c374fff7e8",
+  "fossa_run": "https://github.com/dmytro-yemelianov/upyr/actions/runs/43433033499",
+  "policy_result": {
+    "total_issues": 21,
+    "flagged_licenses": 13,
+    "denied_licenses": 1,
+    "outdated_dependencies": 7
+  },
+  "packages": [
+    {
+      "name": "epaint_default_fonts",
+      "version": "0.32.3",
+      "declared_license": "(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0",
+      "crate_sha256": "1537accc50c9cab5a272c39300bdd0dd5dca210f6e5e8d70be048df9596e7ca2",
+      "upstream_commit": "af96e0373c18477b77236e2bfc89735af007b1c2",
+      "path_in_vcs": "crates/epaint_default_fonts",
+      "source_files": [
+        {
+          "path": "Cargo.toml",
+          "sha256": "fdbf7828df17aae05bbdb05844348ef2dad83ccf21cdae11b401001da1304e61"
+        },
+        {
+          "path": "fonts/Hack-Regular.txt",
+          "sha256": "47c0cccbeec7e8614548cc485588b28149e7874188df5f41b36efebcee285c87"
+        },
+        {
+          "path": "fonts/OFL.txt",
+          "sha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2"
+        },
+        {
+          "path": "fonts/UFL.txt",
+          "sha256": "2f0015108d68627bd788d313f529c21ff4da2c2c42a5e1f3883acc83480f9002"
+        },
+        {
+          "path": "fonts/emoji-icon-font-mit-license.txt",
+          "sha256": "b9d2c1d909aa149996fd4c91dcb92b2362a04431640c1d200959da94caf8cde1"
+        }
+      ]
+    },
+    {
+      "name": "linux-raw-sys",
+      "version": "0.12.1",
+      "declared_license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "crate_sha256": "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53",
+      "upstream_commit": "0e2918cf3e366d9c923d4ca05f169b49d826db56",
+      "path_in_vcs": "",
+      "source_files": [
+        {
+          "path": "COPYRIGHT",
+          "sha256": "3290ae0fbc9ddb77d2239121d710f0bb9d31b3b4744e6d97fe01e652b4c1870b"
+        },
+        {
+          "path": "Cargo.toml",
+          "sha256": "1d24fe227d87b23fc5220ddf2ca4708e5e0d794a3f77961b71cd8140bf33faa5"
+        },
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "name": "linux-raw-sys",
+      "version": "0.4.15",
+      "declared_license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "crate_sha256": "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab",
+      "upstream_commit": "77e4a4223b14957ad8fa2958ea411cd4b54314e7",
+      "path_in_vcs": "",
+      "source_files": [
+        {
+          "path": "COPYRIGHT",
+          "sha256": "3290ae0fbc9ddb77d2239121d710f0bb9d31b3b4744e6d97fe01e652b4c1870b"
+        },
+        {
+          "path": "Cargo.toml",
+          "sha256": "0158431ac8b7b25dca745feef8cb28d5a58d0bf78b97e2a9027af5eeadc3af55"
+        },
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "name": "orbclient",
+      "version": "0.3.55",
+      "declared_license": "MIT",
+      "crate_sha256": "5df339f526ea9a60e371768d50efc2f2508c7203290731565d1f7a6f71d21747",
+      "upstream_commit": "5e16bc813e6c53fe40a6145975b2566fb0e890b6",
+      "path_in_vcs": "",
+      "source_files": [
+        {
+          "path": "Cargo.toml",
+          "sha256": "8da23951b7b6b4c61595f86241bde98f006915cca0bbf5a57e7090b009e65144"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "3d3568e12e4408beb59fe51fd3265faa1fa7d2299f3064502a63e80ce208ca63"
+        },
+        {
+          "path": "res/unifont-license.txt",
+          "sha256": "95d93c1634f6982250d51940ff5c81b93a657c295b5c24dfa4214a13c6100495"
+        }
+      ]
+    },
+    {
+      "name": "r-efi",
+      "version": "5.3.0",
+      "declared_license": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
+      "crate_sha256": "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f",
+      "upstream_commit": "97b55bed1c2c91dcbf787674849f05337ff80b33",
+      "path_in_vcs": "",
+      "source_files": [
+        {
+          "path": "Cargo.toml",
+          "sha256": "dba000c0173b09b1e3b69afa42a715b5ab64355e6502ce6d9d1767c7845cf402"
+        }
+      ]
+    },
+    {
+      "name": "r-efi",
+      "version": "6.0.0",
+      "declared_license": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
+      "crate_sha256": "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf",
+      "upstream_commit": "7e1b0322d31d625f81a5656096330934f9cd835d",
+      "path_in_vcs": "",
+      "source_files": [
+        {
+          "path": "Cargo.toml",
+          "sha256": "a021f9fb0645cc5de5770cf7f41594c1deff4b388eca933b289752aa52666829"
+        }
+      ]
+    },
+    {
+      "name": "rustix",
+      "version": "0.38.44",
+      "declared_license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "crate_sha256": "fdb5bc1ae2baa591800df16c9ca78619bf65c0488b41b96ccec5d11220d8c154",
+      "upstream_commit": "acf4a284ea893efa93953e1ff2f2f0ab00be1cdc",
+      "path_in_vcs": "",
+      "source_files": [
+        {
+          "path": "COPYRIGHT",
+          "sha256": "377c2e7c53250cc5905c0b0532d35973392af16ffb9596a41d99d202cf3617c9"
+        },
+        {
+          "path": "Cargo.toml",
+          "sha256": "a3ef392e8b5aa8f4662a38db0f78ea353982e51b010dd8040df07bad7c63f59c"
+        },
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "name": "rustix",
+      "version": "1.1.6",
+      "declared_license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "crate_sha256": "e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa",
+      "upstream_commit": "4a563ad698b2c20ff848515821023d2265a788d0",
+      "path_in_vcs": "",
+      "source_files": [
+        {
+          "path": "COPYRIGHT",
+          "sha256": "377c2e7c53250cc5905c0b0532d35973392af16ffb9596a41d99d202cf3617c9"
+        },
+        {
+          "path": "Cargo.toml",
+          "sha256": "43d4bcaf19bf857aaa17ada056e7561a50abdcb3201a1722770948ce050c77cb"
+        },
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "name": "wasi",
+      "version": "0.11.1+wasi-snapshot-preview1",
+      "declared_license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "crate_sha256": "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b",
+      "upstream_commit": "f136a81add9706ed0b36ac3c4b0da943de8e690d",
+      "path_in_vcs": "",
+      "source_files": [
+        {
+          "path": "Cargo.toml",
+          "sha256": "25915be68a3057b798a4a6d4e5ceef36047e03bf0353d3f2a99236cd23e410db"
+        },
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    },
+    {
+      "name": "wayland-protocols-plasma",
+      "version": "0.3.12",
+      "declared_license": "MIT",
+      "crate_sha256": "2b6d8cf1eb2c1c31ed1f5643c88a6e53538129d4af80030c8cabd1f9fa884d91",
+      "upstream_commit": "a3d7927d87799b2955bf491b51c7c2a3a82da661",
+      "path_in_vcs": "wayland-protocols-plasma",
+      "source_files": [
+        {
+          "path": "Cargo.toml",
+          "sha256": "898c01b3c9c64bad9794bbd4701debc10922940ad9a2e7050bf522e17fed2ab1"
+        },
+        {
+          "path": "LICENSE.txt",
+          "sha256": "1cb6f4dee8c649f175736380495f0af0c753c87f22d50931692968bb24bf2161"
+        },
+        {
+          "path": "plasma-wayland-protocols/COPYING.LIB",
+          "sha256": "a9bdde5616ecdd1e980b44f360600ee8783b1f99b8cc83a2beb163a0a390e861"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/appmenu.xml",
+          "sha256": "7c202be470b2a4dd62fb82814d3b63fc02283f90fcedf205d9447e2fd602e552"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/blur.xml",
+          "sha256": "a8a8aaf9f9284d55960b0ca628469cd7c06646a5d69c5362a03a525f0ea773b7"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/contrast.xml",
+          "sha256": "6f000c4b29c3713cd68fc0cb544946438eb705d54e64de9f8ebd23ff27550579"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/dpms.xml",
+          "sha256": "948b8249aad3bd7929d5442f48cf9d0105a37689756fe1f388052361cd9e0463"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/fake-input.xml",
+          "sha256": "841a29f924ced45db33cb4e744f889bfe7a73de9d8afd0fb194d3b40969e96de"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/fullscreen-shell.xml",
+          "sha256": "ed7ded0629f9f05adb9326a378258255d623522b85ec4d47c787742da7fd5c7c"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/idle.xml",
+          "sha256": "0a456660197502e1b23b0f583ff99caddf8069a7d6c21fe2eb4893d579f5b5b2"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/kde-external-brightness-v1.xml",
+          "sha256": "40c6ce2ca287cebb8509dc75cdadddbb55f824e78926006f4ff14f0fbe36bab9"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/kde-lockscreen-overlay-v1.xml",
+          "sha256": "7d377496ef1f86ae80b2292952fd8d00eefe1d49b5a80318676179d31fc1b971"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/kde-output-device-v2.xml",
+          "sha256": "a073095e9b3329f4c89a3a63a957e10eb2780da5e74545e681064619cd70733b"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/kde-output-management-v2.xml",
+          "sha256": "2d5eabfc38895241ec37eb26e1844e88cc7d296df21842f340b77faeb6a8922b"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/kde-output-order-v1.xml",
+          "sha256": "fb7800fa589309d918f16db202d4f95b0632932bda017c0969bdaca21ee28290"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/kde-primary-output-v1.xml",
+          "sha256": "0775894801693310fac9090a2ffc4972cd325b332804cb11bff6b6c1abf71ba5"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/kde-screen-edge-v1.xml",
+          "sha256": "95b3a323db0b5d488a596b4e5ec13bb9e58fd0eb11461f08e7de64f4fb7e8810"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/keystate.xml",
+          "sha256": "fb04b88e5306f1c3b5294948d5237d6115487ade13572b6c06c9a63f02622f2d"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/org-kde-plasma-virtual-desktop.xml",
+          "sha256": "29e89fa0a18c8db92edb8521d2778c302a9ebd2374992d9fef9ac55e4c95de72"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/output-management.xml",
+          "sha256": "2a5a5f3360263fdf94784f68145e496e5d9c7b77cf4d58525687a2bc4bcbcb48"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/outputdevice.xml",
+          "sha256": "98653e9c7bd60f75e8a67c5d20870540ae21160bc2aafa25a3c7b6c43d94368a"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/plasma-shell.xml",
+          "sha256": "1b686f6f015a872e6dc856498d505b1d4a76be0c11509a83988ce28ffa75868c"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/plasma-window-management.xml",
+          "sha256": "5a250d8b282050b4f7d8271e3a2e67e64e37b486634f5f5996213512bb45e2e9"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/remote-access.xml",
+          "sha256": "3c548b8c79f978369028324040dd6ab20693ead7b2e1628b2d649308b8e53e98"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/server-decoration-palette.xml",
+          "sha256": "101e225ff0e035b8f4ed177a05cf6c985a5aba8c243b9f649cb1cd78d7c6b1f9"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/server-decoration.xml",
+          "sha256": "c5f857734bb190dc9adfb65fb05550a6245f12af1a2be5eefd05be199805a68c"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/shadow.xml",
+          "sha256": "3796bbc8d922df764dbee8ff147c3b945c023469d92695c0d59eabe39793afaa"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/slide.xml",
+          "sha256": "44b94434b6476bf76b3bb887081d66f199cb4a891f90cf39a55fde7656ac20e7"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/surface-extension.xml",
+          "sha256": "86d1dfa8140354b010109e31683855e23bd242c1e2eb0e5e3b5758d0ceeeb23c"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/text-input-unstable-v2.xml",
+          "sha256": "310a1dd3d3d5f082b5dae67742a6d0a8b013bcbe436e1e110af010fb862a60e2"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/text-input.xml",
+          "sha256": "5088e7f763d138bb27fdd93222f0b8fe0f64d7ed4b2c2c614c9e1cebcae28bd8"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/wayland-eglstream-controller.xml",
+          "sha256": "6a72b8e52bbd6bb18111ec396ad1790d1da11fa30fc45495e694fbd1f963d260"
+        },
+        {
+          "path": "plasma-wayland-protocols/src/protocols/zkde-screencast-unstable-v1.xml",
+          "sha256": "bf9db7f1faf6c0e5584c93b3ee6f06568faf1f8783783e475ef22b2b1d941729"
+        }
+      ]
+    },
+    {
+      "name": "winit",
+      "version": "0.30.13",
+      "declared_license": "Apache-2.0",
+      "crate_sha256": "a6755fa58a9f8350bd1e472d4c3fcc25f824ec358933bba33306d0b63df5978d",
+      "upstream_commit": "e9809ef54b18499bb4f2cac945719ecc2a61061b",
+      "path_in_vcs": "",
+      "source_files": [
+        {
+          "path": "Cargo.toml",
+          "sha256": "2aeb741d47b763ee198ca915c330a6bf0b1fc094dd69357e80278b7852289c61"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "6dc0e068dcf3a5bc8e054205b85b7720e1d49265bbc64bf515d2cf79197df69a"
+        },
+        {
+          "path": "docs/res/ATTRIBUTION.md",
+          "sha256": "cce791f4d42357649754427331e9a0e0d4ff21f7e49919708991c71a70b7b132"
+        }
+      ]
+    },
+    {
+      "name": "wit-bindgen",
+      "version": "0.46.0",
+      "declared_license": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "crate_sha256": "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59",
+      "upstream_commit": "4c0e9a4edb73efb7b41758562eb0055c0e99cf92",
+      "path_in_vcs": "crates/guest-rust",
+      "source_files": [
+        {
+          "path": "Cargo.toml",
+          "sha256": "871d1bbb96cf118398ccaa8df5997eeb5e9d97c7d3392227cbe0020d5c8fb6b4"
+        },
+        {
+          "path": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5"
+        },
+        {
+          "path": "LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+        }
+      ]
+    }
+  ],
+  "desktop_dependency_graphs": {
+    "aarch64-apple-darwin": {
+      "command": "cargo tree --locked --workspace --target aarch64-apple-darwin --edges normal,build --prefix none --format {p}",
+      "listed_packages": [
+        "epaint_default_fonts v0.32.3",
+        "winit v0.30.13"
+      ]
+    },
+    "x86_64-apple-darwin": {
+      "command": "cargo tree --locked --workspace --target x86_64-apple-darwin --edges normal,build --prefix none --format {p}",
+      "listed_packages": [
+        "epaint_default_fonts v0.32.3",
+        "winit v0.30.13"
+      ]
+    },
+    "x86_64-pc-windows-msvc": {
+      "command": "cargo tree --locked --workspace --target x86_64-pc-windows-msvc --edges normal,build --prefix none --format {p}",
+      "listed_packages": [
+        "epaint_default_fonts v0.32.3",
+        "winit v0.30.13"
+      ]
+    },
+    "x86_64-unknown-linux-gnu": {
+      "command": "cargo tree --locked --workspace --target x86_64-unknown-linux-gnu --edges normal,build --prefix none --format {p}",
+      "listed_packages": [
+        "epaint_default_fonts v0.32.3",
+        "linux-raw-sys v0.12.1",
+        "linux-raw-sys v0.4.15",
+        "rustix v0.38.44",
+        "rustix v1.1.6",
+        "wayland-protocols-experimental v20250721.0.1",
+        "wayland-protocols-plasma v0.3.12",
+        "winit v0.30.13"
+      ]
+    }
+  }
+}

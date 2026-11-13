@@ -26,9 +26,15 @@ then current engineering checks. Each badge links to its source or explanation.
   are navigation or project metadata, not audit results.
 - **CI**, **Security** and **Self-audit** are live workflow statuses on `main`.
   Self-audit includes the dependency license/source check; Security has the
-  separate scope listed below. Click through to inspect the commit and logs.
-- **Dependency licenses** follows the dedicated cargo-deny workflow on `main`;
-  its scope is Cargo license metadata and source policy, not all asset rights.
+  separate scope listed below. The [dedicated dependency-license workflow](../.github/workflows/licenses.yml)
+  exposes cargo-deny separately; its Cargo metadata policy has a different scope
+  from FOSSA. Click through to inspect the commit and logs.
+- **FOSSA license scan** follows the connected project's server-side license
+  policy. It currently reports failing; the
+  [findings review](security/fossa-review-2026-11-13.md) explains the evidence and
+  remaining decisions. Scans run on main updates, weekly or manually; the dashboard requires
+  authentication, and this license badge does not represent FOSSA's outdated
+  dependency category or an unrestricted security scan.
 - **Codecov** shows processed Linux workspace coverage from successful `main`
   audits. It is a separate aggregation of LCOV line observations, including inline
   tests, and is not the pinned release core percentage beside the release badges.

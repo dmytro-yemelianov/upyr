@@ -23,11 +23,13 @@ three-platform, WASM and security workflows with their distinct scope; do not
 claim their latest results were measured by this run. Following the user's RAPS
 badge example, keep the README to two compact rows: release, Cargo version, asset
 downloads, documentation, license, Rust minimum and release core coverage; then
-CI, security, self-audit, verified Codecov coverage and dependency-license policy. Security policy remains
+CI, security, self-audit, verified Codecov coverage and the connected FOSSA
+license result (including failure). The dedicated cargo-deny policy check is
+linked from the quality report. Security policy remains
 linked in the privacy section. Live workflow badges follow main;
 coverage identifies a verified release snapshot and host. Explain their scope
-in the detailed report. Do not imply unconfigured FOSSA/Codecov integrations or
-an ASVS assessment.
+in the detailed report. Do not imply a passing FOSSA policy or an ASVS level
+without supporting evidence.
 
 Attach the audit for the exact release commit to the 0.6.0 preview. Document
 unmeasured areas and remaining warnings explicitly. Do not add compliance logos
