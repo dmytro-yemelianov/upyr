@@ -34,7 +34,7 @@ class TranslationParserTests(unittest.TestCase):
 
 class SettingsScreenshotTests(unittest.TestCase):
     def test_decodes_the_published_webp_dimensions(self) -> None:
-        self.assertEqual(webp_dimensions(SCREENSHOT_PATH.read_bytes()), (1440, 1360))
+        self.assertEqual(webp_dimensions(SCREENSHOT_PATH.read_bytes()), (898, 779))
 
     def test_rejects_a_truncated_webp(self) -> None:
         with self.assertRaises(SystemExit):
@@ -43,11 +43,11 @@ class SettingsScreenshotTests(unittest.TestCase):
     def test_finds_only_the_expected_settings_asset(self) -> None:
         parser = SettingsImageParser()
         parser.feed(
-            '<img src="elsewhere.webp"><img src="assets/upyr-settings-feedback.webp" '
-            'width="1440" height="1360">'
+            '<img src="elsewhere.webp"><img src="assets/upyr-settings-pixel-uk.webp" '
+            'width="898" height="779">'
         )
         self.assertEqual(len(parser.matches), 1)
-        self.assertEqual(parser.matches[0]["width"], "1440")
+        self.assertEqual(parser.matches[0]["width"], "898")
 
 
 class SignedModelContractTests(unittest.TestCase):

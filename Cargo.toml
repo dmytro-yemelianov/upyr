@@ -40,6 +40,7 @@ include = [
   "/assets/globe-switch/**",
   "/assets/sounds/anime/**",
   "/tests/**",
+  "/examples/boundary_benchmark.rs",
 ]
 
 [[bin]]
@@ -78,6 +79,13 @@ upyr-core = { path = "crates/upyr-core", version = "=0.5.0" }
 upyr-audio = { path = "crates/upyr-audio", version = "=0.5.0" }
 winit = { version = "0.30.12", default-features = false, features = ["rwh_06", "x11"] }
 
+[features]
+engine-bench = ["upyr-core/engine-bench"]
+
+[[example]]
+name = "boundary_benchmark"
+required-features = ["engine-bench"]
+
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "0.3.6", default-features = false, features = ["async-io", "blocking"] }
 x11-dl = "2.21.0"
@@ -88,6 +96,7 @@ zbus = { version = "5.13.2", default-features = false, features = ["async-io", "
 tray-icon = { version = "0.24.1", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+image = { version = "0.25.9", default-features = false, features = ["png"] }
 block2 = "0.6.2"
 macos-accessibility-client = "0.0.2"
 objc2 = "0.6.4"
@@ -96,7 +105,7 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = ["bloc
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSArray", "NSData", "NSDictionary", "NSAttributedString", "NSGeometry", "NSKeyValueCoding", "NSValue", "NSString", "NSLocale"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Media_Audio", "Win32_Storage_FileSystem", "Win32_System_DataExchange", "Win32_System_Diagnostics_Debug", "Win32_System_Memory", "Win32_System_SystemServices", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Media_Audio", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_Diagnostics_Debug", "Win32_System_Memory", "Win32_System_SystemServices", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 lto = "thin"

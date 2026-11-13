@@ -1,0 +1,60 @@
+{
+  "format": "upyr-punto-import-v1",
+  "source": {
+    "profile": "windows-4.4.2.334",
+    "product": "Punto Switcher for Windows 4.4.2.334",
+    "archive": {
+      "sha256": "cd337ea4252118aec42decab6720ced96c324eaa006be21d1bf7bf632d357a76",
+      "url": "https://web.archive.org/web/20180101000000id_/https://download.cdn.yandex.net/punto/PuntoSwitcherSetup.exe",
+      "note": "Wayback capture dated 2018-04-10; not a claim about the current Punto release."
+    },
+    "files": {
+      "ps.dat": {
+        "sha256": "3ce67825518e7f6c48a81feaeb727c1f39c72645563b5b02e28d485c7931081f",
+        "encoding": "cp1251",
+        "xor": "0xaa except CR/LF/TAB"
+      },
+      "triggers.dat": {
+        "sha256": "e9e5c667482ba63c326a51aa4d048e7ce50e2d6aa303592edc2688f6ee100895",
+        "encoding": "cp1251"
+      }
+    }
+  },
+  "decoded": {
+    "ps_utf8_sha256": "993554cd464e50465c5bb22c992d437a87ae7e675fec93f398399c11a8085d04",
+    "triggers_utf8_sha256": "6bf4bb156cbfb47b76f134f35dee0b3b9f60232aa85f2a07addb5d9edc4ca0fc",
+    "ps_header": "PSVersion=20170301",
+    "ps_row_count": 37613,
+    "ps_rule_count": 37612,
+    "skipped_empty_lines": 1,
+    "trigger_count": 4511,
+    "rule_tag_counts": {
+      "_A": 17,
+      "_B": 8372,
+      "_BA": 1,
+      "_BC": 894,
+      "_BCE": 11,
+      "_BE": 4163,
+      "_BEC": 543,
+      "_BP": 3,
+      "_C": 924,
+      "_CB": 277,
+      "_CP": 561,
+      "_E": 498,
+      "_EB": 61,
+      "_EC": 148,
+      "_ECB": 89,
+      "_ECP": 956,
+      "_EP": 1594,
+      "_EPC": 2,
+      "_P": 2112,
+      "_PB": 1,
+      "_PC": 552,
+      "_PD": 26,
+      "_PE": 513,
+      "_PEC": 805,
+      "bare": 14489
+    },
+    "exception_rule_count": 9383
+  }
+}

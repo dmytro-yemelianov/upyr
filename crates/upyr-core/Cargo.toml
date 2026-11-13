@@ -12,12 +12,21 @@ keywords = ["keyboard", "layout", "ukrainian", "text"]
 categories = ["internationalization", "text-processing"]
 include = [
   "/Cargo.toml",
+  "/build.rs",
   "/README.md",
   "/THIRD_PARTY_NOTICES.md",
   "/assets/**",
   "/fixtures/**",
+  "/examples/**",
   "/src/**",
 ]
 
 [dependencies]
 serde.workspace = true
+
+[features]
+engine-bench = []
+
+[[example]]
+name = "engine_contract"
+required-features = ["engine-bench"]

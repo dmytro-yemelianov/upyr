@@ -1,5 +1,14 @@
 # Third-party notices
 
+## Punto Switcher rule data
+
+`assets/punto/ps.txt` and `assets/punto/triggers.txt` are complete UTF-8
+transcriptions of the rule tables shipped with Punto Switcher for Windows 4.4.2.334
+(Yandex). They are third-party proprietary data, not covered by Upyr's MIT
+license. No redistribution license is asserted here. The adjacent manifest
+records the archived source, input hashes and decoding procedure. Upyr's Rust
+matcher and importer were written separately; no Punto executable code is used.
+
 ## Leipzig Corpora Collection
 
 Upyr's generated character n-gram model in `assets/models/language.ngm` is
@@ -27,3 +36,27 @@ signed language confidence. The generated artifact contains no corpus
 word-frequency table or sentences, only packed 2-5-character n-grams; some
 short n-grams naturally coincide with complete short words. These changes are
 not endorsed by the corpus authors.
+
+## Physical-key prefix lexicon
+
+`assets/models/prefixes.lxp` is derived from the same CC BY 4.0 English
+and Ukrainian Leipzig news corpora credited above, plus FreeBSD's Web2 English
+word list at revision `4a65e12dfbaba7193e37fcd2e14fbc20776a78b9`.
+The accompanying [`prefixes-web2-NOTICE.txt`](assets/models/prefixes-web2-NOTICE.txt)
+retains that snapshot's dictionary README and repository copyright terms.
+The adjacent `prefixes.json` records pinned source URLs, input hashes,
+normalization, physical-key mappings and the generated artifact hash.
+
+This transformation case-folds and alphabet-filters word forms, maps Ukrainian
+forms to physical EN keyboard positions, and minimizes a prefix automaton with
+EN/UK continuation masks. Original sentences, frequencies and word-ending
+markers are not included. These changes are not endorsed by the source authors.
+
+## Short-word context index
+
+`assets/models/context.bgm` is derived from the same English and Ukrainian
+Leipzig news corpora under CC BY 4.0 credited above. It contains normalized
+word forms and aggregated adjacent-word counts with a short function word on
+the left, not original sentences. One percent of sentence IDs is excluded for
+evaluation. `context.json` records source hashes and transformation rules.
+These changes are not endorsed by the corpus authors.

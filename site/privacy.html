@@ -28,11 +28,9 @@
           <span>Upyr</span>
         </a>
         <nav class="nav" id="primary-nav" aria-label="Main navigation" data-i18n-aria="navLabel">
-          <a href="index.html" data-i18n="navHome">Home</a>
           <a href="how.html" data-i18n="navHow">How it works</a>
           <a href="features.html" data-i18n="navFeatures">Features</a>
           <a href="privacy.html" data-i18n="navPrivacy" aria-current="page" class="is-current">Privacy</a>
-          <a href="articles/reverse-engineering-punto-switcher.html" data-i18n="navStory">The making-of</a>
         </nav>
         <div class="header-actions">
           <div class="language-switch" role="group" aria-label="Choose language" data-i18n-aria="languageLabel">
@@ -61,7 +59,7 @@
         <div class="shell privacy-grid">
           <div class="privacy-heading">
             <p class="kicker" data-i18n="privacyKicker">Privacy is architecture</p>
-            <h2 data-i18n="privacyTitle">Your typing never needs to leave your Mac.</h2>
+            <h1 data-i18n="privacyTitle">Your typing never needs to leave your Mac.</h1>
             <p data-i18n="privacyLead">Upyr has no account system, cloud inference, analytics SDK, telemetry endpoint, crash reporter, advertising, or automatic update ping.</p>
             <a class="button button-secondary" href="https://github.com/dmytro-yemelianov/upyr/security">
               <span data-i18n="securityPolicy">Security and advisories</span><span aria-hidden="true">↗</span>
@@ -130,17 +128,20 @@
           <div>
             <p class="kicker" data-i18n="downloadKicker">Public preview</p>
             <h2 data-i18n="downloadTitle">Keep typing. Upyr will flip the rest.</h2>
-            <p class="download-copy" data-i18n="downloadCopy">If macOS says Apple could not verify Upyr, you are using the current ad-hoc signed, unnotarized preview. Upyr has no automatic updater; use Releases for app bundles or install the source-built Cargo/Homebrew packages below.</p>
-            <div class="install-options" aria-label="Package-manager install commands" data-i18n-aria="installOptionsLabel">
-              <div class="install-option">
-                <span data-i18n="installCargoLabel">Cargo</span>
-                <code>cargo install upyr --locked</code>
+            <p class="download-copy" data-i18n="downloadCopy">Download the current preview and read its installation notes on GitHub Releases. Updates are manual.</p>
+            <details class="install-details">
+              <summary data-i18n="installAlternatives">Install with Cargo or Homebrew</summary>
+              <div class="install-options" aria-label="Package-manager install commands" data-i18n-aria="installOptionsLabel">
+                <div class="install-option">
+                  <span data-i18n="installCargoLabel">Cargo</span>
+                  <code>cargo install upyr --locked</code>
+                </div>
+                <div class="install-option">
+                  <span data-i18n="installBrewLabel">Homebrew</span>
+                  <code>brew tap dmytro-yemelianov/upyr &amp;&amp; brew install upyr</code>
+                </div>
               </div>
-              <div class="install-option">
-                <span data-i18n="installBrewLabel">Homebrew</span>
-                <code>brew tap dmytro-yemelianov/upyr &amp;&amp; brew install upyr</code>
-              </div>
-            </div>
+            </details>
           </div>
           <div class="download-actions">
             <a class="button button-light" href="https://github.com/dmytro-yemelianov/upyr/releases"><span data-i18n="downloadButton">Open releases</span><span aria-hidden="true">↓</span></a>

@@ -19,6 +19,16 @@ use crate::{
 use tracing::{debug, warn};
 
 #[cfg(target_os = "macos")]
+thread_local! {
+    static TYPING_TIMESTAMP: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn set_typing_timestamp(timestamp: Option<u64>) {
+    TYPING_TIMESTAMP.set(timestamp);
+}
+
+#[cfg(target_os = "macos")]
 mod input_guard;
 #[cfg(any(target_os = "macos", test))]
 mod keyboard;
@@ -30,6 +40,27 @@ mod terminal_typing;
 pub(crate) use input_guard::FocusTarget;
 #[cfg(target_os = "macos")]
 pub(crate) use input_guard::{caps_lock_on, frontmost_pid, modifiers_released, turn_off_caps_lock};
+
+/// Prepare the target's event stream while the first keys are still being
+/// recognized, instead of starting its tap after a correction is already due.
+#[cfg(target_os = "macos")]
+pub(crate) fn warm_typing_target() {
+    if let Some(pid) = frontmost_pid() {
+        if let Err(error) = terminal_typing::warm_target(pid) {
+            tracing::debug!(%error, "could not prepare typing target");
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn input_source_changed() {
+    terminal_typing::input_source_changed(
+        crate::system_layout::current()
+            .ok()
+            .flatten()
+            .map(|source| source.source_id),
+    );
+}
 #[cfg(target_os = "macos")]
 pub(crate) use pipeline::{ConversionTask, Progress, Request};
 #[cfg(target_os = "macos")]

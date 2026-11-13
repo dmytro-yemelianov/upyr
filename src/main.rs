@@ -71,8 +71,8 @@ enum Command {
     },
     /// Print the configuration file path.
     ConfigPath,
-    /// Open the native settings window.
-    Settings,
+    /// Open settings, or choose an optional pixel or terminal editor.
+    Settings(upyr::settings::SettingsOptions),
     /// Print runtime configuration and active input-source diagnostics.
     Doctor,
     /// Manage user-level launch-at-login integration.
@@ -189,7 +189,7 @@ fn main() -> Result<()> {
             println!("{}", config_path()?.display());
             Ok(())
         }
-        Command::Settings => upyr::settings::run(),
+        Command::Settings(options) => upyr::settings::run_with(options),
         Command::Doctor => doctor(),
         Command::Autostart { action } => manage_autostart(action),
     }

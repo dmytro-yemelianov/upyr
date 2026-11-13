@@ -1,5 +1,13 @@
 # Third-party notices
 
+## Punto Switcher rule data
+
+The complete tables in `crates/upyr-core/assets/punto/` come from Punto Switcher
+for Mac 1.0 (Yandex). They are third-party proprietary data and are not covered
+by Upyr's MIT license. No redistribution license is asserted here. See the
+[core notices](crates/upyr-core/THIRD_PARTY_NOTICES.md) and
+[import evidence](docs/punto-early-rules.md) for provenance and scope.
+
 ## GlobeSwitch
 
 The macOS flag-row indicator and pixel flag corpus are adapted from
@@ -137,3 +145,28 @@ signed language confidence. The generated artifact contains no corpus
 word-frequency table or sentences, only packed 2–5-character n-grams; some
 short n-grams naturally coincide with complete short words. These changes are
 not endorsed by the corpus authors.
+
+## Physical-key prefix lexicon
+
+`crates/upyr-core/assets/models/prefixes.lxp` is derived from the same CC BY 4.0 English
+and Ukrainian Leipzig news corpora credited above, plus FreeBSD's Web2 English
+word list at revision `4a65e12dfbaba7193e37fcd2e14fbc20776a78b9`.
+The accompanying [`prefixes-web2-NOTICE.txt`](crates/upyr-core/assets/models/prefixes-web2-NOTICE.txt)
+retains that snapshot's dictionary README and repository copyright terms.
+The adjacent `prefixes.json` records pinned source URLs, input hashes,
+normalization, physical-key mappings and the generated artifact hash.
+
+This transformation case-folds and alphabet-filters word forms, maps Ukrainian
+forms to physical EN keyboard positions, and minimizes a prefix automaton with
+EN/UK continuation masks. Original sentences, frequencies and word-ending
+markers are not included. These changes are not endorsed by the source authors.
+
+## Short-word context index
+
+`crates/upyr-core/assets/models/context.bgm` is derived from the same English
+and Ukrainian Leipzig news corpora under CC BY 4.0 credited above. It contains
+normalized word forms and aggregated adjacent-word counts with a short function
+word on the left, not original sentences. One percent of sentence IDs is
+excluded for evaluation. `context.json` records source hashes and transformation
+rules; `tools/generate_context_model.py` reproduces the artifact. These changes
+are not endorsed by the corpus authors.

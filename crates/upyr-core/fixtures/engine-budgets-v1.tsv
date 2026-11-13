@@ -1,0 +1,20 @@
+# check	relation	limit
+# Requested heap bytes, not RSS. No timing thresholds.
+partial_reference_comparisons	min	1000
+partial_reference_mismatches	max	0
+boundary_reference_comparisons	min	1000
+boundary_reference_mismatches	max	0
+partial_warm_allocations	max	0
+partial_warm_corrections	max	0
+mapping_standard_heap_bytes	max	3072
+mapping_max_heap_bytes	max	8192
+mapping_replacement_live_bytes	max	8192
+mapping_replacement_peak_bytes	max	16384
+mapping_warm_allocations	max	0
+mapping_fallback_heap_bytes	max	0
+token_cache_entries	max	65536
+token_cache_entries	min	50000
+token_cache_size_regressions	max	0
+token_cache_retained_bytes	max	4500000
+token_cache_peak_bytes	max	4600000
+token_cache_hit_allocations	max	0

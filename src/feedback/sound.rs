@@ -525,6 +525,50 @@ mod platform {
     use objc2_app_kit::NSSound;
     use objc2_foundation::{NSData, NSString};
     use std::cell::RefCell;
+    use std::sync::{OnceLock, mpsc};
+
+    enum Command {
+        Play(SoundAsset, u8, u8, u64),
+        Stop(u64),
+    }
+
+    static PLAYER: OnceLock<Result<mpsc::SyncSender<Command>, String>> = OnceLock::new();
+
+    fn player() -> Result<&'static mpsc::SyncSender<Command>> {
+        PLAYER
+            .get_or_init(|| {
+                let (sender, receiver) = mpsc::sync_channel(8);
+                std::thread::Builder::new()
+                    .name("upyr-sound-player".into())
+                    .spawn(move || {
+                        while let Ok(command) = receiver.recv() {
+                            objc2::rc::autoreleasepool(|_| {
+                                let generation = match &command {
+                                    Command::Stop(generation) => {
+                                        (*generation).max(audio_output::generation())
+                                    }
+                                    _ => audio_output::generation(),
+                                };
+                                stop_loaded_before(generation);
+                                if let Command::Play(asset, volume, headphones, requested) = command
+                                {
+                                    // A queued cue must not jump to a newly selected
+                                    // output device, even at a recomputed gain.
+                                    if requested == generation {
+                                        if let Err(error) = play_now(asset, volume, headphones) {
+                                            tracing::debug!(%error, "sound playback unavailable");
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    })
+                    .map_err(|error| error.to_string())?;
+                Ok(sender)
+            })
+            .as_ref()
+            .map_err(|error| anyhow::anyhow!(error.clone()))
+    }
 
     struct LoadedSound {
         id: SoundId,
@@ -535,6 +579,14 @@ mod platform {
     thread_local! { static LOADED_SOUNDS: RefCell<Vec<LoadedSound>> = const { RefCell::new(Vec::new()) }; }
 
     pub(super) fn stop_before(generation: u64) {
+        if let Some(Ok(player)) = PLAYER.get() {
+            // A full queue is already being drained; every command checks the
+            // current route generation before touching any sound.
+            let _ = player.try_send(Command::Stop(generation));
+        }
+    }
+
+    fn stop_loaded_before(generation: u64) {
         LOADED_SOUNDS.with(|slot| {
             if let Ok(loaded) = slot.try_borrow() {
                 for item in loaded.iter().filter(|item| item.generation < generation) {
@@ -547,6 +599,18 @@ mod platform {
     }
 
     pub fn play(asset: SoundAsset, volume_percent: u8, headphone_volume_percent: u8) -> Result<()> {
+        match player()?.try_send(Command::Play(
+            asset,
+            volume_percent,
+            headphone_volume_percent,
+            audio_output::generation(),
+        )) {
+            Ok(()) | Err(mpsc::TrySendError::Full(_)) => Ok(()),
+            Err(mpsc::TrySendError::Disconnected(_)) => bail!("sound playback worker stopped"),
+        }
+    }
+
+    fn play_now(asset: SoundAsset, volume_percent: u8, headphone_volume_percent: u8) -> Result<()> {
         let watched = audio_output::watch();
         let generation = audio_output::generation();
         let route = audio_output::current();

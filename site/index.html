@@ -35,12 +35,10 @@
           <span>Upyr</span>
         </a>
         <nav class="nav" id="primary-nav" aria-label="Main navigation" data-i18n-aria="navLabel">
-          <a href="#why" data-i18n="navWhy">Why Upyr</a>
           <a href="how.html" data-i18n="navHow">How it works</a>
           <a href="features.html" data-i18n="navFeatures">Features</a>
           <a href="privacy.html" data-i18n="navPrivacy">Privacy</a>
           <a href="releases.html" data-i18n="navReleases">Releases</a>
-          <a href="articles/reverse-engineering-punto-switcher.html" data-i18n="navStory">The making-of</a>
         </nav>
         <div class="header-actions">
           <div class="language-switch" role="group" aria-label="Choose language" data-i18n-aria="languageLabel">
@@ -74,18 +72,16 @@
               <span class="status-dot" aria-hidden="true"></span>
               <span data-i18n="heroEyebrow">Public preview · v0.5.0</span>
             </div>
-            <h1 data-i18n="heroTitle">Your keyboard can be wrong. Your words don’t have to be.</h1>
-            <p class="hero-lead" data-i18n="heroLead">
-              Upyr instantly restores English and Ukrainian text typed on the wrong layout. Native Rust speed, local decisions, zero tracking.
-            </p>
+            <h1 data-i18n="heroTitle">Wrong layout? Keep typing.</h1>
+            <p class="hero-lead" data-i18n="heroLead">Upyr fixes English and Ukrainian text typed on the wrong layout. A small native app that works entirely on your device.</p>
             <div class="hero-actions">
               <a class="button button-primary" href="https://github.com/dmytro-yemelianov/upyr/releases">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v13m0 0 5-5m-5 5-5-5M4 20h16"/></svg>
-                <span data-i18n="downloadMac">Open macOS previews</span>
+                <span data-i18n="downloadMac">Download for macOS</span>
               </a>
-              <a class="button button-secondary" href="https://github.com/dmytro-yemelianov/upyr">
-                <span data-i18n="viewSource">View source</span>
-                <span aria-hidden="true">↗</span>
+              <a class="button button-secondary" href="#try-it">
+                <span data-i18n="tryDemo">Try in your browser</span>
+                <span aria-hidden="true">↓</span>
               </a>
             </div>
             <p class="release-note" data-i18n="releaseNote">
@@ -136,41 +132,36 @@
       <section class="section section-panel" id="try-it">
         <div class="shell">
           <div class="section-intro section-intro-wide">
-            <p class="kicker">Try it live</p>
-            <h2>An on-screen Apple keyboard, running real WebAssembly</h2>
-            <p>This runs the same Rust decision engine as the desktop app, compiled to WebAssembly and executed entirely in this page. Nothing typed here leaves your browser.</p>
+            <p class="kicker" data-i18n="demoKicker">Try it</p>
+            <h2 data-i18n="demoTitle">See a correction happen.</h2>
+            <p data-i18n="demoLead">Type below or play an example. The same Rust engine runs locally in your browser.</p>
           </div>
-
           <div class="live-demo" id="live-demo">
-            <div class="live-demo-controls">
-              <div class="layout-toggle" role="group" aria-label="Keyboard layout">
-                <button type="button" class="layout-toggle-button" data-manual-layout="english">EN</button>
-                <button type="button" class="layout-toggle-button" data-manual-layout="ukrainian">УК</button>
-                <button type="button" class="layout-toggle-button layout-toggle-auto" data-role="auto-toggle">Auto-follow correction</button>
-              </div>
-              <button type="button" class="text-link demo-intense-button" data-role="intense-toggle">
-                <span aria-hidden="true">▶</span> Play intense switching demo
-              </button>
+            <div class="live-demo-field-group">
+              <label for="live-demo-field" data-i18n="demoFieldLabel">Type ghbdsn, then press Space</label>
+              <textarea id="live-demo-field" data-role="demo-field" rows="2" spellcheck="false" autocomplete="off" aria-describedby="live-demo-status"></textarea>
+              <p class="live-demo-status" id="live-demo-status" data-role="status" aria-live="polite"></p>
             </div>
-
-            <div class="live-demo-keyboard-wrap">
-              <div class="live-demo-layout-badge" data-role="layout-badge" aria-hidden="true">EN</div>
-              <div class="keyboard" data-role="keyboard"></div>
-            </div>
-
-            <div class="live-demo-fields">
-              <div class="live-demo-field-group">
-                <label for="live-demo-field">Type here — click the keys above, or use your real keyboard</label>
-                <textarea id="live-demo-field" data-role="demo-field" rows="3" spellcheck="false" autocomplete="off"></textarea>
-                <p class="live-demo-status" data-role="status" aria-live="polite"></p>
+            <button type="button" class="text-link demo-intense-button" data-role="intense-toggle" data-i18n="demoPlay">Play example</button>
+            <details class="demo-details">
+              <summary data-i18n="demoControls">On-screen keyboard and controls</summary>
+              <div class="live-demo-controls">
+                <div class="layout-toggle" role="group" aria-label="Keyboard layout" data-i18n-aria="demoLayoutLabel">
+                  <button type="button" class="layout-toggle-button" data-manual-layout="english">EN</button>
+                  <button type="button" class="layout-toggle-button" data-manual-layout="ukrainian">УК</button>
+                  <button type="button" class="layout-toggle-button layout-toggle-auto" data-role="auto-toggle" data-i18n="demoFollow">Follow correction</button>
+                </div>
               </div>
-
+              <div class="live-demo-keyboard-wrap">
+                <div class="live-demo-layout-badge" data-role="layout-badge" aria-hidden="true">EN</div>
+                <div class="keyboard" data-role="keyboard"></div>
+              </div>
               <div class="live-demo-field-group live-demo-excluded">
-                <label for="live-demo-password">Password field — Upyr never attaches to this</label>
-                <input id="live-demo-password" data-role="password-field" type="password" autocomplete="current-password" placeholder="Try typing here">
+                <label for="live-demo-password" data-i18n="demoPasswordLabel">Password field — excluded from this demo</label>
+                <input id="live-demo-password" data-role="password-field" type="password" autocomplete="off">
                 <p class="live-demo-status" data-role="excluded-note"></p>
               </div>
-            </div>
+            </details>
           </div>
         </div>
       </section>
@@ -179,29 +170,29 @@
         <div class="shell">
           <div class="section-intro">
             <p class="kicker" data-i18n="whyKicker">Stay in the flow</p>
-            <h2 data-i18n="whyTitle">Fix the layout. Keep the thought.</h2>
-            <p data-i18n="whyLead">A small native tool for a very specific interruption—built to disappear when it has done its job.</p>
+            <h2 data-i18n="whyTitle">A few useful things. Out of your way.</h2>
+            <p data-i18n="whyLead">Use a shortcut, enable automatic correction, or pause it whenever you want.</p>
           </div>
           <div class="feature-grid">
             <article class="feature-card feature-card-accent">
               <div class="feature-mark" aria-hidden="true">A<span>Я</span></div>
-              <h3 data-i18n="featureAutoTitle">Automatic when certain</h3>
-              <p data-i18n="featureAutoCopy">Opt in to correction after Space. Conservative policy keeps valid words, names, URLs, and technical tokens untouched.</p>
+              <h3 data-i18n="featureAutoTitle">Automatic correction</h3>
+              <p data-i18n="featureAutoCopy">Enable correction while typing or after Space. Clear mistakes are fixed; ambiguous input can stay as typed.</p>
             </article>
             <article class="feature-card">
               <div class="feature-mark feature-key" aria-hidden="true">⌥⌘␣</div>
-              <h3 data-i18n="featureManualTitle">Manual when you choose</h3>
-              <p data-i18n="featureManualCopy">Fix a selection or the previous word with a shortcut. By default, Upyr attempts to restore the input source and supported clipboard formats.</p>
+              <h3 data-i18n="featureManualTitle">A shortcut when you need it</h3>
+              <p data-i18n="featureManualCopy">Fix a selection or the previous word. Upyr can switch to the matching layout and restore your clipboard.</p>
             </article>
             <article class="feature-card">
               <div class="feature-mark feature-map" aria-hidden="true"><span>G</span><i>→</i><span>П</span></div>
-              <h3 data-i18n="featureKeysTitle">Physical-key truth</h3>
-              <p data-i18n="featureKeysCopy">Upyr derives mappings from installed layouts and understands Shift, punctuation, apostrophes, ї, є, ґ, and fast mixed-language entry.</p>
+              <h3 data-i18n="featureKeysTitle">Built for English and Ukrainian</h3>
+              <p data-i18n="featureKeysCopy">Works with your installed layouts, including case, punctuation, ї, є and ґ.</p>
             </article>
             <article class="feature-card">
               <div class="feature-mark feature-feedback" aria-hidden="true"><span>EN</span><span>УК</span></div>
-              <h3 data-i18n="featureFeedbackTitle">Quiet feedback</h3>
-              <p data-i18n="featureFeedbackCopy">Optional language flags and three local sound packs add short event and key cues. Key cues and two packs’ event cues are synthesized on-device; Anime Reactions bundles six pre-rendered event cues. Nothing is downloaded at runtime.</p>
+              <h3 data-i18n="featureFeedbackTitle">Feedback you choose</h3>
+              <p data-i18n="featureFeedbackCopy">Turn on language flags or a sound pack, adjust the volume, or keep Upyr quiet.</p>
             </article>
           </div>
         </div>
@@ -212,17 +203,20 @@
           <div>
             <p class="kicker" data-i18n="downloadKicker">Public preview</p>
             <h2 data-i18n="downloadTitle">Keep typing. Upyr will flip the rest.</h2>
-            <p class="download-copy" data-i18n="downloadCopy">If macOS says Apple could not verify Upyr, you are using the current ad-hoc signed, unnotarized preview. Upyr has no automatic updater; use Releases for app bundles or install the source-built Cargo/Homebrew packages below.</p>
-            <div class="install-options" aria-label="Package-manager install commands" data-i18n-aria="installOptionsLabel">
-              <div class="install-option">
-                <span data-i18n="installCargoLabel">Cargo</span>
-                <code>cargo install upyr --locked</code>
+            <p class="download-copy" data-i18n="downloadCopy">Download the current preview and read its installation notes on GitHub Releases. Updates are manual.</p>
+            <details class="install-details">
+              <summary data-i18n="installAlternatives">Install with Cargo or Homebrew</summary>
+              <div class="install-options" aria-label="Package-manager install commands" data-i18n-aria="installOptionsLabel">
+                <div class="install-option">
+                  <span data-i18n="installCargoLabel">Cargo</span>
+                  <code>cargo install upyr --locked</code>
+                </div>
+                <div class="install-option">
+                  <span data-i18n="installBrewLabel">Homebrew</span>
+                  <code>brew tap dmytro-yemelianov/upyr &amp;&amp; brew install upyr</code>
+                </div>
               </div>
-              <div class="install-option">
-                <span data-i18n="installBrewLabel">Homebrew</span>
-                <code>brew tap dmytro-yemelianov/upyr &amp;&amp; brew install upyr</code>
-              </div>
-            </div>
+            </details>
           </div>
           <div class="download-actions">
             <a class="button button-light" href="https://github.com/dmytro-yemelianov/upyr/releases"><span data-i18n="downloadButton">Open releases</span><span aria-hidden="true">↓</span></a>

@@ -28,11 +28,9 @@
           <span>Upyr</span>
         </a>
         <nav class="nav" id="primary-nav" aria-label="Main navigation" data-i18n-aria="navLabel">
-          <a href="index.html" data-i18n="navHome">Home</a>
           <a href="how.html" data-i18n="navHow">How it works</a>
           <a href="features.html" data-i18n="navFeatures" aria-current="page" class="is-current">Features</a>
           <a href="privacy.html" data-i18n="navPrivacy">Privacy</a>
-          <a href="articles/reverse-engineering-punto-switcher.html" data-i18n="navStory">The making-of</a>
         </nav>
         <div class="header-actions">
           <div class="language-switch" role="group" aria-label="Choose language" data-i18n-aria="languageLabel">
@@ -61,27 +59,27 @@
         <div class="shell">
           <div class="section-intro section-intro-wide">
             <p class="kicker" data-i18n="experienceKicker">See it. Hear it.</p>
-            <h2 data-i18n="experienceTitle">Native controls, with feedback you can tune.</h2>
-            <p data-i18n="experienceLead">Searchable macOS settings keep automation, shortcuts, language flags, and every sound event understandable and optional.</p>
+            <h1 data-i18n="experienceTitle">Settings that are easy to find.</h1>
+            <p data-i18n="experienceLead">Seven searchable pages for correction, shortcuts, flags and sounds. Ukrainian by default, with English available.</p>
           </div>
 
           <div class="experience-grid">
             <figure class="settings-preview">
-              <a class="settings-image-frame" href="assets/upyr-settings-feedback.webp" aria-label="Open the full-size Upyr Settings screenshot" data-i18n-aria="settingsScreenshotLinkLabel">
+              <a class="settings-image-frame" href="assets/upyr-settings-pixel-uk.webp" aria-label="Open the full-size Upyr Settings screenshot" data-i18n-aria="settingsScreenshotLinkLabel">
                 <img
-                  src="assets/upyr-settings-feedback.webp"
-                  width="1440"
-                  height="1360"
+                  src="assets/upyr-settings-pixel-uk.webp"
+                  width="898"
+                  height="779"
                   loading="lazy"
                   decoding="async"
-                  alt="Upyr Settings on macOS showing language indicator and sound feedback controls"
+                  alt="Upyr pixel settings in Ukrainian, showing correction and context controls"
                   data-i18n-alt="settingsScreenshotAlt"
                 >
                 <span class="settings-expand"><span data-i18n="settingsExpand">Open full size</span><span aria-hidden="true">↗</span></span>
               </a>
               <figcaption>
-                <span data-i18n="settingsCaption">Native AppKit settings on macOS</span>
-                <small data-i18n="settingsCaptionDetail">Searchable tabs, per-event controls, previews, and one clear Save action.</small>
+                <span data-i18n="settingsCaption">Pixel settings in Ukrainian</span>
+                <small data-i18n="settingsCaptionDetail">The Correction page, with all seven sections a click away.</small>
               </figcaption>
             </figure>
 
@@ -167,17 +165,20 @@
           <div>
             <p class="kicker" data-i18n="downloadKicker">Public preview</p>
             <h2 data-i18n="downloadTitle">Keep typing. Upyr will flip the rest.</h2>
-            <p class="download-copy" data-i18n="downloadCopy">If macOS says Apple could not verify Upyr, you are using the current ad-hoc signed, unnotarized preview. Upyr has no automatic updater; use Releases for app bundles or install the source-built Cargo/Homebrew packages below.</p>
-            <div class="install-options" aria-label="Package-manager install commands" data-i18n-aria="installOptionsLabel">
-              <div class="install-option">
-                <span data-i18n="installCargoLabel">Cargo</span>
-                <code>cargo install upyr --locked</code>
+            <p class="download-copy" data-i18n="downloadCopy">Download the current preview and read its installation notes on GitHub Releases. Updates are manual.</p>
+            <details class="install-details">
+              <summary data-i18n="installAlternatives">Install with Cargo or Homebrew</summary>
+              <div class="install-options" aria-label="Package-manager install commands" data-i18n-aria="installOptionsLabel">
+                <div class="install-option">
+                  <span data-i18n="installCargoLabel">Cargo</span>
+                  <code>cargo install upyr --locked</code>
+                </div>
+                <div class="install-option">
+                  <span data-i18n="installBrewLabel">Homebrew</span>
+                  <code>brew tap dmytro-yemelianov/upyr &amp;&amp; brew install upyr</code>
+                </div>
               </div>
-              <div class="install-option">
-                <span data-i18n="installBrewLabel">Homebrew</span>
-                <code>brew tap dmytro-yemelianov/upyr &amp;&amp; brew install upyr</code>
-              </div>
-            </div>
+            </details>
           </div>
           <div class="download-actions">
             <a class="button button-light" href="https://github.com/dmytro-yemelianov/upyr/releases"><span data-i18n="downloadButton">Open releases</span><span aria-hidden="true">↓</span></a>

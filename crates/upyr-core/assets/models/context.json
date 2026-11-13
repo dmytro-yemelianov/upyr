@@ -1,0 +1,27 @@
+{
+  "format": "UPYRBG1",
+  "sources": {
+    "english": {
+      "url": "https://downloads.wortschatz-leipzig.de/corpora/eng_news_2023_1M.tar.gz",
+      "sha256": "c8a5a5e72897aa5e367b0319c1884831c02aaf29bf81342de31ca1b1cc8f3e4c",
+      "archive": "eng_news_2023_1M.tar.gz"
+    },
+    "ukrainian": {
+      "url": "https://downloads.wortschatz-leipzig.de/corpora/ukr_news_2023_1M.tar.gz",
+      "sha256": "0901bff8b3fdb3a8c657137754b4214b8ea6f241572d3ff9b2ae718487412383",
+      "archive": "ukr_news_2023_1M.tar.gz"
+    }
+  },
+  "normalization": "lowercase; normalize apostrophes; alphabet-filter; whitespace-adjacent pairs only; length 1..48",
+  "short_words_sha256": "87f03bae112dda16aa6fb820b046ff4864a7f301529d953e4096e120e06f460c",
+  "minimum_pair_count": 8,
+  "excluded_sentence_ids": "id % 100 == 0",
+  "training_pair_occurrences": {
+    "english": 6061100,
+    "ukrainian": 2537292
+  },
+  "words": 34777,
+  "pairs": 102767,
+  "bytes": 1772768,
+  "sha256": "17593fc298feed4fa9ac43c4ff27231c99c4fe2070157439f9ea9b11c9e8947c"
+}

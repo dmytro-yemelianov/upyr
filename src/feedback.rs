@@ -62,7 +62,7 @@ pub fn preview_key_sound(cue: KeyCue, settings: &SoundSettings) -> Result<()> {
 
 /// Plays the configured cue for an application event.
 ///
-/// Returns `true` only when playback was enabled and successfully started. A
+/// Returns `true` when enabled playback was accepted by the sound backend. A
 /// caller can use this to choose a single fallback cue without double-playing.
 pub fn play_sound_event(event: SoundEvent, config: &Config) -> bool {
     if !config.sounds.event_enabled(event) {

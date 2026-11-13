@@ -15,6 +15,34 @@ use crate::layout::Direction;
 
 pub const CURRENT_CONFIG_VERSION: u32 = 12;
 
+/// Display language only; independent of keyboard layouts and correction.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UiLanguage {
+    #[default]
+    #[serde(rename = "uk")]
+    Ukrainian,
+    #[serde(rename = "en")]
+    English,
+}
+
+impl UiLanguage {
+    pub const ALL: [Self; 2] = [Self::Ukrainian, Self::English];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Ukrainian => "Українська",
+            Self::English => "English",
+        }
+    }
+
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Ukrainian => "uk",
+            Self::English => "en",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AutoCorrectSensitivity {
@@ -197,11 +225,12 @@ impl SoundSettings {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// Schema version used for forward-compatible configuration migrations.
     pub config_version: u32,
+    pub ui_language: UiLanguage,
     /// Global shortcut syntax follows global-hotkey, for example CmdOrCtrl+Alt+Space.
     pub hotkey: String,
     /// Converts the word immediately before the caret without a manual selection.
@@ -276,6 +305,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             config_version: CURRENT_CONFIG_VERSION,
+            ui_language: UiLanguage::default(),
             hotkey: "CmdOrCtrl+Alt+Space".to_owned(),
             last_word_hotkey: "CmdOrCtrl+Alt+Backspace".to_owned(),
             undo_hotkey: "CmdOrCtrl+Alt+Z".to_owned(),
@@ -983,6 +1013,32 @@ pub fn config_path() -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn ui_language_defaults_round_trips_and_merges_independently() {
+        assert_eq!(
+            super::Config::default().ui_language,
+            super::UiLanguage::Ukrainian
+        );
+        let old = super::Config::decode("config_version = 12").unwrap();
+        assert_eq!(old.ui_language, super::UiLanguage::Ukrainian);
+        let english = super::Config::decode("ui_language = \"en\"").unwrap();
+        assert_eq!(english.ui_language, super::UiLanguage::English);
+        assert_eq!(
+            super::Config::decode(&toml::to_string(&english).unwrap()).unwrap(),
+            english
+        );
+        assert!(super::Config::decode("ui_language = \"invalid\"").is_err());
+        let mut concurrent = old.clone();
+        concurrent.auto_correct_exceptions = vec!["General".into(), "Українська".into()];
+        let merged = super::Config::merge_edits(&old, &english, &concurrent).unwrap();
+        assert_eq!(merged.ui_language, super::UiLanguage::English);
+        assert_eq!(
+            merged.auto_correct_exceptions,
+            concurrent.auto_correct_exceptions
+        );
+        assert_eq!(merged.hotkey, old.hotkey);
+    }
     use super::*;
 
     #[test]

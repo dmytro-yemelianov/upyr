@@ -86,6 +86,9 @@ pub fn plausible(caret: Rect) -> bool {
 pub use native::{caret, selected_text};
 
 #[cfg(target_os = "macos")]
+pub(crate) use native::{selected_text_if_ready, text_before_caret, text_through_selection};
+
+#[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 mod native {
     use super::{Rect, plausible};
@@ -199,22 +202,98 @@ mod native {
 
     /// The focused element of the frontmost app.
     fn focused() -> Option<Owned> {
+        focused_with_timeout(TIMEOUT_SECONDS)
+    }
+
+    fn focused_with_timeout(timeout: f32) -> Option<Owned> {
         let system = Owned::new(unsafe { AXUIElementCreateSystemWide() })?;
-        unsafe { AXUIElementSetMessagingTimeout(system.0, TIMEOUT_SECONDS) };
+        unsafe { AXUIElementSetMessagingTimeout(system.0, timeout) };
         // Some apps answer only through their application element.
         let element = attribute(&system, c"AXFocusedUIElement").or_else(|| {
             let application = attribute(&system, c"AXFocusedApplication")?;
-            unsafe { AXUIElementSetMessagingTimeout(application.0, TIMEOUT_SECONDS) };
+            unsafe { AXUIElementSetMessagingTimeout(application.0, timeout) };
             attribute(&application, c"AXFocusedUIElement")
         })?;
-        unsafe { AXUIElementSetMessagingTimeout(element.0, TIMEOUT_SECONDS) };
+        unsafe { AXUIElementSetMessagingTimeout(element.0, timeout) };
         Some(element)
     }
 
     /// The text selected in the focused element, or None when the app does
     /// not expose it.
     pub fn selected_text() -> Option<String> {
-        let text = attribute(&focused()?, c"AXSelectedText")?;
+        selected_text_from(&focused()?)
+    }
+
+    /// One opportunistic readiness probe. A busy app gets at most 5 ms per
+    /// AX request here; the regular selection/copy fallback remains available.
+    pub(crate) fn selected_text_if_ready() -> Option<String> {
+        selected_text_from(&focused_with_timeout(0.005)?)
+    }
+
+    fn selected_text_from(element: &Owned) -> Option<String> {
+        let text = attribute(element, c"AXSelectedText")?;
+        string(&text)
+    }
+
+    /// Read only a bounded suffix, never the editor's whole AXValue. A live
+    /// selection or unsupported range API declines the catch-up operation.
+    pub(crate) fn text_before_caret() -> Option<String> {
+        bounded_suffix(None)
+    }
+
+    /// Same bounded read, ending at an exact selection made by our hold.
+    pub(crate) fn text_through_selection(selected: &str) -> Option<String> {
+        bounded_suffix(Some(selected))
+    }
+
+    fn bounded_suffix(selected: Option<&str>) -> Option<String> {
+        let element = focused_with_timeout(0.005)?;
+        let selection = attribute(&element, c"AXSelectedTextRange")?;
+        let mut range = CFRange::default();
+        if unsafe { AXValueGetValue(selection.0, AX_VALUE_CFRANGE, (&raw mut range).cast()) } == 0
+            || range.length < 0
+            || range.location < 0
+        {
+            return None;
+        }
+        match selected {
+            Some(text)
+                if !text.is_empty()
+                    && range.length as usize == text.encode_utf16().count()
+                    && selected_text_from(&element).as_deref() == Some(text) => {}
+            None if range.length == 0 => {}
+            _ => return None,
+        }
+        range.location = range.location.checked_add(range.length)?;
+        if range.location == 0 {
+            return None;
+        }
+        range.length = range.location.min(65);
+        range.location -= range.length;
+        let parameter =
+            Owned::new(unsafe { AXValueCreate(AX_VALUE_CFRANGE, (&raw const range).cast()) })?;
+        let attribute = name(c"AXStringForRange")?;
+        let mut value = std::ptr::null();
+        if unsafe {
+            AXUIElementCopyParameterizedAttributeValue(
+                element.0,
+                attribute.0,
+                parameter.0,
+                &mut value,
+            )
+        } != 0
+        {
+            return None;
+        }
+        let value = Owned::new(value)?;
+        if unsafe { CFGetTypeID(value.0) != CFStringGetTypeID() || CFStringGetLength(value.0) > 65 }
+        {
+            return None;
+        }
+        string(&value)
+    }
+
+    fn string(text: &Owned) -> Option<String> {
         if unsafe { CFGetTypeID(text.0) != CFStringGetTypeID() } {
             return None;
         }

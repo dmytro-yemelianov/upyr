@@ -337,12 +337,17 @@ impl CaptureState {
                 })
                 .is_some_and(|character| character.is_ascii_alphabetic());
             return Some(AutoKeyEvent {
+                timestamp: None,
                 key,
                 shifted: shifted ^ letter,
             });
         }
 
-        Some(AutoKeyEvent { key, shifted })
+        Some(AutoKeyEvent {
+            timestamp: None,
+            key,
+            shifted,
+        })
     }
 
     fn chord_modifier_active(&self) -> bool {
@@ -387,6 +392,7 @@ impl CaptureState {
 
 fn reset_event(key: Keycode) -> AutoKeyEvent {
     AutoKeyEvent {
+        timestamp: None,
         key,
         shifted: false,
     }
@@ -550,6 +556,11 @@ impl AutoCorrectMonitor {
         };
 
         if suspended {
+            // A queued correction can start while replay of the previous
+            // correction is still suspended. Keep the later physical keys.
+            if subscription.suspended {
+                return;
+            }
             subscription.deferred_text_events.clear();
             subscription.deferred_overflowed = false;
             subscription.suspended = true;
@@ -695,6 +706,11 @@ fn spawn_listener(state: &Arc<ListenerState>) -> Result<()> {
 }
 
 fn dispatch_key(state: &ListenerState, event: AutoKeyEvent) {
+    #[cfg(target_os = "macos")]
+    let event = AutoKeyEvent {
+        timestamp: macos::event_timestamp().or(event.timestamp),
+        ..event
+    };
     let Ok(mut subscription) = state.subscription.lock() else {
         return;
     };
@@ -1149,6 +1165,7 @@ mod tests {
         dispatch_key(
             &monitor.state,
             AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::H,
                 shifted: true,
             },
@@ -1162,6 +1179,7 @@ mod tests {
         assert_eq!(
             *received.lock().expect("received lock"),
             [AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::H,
                 shifted: true,
             }]
@@ -1205,6 +1223,7 @@ mod tests {
             dispatch_key(
                 &monitor.state,
                 AutoKeyEvent {
+                    timestamp: None,
                     key: first,
                     shifted: true,
                 },
@@ -1216,6 +1235,7 @@ mod tests {
                 dispatch_key(
                     &monitor.state,
                     AutoKeyEvent {
+                        timestamp: None,
                         key,
                         shifted: false,
                     },
@@ -1256,6 +1276,7 @@ mod tests {
         for arrives_before_resume in [true, false] {
             let (monitor, received) = test_monitor();
             let capital = AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::H,
                 shifted: true,
             };
@@ -1279,6 +1300,7 @@ mod tests {
         // correction runs: replaying only the letters would join `okc`.
         let (monitor, received) = test_monitor();
         let key = |key| AutoKeyEvent {
+            timestamp: None,
             key,
             shifted: false,
         };
@@ -1314,6 +1336,7 @@ mod tests {
             dispatch_key(
                 &monitor.state,
                 AutoKeyEvent {
+                    timestamp: None,
                     key: Keycode::H,
                     shifted: false,
                 },
@@ -1325,6 +1348,49 @@ mod tests {
             *received.lock().expect("received lock"),
             [reset_event(Keycode::Escape)]
         );
+    }
+
+    #[test]
+    fn consecutive_corrections_do_not_clear_deferred_input() {
+        let (monitor, received) = test_monitor();
+        monitor.set_suspended(true);
+        dispatch_key(&monitor.state, reset_event(Keycode::C));
+        monitor.set_suspended(true);
+        dispatch_key(&monitor.state, reset_event(Keycode::Escape));
+        dispatch_key(&monitor.state, reset_event(Keycode::H));
+        monitor.set_suspended(false);
+        assert_eq!(
+            *received.lock().expect("received lock"),
+            [
+                reset_event(Keycode::C),
+                reset_event(Keycode::Escape),
+                reset_event(Keycode::H)
+            ]
+        );
+    }
+
+    #[test]
+    fn deferred_keys_keep_the_original_physical_event_identity() {
+        let (monitor, received) = test_monitor();
+        monitor.set_suspended(true);
+        let events = [
+            AutoKeyEvent {
+                key: Keycode::H,
+                shifted: false,
+                timestamp: Some(40),
+            },
+            AutoKeyEvent {
+                key: Keycode::F,
+                shifted: false,
+                timestamp: Some(50),
+            },
+        ];
+        for event in events {
+            dispatch_key(&monitor.state, event);
+        }
+        monitor.set_suspended(true);
+        monitor.set_suspended(false);
+        assert_eq!(*received.lock().expect("received lock"), events);
     }
 
     #[test]
@@ -1340,6 +1406,7 @@ mod tests {
             assert_eq!(
                 state.observe(EventType::KeyPress(Key::KeyG), Some("g")),
                 Some(AutoKeyEvent {
+                    timestamp: None,
                     key: Keycode::G,
                     shifted: false,
                 })
@@ -1358,6 +1425,7 @@ mod tests {
             assert_eq!(
                 state.observe(EventType::KeyPress(Key::KeyH), Some("р")),
                 Some(AutoKeyEvent {
+                    timestamp: None,
                     key: Keycode::H,
                     shifted: false,
                 })
@@ -1372,6 +1440,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::A,
                 shifted: false,
             })
@@ -1392,6 +1461,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyN), Some("n")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::N,
                 shifted: false,
             })
@@ -1416,6 +1486,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::A,
                 shifted: false,
             })
@@ -1433,6 +1504,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::A,
                 shifted: false,
             })
@@ -1454,6 +1526,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyH), Some("H")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::H,
                 shifted: true,
             })
@@ -1462,6 +1535,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyO), Some("O")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::O,
                 shifted: true,
             })
@@ -1479,6 +1553,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyG), Some("G")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::G,
                 shifted: true,
             })
@@ -1500,6 +1575,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyH), Some("H")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::H,
                 shifted: true,
             })
@@ -1519,6 +1595,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyH), Some("h")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::H,
                 shifted: false,
             })
@@ -1543,6 +1620,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::A,
                 shifted: false,
             })
@@ -1557,6 +1635,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("A")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::A,
                 shifted: true,
             })
@@ -1566,6 +1645,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::A,
                 shifted: false,
             })
@@ -1575,6 +1655,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::A,
                 shifted: false,
             })
@@ -1592,6 +1673,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("Ф")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::A,
                 shifted: true,
             })
@@ -1599,6 +1681,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::LeftBracket), Some("х")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::LeftBracket,
                 shifted: false,
             })
@@ -1613,6 +1696,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("A")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::A,
                 shifted: true,
             })
@@ -1625,6 +1709,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::Slash), Some("/")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::Slash,
                 shifted: false,
             })
@@ -1642,6 +1727,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("A")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::A,
                 shifted: true,
             })
@@ -1650,6 +1736,7 @@ mod tests {
         assert_eq!(
             state.observe(EventType::KeyPress(Key::KeyA), Some("a")),
             Some(AutoKeyEvent {
+                timestamp: None,
                 key: Keycode::A,
                 shifted: false,
             })

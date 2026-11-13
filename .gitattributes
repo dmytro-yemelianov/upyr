@@ -1,0 +1,3 @@
+# Preserve imported resource bytes, including CRLF and significant spaces.
+/crates/upyr-core/assets/punto/ps.txt -text whitespace=-blank-at-eol,cr-at-eol
+/crates/upyr-core/assets/punto/triggers.txt -text whitespace=-blank-at-eol,cr-at-eol

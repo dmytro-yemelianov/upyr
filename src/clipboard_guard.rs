@@ -114,7 +114,10 @@ mod platform {
     }
 
     pub fn snapshot_native() -> Option<NativeSnapshot> {
-        let pasteboard = NSPasteboard::generalPasteboard();
+        snapshot_pasteboard(&NSPasteboard::generalPasteboard())
+    }
+
+    fn snapshot_pasteboard(pasteboard: &NSPasteboard) -> Option<NativeSnapshot> {
         let Some(items) = pasteboard.pasteboardItems() else {
             return Some(NativeSnapshot { items: Vec::new() });
         };
@@ -124,13 +127,24 @@ mod platform {
             let types = item.types();
             let mut formats = Vec::with_capacity(types.len());
             for data_type in types.to_vec() {
-                let data = item.dataForType(&data_type)?;
+                // A pasteboard can advertise unavailable/promised formats
+                // (including iOS metadata). One unreadable format must not
+                // discard the other items and their available rich data by
+                // forcing the lossy text/HTML fallback.
+                let Some(data) = item.dataForType(&data_type) else {
+                    continue;
+                };
                 formats.push(FormatData {
                     data_type: data_type.to_string(),
                     bytes: data.to_vec(),
                 });
             }
-            snapshot_items.push(formats);
+            if !formats.is_empty() {
+                snapshot_items.push(formats);
+            }
+        }
+        if !items.is_empty() && snapshot_items.is_empty() {
+            return None;
         }
         Some(NativeSnapshot {
             items: snapshot_items,
@@ -138,7 +152,10 @@ mod platform {
     }
 
     pub fn restore_native(snapshot: NativeSnapshot) -> Result<()> {
-        let pasteboard = NSPasteboard::generalPasteboard();
+        restore_pasteboard(&NSPasteboard::generalPasteboard(), snapshot)
+    }
+
+    fn restore_pasteboard(pasteboard: &NSPasteboard, snapshot: NativeSnapshot) -> Result<()> {
         pasteboard.clearContents();
         if snapshot.items.is_empty() {
             return Ok(());
@@ -163,6 +180,132 @@ mod platform {
             bail!("macOS rejected the restored clipboard items");
         }
         Ok(())
+    }
+
+    #[cfg(test)]
+    #[allow(unsafe_code)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn unreadable_format_does_not_drop_other_clipboard_formats() {
+            // A private pasteboard avoids touching the user's clipboard.
+            let board = NSPasteboard::pasteboardWithUniqueName();
+            let text = NSString::from_str("public.utf8-plain-text");
+            let rich = NSString::from_str("dev.upyr.test.rich-data");
+            let unavailable = NSString::from_str("dev.upyr.test.unavailable");
+            let types =
+                NSArray::from_retained_slice(&[text.clone(), unavailable.clone(), rich.clone()]);
+            // SAFETY: no owner object is supplied; the private board simply
+            // declares a format whose provider never supplies any data.
+            unsafe { board.declareTypes_owner(&types, None) };
+            assert!(board.setData_forType(Some(&NSData::with_bytes(b"test text")), &text));
+            assert!(board.setData_forType(Some(&NSData::with_bytes(&[0, 1, 128, 255])), &rich));
+            assert!(board.dataForType(&unavailable).is_none());
+
+            let snapshot = snapshot_pasteboard(&board).expect("preserve readable formats");
+            board.clearContents();
+            restore_pasteboard(&board, snapshot).unwrap();
+            assert_eq!(board.dataForType(&text).unwrap().to_vec(), b"test text");
+            assert_eq!(board.dataForType(&rich).unwrap().to_vec(), [0, 1, 128, 255]);
+            board.clearContents();
+            // SAFETY: no owner object, as above. Keep the fallback available
+            // when the board has no readable data at all.
+            unsafe {
+                board.declareTypes_owner(&NSArray::from_retained_slice(&[unavailable]), None)
+            };
+            assert!(snapshot_pasteboard(&board).is_none());
+            board.clearContents();
+        }
+
+        #[test]
+        fn native_round_trip_preserves_multiple_items_and_empty_clipboard() {
+            let board = NSPasteboard::pasteboardWithUniqueName();
+            let kind = NSString::from_str("public.utf8-plain-text");
+            let items: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> =
+                [b"first".as_slice(), b"second".as_slice()]
+                    .into_iter()
+                    .map(|bytes| {
+                        let item = NSPasteboardItem::new();
+                        assert!(item.setData_forType(&NSData::with_bytes(bytes), &kind));
+                        ProtocolObject::from_retained(item)
+                    })
+                    .collect();
+            assert!(board.writeObjects(&NSArray::from_retained_slice(&items)));
+            let snapshot = snapshot_pasteboard(&board).unwrap();
+            restore_pasteboard(&board, snapshot).unwrap();
+            let restored = board.pasteboardItems().unwrap().to_vec();
+            assert_eq!(restored.len(), 2);
+            assert_eq!(restored[0].dataForType(&kind).unwrap().to_vec(), b"first");
+            assert_eq!(restored[1].dataForType(&kind).unwrap().to_vec(), b"second");
+            board.clearContents();
+            let empty = snapshot_pasteboard(&board).unwrap();
+            restore_pasteboard(&board, empty).unwrap();
+            assert!(board.pasteboardItems().is_none_or(|items| items.is_empty()));
+        }
+
+        #[test]
+        fn rich_clipboard_formats_survive_repeated_native_round_trips() {
+            let board = NSPasteboard::pasteboardWithUniqueName();
+            // Exercise actual native format aliases, binary/empty payloads,
+            // multiple items, and an advertised iOS format without a provider.
+            let formats: &[(&str, &[u8])] = &[
+                ("public.utf8-plain-text", "Виправлення — test".as_bytes()),
+                ("public.html", b"<b>test</b>"),
+                ("public.rtf", br"{\rtf1\ansi test}"),
+                ("dev.upyr.test.binary", &[0, 1, 127, 128, 255]),
+                ("dev.upyr.test.empty", &[]),
+            ];
+            let unavailable = NSString::from_str("iOS rich content paste pasteboard type");
+            let mut kinds = formats
+                .iter()
+                .map(|(name, _)| NSString::from_str(name))
+                .collect::<Vec<_>>();
+            kinds.push(unavailable.clone());
+            // SAFETY: a private pasteboard with no provider/owner.
+            unsafe { board.declareTypes_owner(&NSArray::from_retained_slice(&kinds), None) };
+            for (name, bytes) in formats {
+                assert!(
+                    board.setData_forType(
+                        Some(&NSData::with_bytes(bytes)),
+                        &NSString::from_str(name)
+                    )
+                );
+            }
+            assert!(board.dataForType(&unavailable).is_none());
+            let all_readable = |snapshot: NativeSnapshot| {
+                snapshot
+                    .items
+                    .into_iter()
+                    .map(|formats| {
+                        let mut values = formats
+                            .into_iter()
+                            .map(|format| (format.data_type, format.bytes))
+                            .collect::<Vec<_>>();
+                        values.sort();
+                        values
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let before = all_readable(snapshot_pasteboard(&board).unwrap());
+            for _ in 0..100 {
+                let saved = snapshot_pasteboard(&board).unwrap();
+                restore_pasteboard(&board, saved).unwrap();
+                assert_eq!(all_readable(snapshot_pasteboard(&board).unwrap()), before);
+                for (name, bytes) in formats {
+                    assert_eq!(
+                        board
+                            .dataForType(&NSString::from_str(name))
+                            .unwrap()
+                            .to_vec(),
+                        *bytes,
+                        "{name}"
+                    );
+                }
+                assert_eq!(board.pasteboardItems().unwrap().len(), 1);
+            }
+            board.clearContents();
+        }
     }
 }
 

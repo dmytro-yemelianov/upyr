@@ -6,12 +6,115 @@ change between minor releases while the version is below 1.0.
 
 ## [Unreleased]
 
+### Security
+
+- Update `rustix` 1.1.4 to 1.1.6 for
+  [RUSTSEC-2026-0486](https://rustsec.org/advisories/RUSTSEC-2026-0486.html),
+  fixing zero-length extended-attribute buffer handling in the dependency.
+
 ### Added
 
+- Complete pixel settings: all seven pages and shared search, physical shortcut
+  recording, macOS Globe/terminal/Undo controls, flag gallery, sound previews,
+  headphone ceiling and startup actions. Edits share the existing draft and
+  merge/save host; failed startup changes stay pending for retry.
+
+- The tray's Settings action opens the pixel-style editor. Repeated activation
+  restores its window; Native interface opens the alternative editor after guarding
+  unsaved changes.
+
+- `upyr settings --pixel` opens the complete GUI; `--tui` opens a local editor
+  for Correction and Exceptions, sharing a staged draft, validation and concurrent-config merge
+  with the existing Save flow. Invalid edits remain visible; failed saves keep
+  them, and closing or reloading a dirty editor requires explicit discard.
+  The GUI uses scalable retro styling with Unicode fields and semantic labels;
+  the local TUI accepts line commands without SSH or raw keyboard mode.
+
+- Settings: the Correction tab explains switching during a word and short-word
+  context. Search understands queries such as `mid word`, `short context` and
+  `контекст`; native macOS and egui share the navigation and descriptions.
+
+- Bounded short-word context correction: `nj vb` → `то ми` and `Ш have` →
+  `I have` use a static adjacent-word index. Pending short words can survive a
+  layout change between words; early correction waits for the next boundary.
+  Terminal edits and undo support this exact conversion of up to three words.
+- Protect short Latin identifiers such as `VB` and the English word `vs` from
+  statistical correction; previous-token exceptions and Keep rules also stop
+  the ordinary context rewrite.
+
+- Automatic correction can switch layouts during a word once at least four
+  letters give a clear wrong-layout signal (`сщте` → `cont`, `ghbd` → `прив`).
+  It preserves case, honors exceptions and keep rules, and supports opt-in
+  terminal correction. Ambiguous prefixes wait for the normal word boundary.
+  The early matcher includes all 4,511 triggers and 9,383 exception rules from
+  Punto Switcher for Windows 4.4.2.334, with EN/UK guards and a reproducible data import.
+  Compact trie storage reduces the matcher’s memory use and lookup allocations.
+  The immutable tables are compiled during the build and use packed fields,
+  eliminating runtime tree construction and reducing their storage further.
+  Physical-key prefix lookup reuses prior automaton states while typing and
+  recovers them after Backspace or edits without walking from the root.
+  The live engine also reuses prepared policies, layout maps, conversion buffers,
+  n-gram evidence, Punto rule states and completed-word context. Sequential
+  CPU/allocation benchmarks and reference comparisons cover every stage;
+  changing settings, mappings or tracked text invalidates the relevant caches.
+  Installed mapping pairs use a cached direct index, and uppercase candidates
+  reuse a lowercase buffer while preserving full Unicode casing for custom maps.
+  Completed-word scoring reuses normalized tokens, exact aggregate scores and
+  context word IDs. A bounded clock cache replaces individual entries instead
+  of clearing every cached token when a long typing session reaches capacity.
+  Sparse cache storage grows with occupancy. Boundary scoring borrows canonical
+  text, keeps token ranges in one context string and processes short n-grams
+  on the stack, reducing temporary allocations and cold-cache memory.
+  Boundary candidates reuse converted context slices, snapshots own one word
+  copy, and Enter/terminal evaluation copies prepared rules only when a
+  short-word threshold override needs them.
+  Source-prefix trimming walks UTF-8 slices and reuses correction buffers;
+  ordinary, Caps Lock, Enter and terminal checks share one rendered visible
+  context per decision, reducing repeated conversion and allocation.
+  Visible context borrows a single English layout run and appends converted
+  Ukrainian runs directly into one buffer, avoiding intermediate strings.
+  Custom keyboard mappings reuse a bounded index for boundary conversion:
+  ASCII keys use direct lookup and other Unicode keys use binary search.
+  Content checks preserve in-place edits and first-pair-wins behavior.
 - macOS: "Use F1–F12 as standard function keys" in the menu bar menu switches
   the function keys between standard F1–F12 and the printed brightness, volume
   and media actions, without opening System Settings. The change applies
   immediately, survives a restart, and the checkmark shows the current mode.
+
+### Fixed
+
+- macOS: continuous typing through a correction preserves queued letters in
+  the destination layout. Verified selections can be replaced directly without
+  waiting for clipboard restoration; a bounded editor check catches up when
+  additional letters arrived before the input hold. Manual layout changes
+  invalidate the pending translation, and sound playback runs off the input
+  thread. Terminal edits verify the original physical key before deleting a
+  prefix, so delayed recognition cannot overwrite the wrong characters.
+
+- macOS: automatic correction and undo can skip the ordinary pre-paste delay
+  after exact Accessibility selection confirmation and clipboard readback,
+  while typing remains held. Copy fallbacks, unheld input and deliberately
+  longer paste delays retain their configured waits.
+
+- macOS: automatic correction and undo can proceed after an exact Accessibility
+  selection check at 15 ms instead of always waiting 30 ms. The early check is
+  limited to held input, uses a short timeout, and keeps the original fallback
+  and configured copy/paste delays when the editor is not ready.
+
+- macOS: preserve readable clipboard formats when another advertised format
+  has no data (for example iOS pasteboard metadata), instead of falling back
+  to a text/HTML-only snapshot after an automatic correction.
+
+- Mid-word correction now recognizes persistent rules inside a word, including
+  `dbgh` → `випр` while typing `виправлення`. A generated EN/UK physical-key
+  prefix lexicon protects valid and ambiguous continuations.
+
+- macOS: automatic correction no longer runs in remote-desktop and
+  virtual-machine apps such as Windows App, Screen Sharing, Parallels Desktop
+  and UTM. The remote system reads keys with its own layout, and the editing
+  shortcuts a correction posts reached it as the Windows key and Alt+Shift,
+  opening the Start menu and switching its layout while you typed. The menu
+  bar item shows correction as paused there.
 
 ### Planned
 

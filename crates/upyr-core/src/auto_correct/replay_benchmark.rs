@@ -125,6 +125,31 @@ fn ratio(numerator: usize, denominator: usize) -> f64 {
     }
 }
 
+#[test]
+fn partial_word_policy_preserves_every_prefix_of_native_replay_cases() {
+    let policy = AutoCorrectPolicy::default();
+    let mut checked = 0;
+    for case in parse_cases()
+        .into_iter()
+        .filter(|case| case.expected_action == ExpectedAction::Keep)
+    {
+        let mapping = mapping_for(&case.mapping_profile);
+        for (index, character) in case.physical_word.char_indices() {
+            let prefix = &case.physical_word[..index + character.len_utf8()];
+            let sample = WordSample::new(prefix, prefix, case.source_layout);
+            assert_eq!(
+                evaluate_partial(&sample, &policy, mapping.as_deref()),
+                AutoDecision::Continue,
+                "{}: {prefix:?}",
+                case.id
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 100);
+    println!("{checked} native/ambiguous prefix checks");
+}
+
 fn parse_cases() -> Vec<ReplayCase> {
     let mut cases = Vec::new();
     let mut ids = BTreeSet::new();
@@ -494,6 +519,87 @@ fn configured_path(variable: &str) -> std::path::PathBuf {
     }
 }
 
+#[test]
+#[ignore = "set UPYR_CLEAN_HOLDOUT to the independent Wikipedia TSV"]
+fn partial_word_external_wikipedia_prefix_holdout() {
+    let contents = std::fs::read_to_string(configured_path("UPYR_CLEAN_HOLDOUT")).unwrap();
+    let policy = AutoCorrectPolicy {
+        triggers: crate::triggers::builtin_triggers(),
+        ..AutoCorrectPolicy::default()
+    };
+    let mut words = [0usize; 2];
+    let mut early = [0usize; 2];
+    let mut checks = 0usize;
+    let mut false_corrections = Vec::new();
+    for (line_index, line) in contents.lines().enumerate() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields = line.split('\t').collect::<Vec<_>>();
+        assert_eq!(fields.len(), 4);
+        let native = parse_layout(fields[1], line_index + 1);
+        let opposite = match native {
+            InputLayout::English => InputLayout::Ukrainian,
+            InputLayout::Ukrainian => InputLayout::English,
+        };
+        let index = usize::from(native == InputLayout::Ukrainian);
+        words[index] += 1;
+        let mut corrected = false;
+        let mut native_state = PartialWordState::default();
+        let mut opposite_state = PartialWordState::default();
+        for (offset, character) in fields[2].char_indices() {
+            let prefix = &fields[2][..offset + character.len_utf8()];
+            let sample = WordSample::new(prefix, prefix, native);
+            let decision = native_state.evaluate(&sample, &policy, None);
+            assert_eq!(
+                decision,
+                evaluate_partial(&sample, &policy, None),
+                "native {}",
+                fields[0]
+            );
+            if let AutoDecision::Correct(change) = decision {
+                false_corrections.push(format!(
+                    "{}: {:?}: {:?} -> {:?}",
+                    fields[0], fields[3], prefix, change.replacement
+                ));
+            }
+            checks += 1;
+            if !corrected && prefix.len() < fields[2].len() {
+                let sample = WordSample::new(prefix, prefix, opposite);
+                let decision = opposite_state.evaluate(&sample, &policy, None);
+                assert_eq!(
+                    decision,
+                    evaluate_partial(&sample, &policy, None),
+                    "wrong layout {}",
+                    fields[0]
+                );
+                if let AutoDecision::Correct(change) = decision {
+                    let expected = match native {
+                        InputLayout::English => prefix.to_owned(),
+                        InputLayout::Ukrainian => to_ukrainian(prefix, None),
+                    };
+                    assert_eq!(change.replacement, expected, "{}", fields[0]);
+                    early[index] += 1;
+                    corrected = true;
+                }
+            }
+        }
+    }
+    println!(
+        "Wikipedia prefixes: {checks} native checks; false corrections={}; early recall EN={}/{}, UK={}/{}",
+        false_corrections.len(),
+        early[0],
+        words[0],
+        early[1],
+        words[1]
+    );
+    for failure in false_corrections.iter().take(30) {
+        println!("{failure}");
+    }
+    assert_eq!(words, [10_000, 10_000]);
+    assert!(false_corrections.is_empty());
+}
+
 fn run_external_clean_holdout<S: CandidateScorer + ?Sized>(scorer: &S) -> (usize, usize) {
     let path = configured_path("UPYR_CLEAN_HOLDOUT");
     let contents = std::fs::read_to_string(&path).expect("read clean holdout");
@@ -538,8 +644,8 @@ fn run_external_clean_holdout<S: CandidateScorer + ?Sized>(scorer: &S) -> (usize
             AutoDecision::Correct(correction) => {
                 let candidates = Candidates::new(&sample, None);
                 let context_evidence = scorer.compare(candidates.context_pair());
-                let source_word = normalize_word(&candidates.source_word);
-                let target_word = normalize_word(&candidates.target_word);
+                let source_word = normalize_word(candidates.source_word());
+                let target_word = normalize_word(candidates.target_word());
                 let word_evidence =
                     scorer.compare(candidates.text_pair(&source_word, &target_word));
                 false_corrections.push(format!(
