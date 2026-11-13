@@ -1,0 +1,22 @@
+version: 3
+
+project:
+  id: github.com/dmytro-yemelianov/upyr
+  name: Upyr
+  url: https://github.com/dmytro-yemelianov/upyr
+
+# Analyze only the root Cargo workspace, including its member crates.
+# Do not discover unrelated ignored checkouts or tooling in the working tree.
+targets:
+  only:
+    - type: cargo
+      path: .
+
+paths:
+  exclude:
+    - ./.git
+    - ./.stos
+    - ./target
+
+telemetry:
+  scope: "off"

@@ -11,7 +11,7 @@
 [![Security checks](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/dmytro-yemelianov/upyr/actions/workflows/security.yml?query=branch%3Amain)
 [![Self-audit](https://github.com/dmytro-yemelianov/upyr/actions/workflows/self-audit.yml/badge.svg?branch=main)](docs/quality.md#readme-badges)
 [![Core line coverage: Linux, preview 0.6.0](docs/badges/core-coverage-preview-0.6.0-linux.svg "Linux core line coverage, preview 0.6.0; includes inline unit tests")](docs/quality.md#readme-badges)
-[![Security policy](https://img.shields.io/badge/security-policy-blue.svg)](SECURITY.md)
+[![Dependency licenses](https://github.com/dmytro-yemelianov/upyr/actions/workflows/licenses.yml/badge.svg?branch=main)](docs/quality-integrations.md#dependency-license-policy)
 
 **Fix English ↔ Ukrainian text typed on the wrong keyboard layout.**
 Upyr runs locally in your menu bar or system tray, with no account or telemetry.

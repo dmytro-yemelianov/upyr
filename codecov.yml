@@ -1,0 +1,17 @@
+codecov:
+  require_ci_to_pass: true
+
+coverage:
+  precision: 2
+  round: down
+  status:
+    project: false
+    patch: false
+
+# The local self-audit owns the core >= 90% gate. This service presents coverage
+# history; it must not post comments or invent a different quality threshold.
+comment: false
+
+flags:
+  linux:
+    carryforward: false

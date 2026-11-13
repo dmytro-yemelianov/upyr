@@ -20,6 +20,11 @@ import subprocess
 import sys
 import time
 
+try:
+    from .coverage_upload import normalize_lcov
+except ImportError:
+    from coverage_upload import normalize_lcov
+
 ROOT = Path(__file__).resolve().parents[1]
 CORE_LINE_FLOOR = 90.0
 CRATES = {"upyr": "src/", "upyr-core": "crates/upyr-core/src/",
@@ -294,7 +299,7 @@ def main() -> int:
     execute("rustdoc", ["cargo", "doc", "--workspace", "--no-deps", "--locked"], env={"RUSTDOCFLAGS": "-D warnings"})
     execute("privacy", [sys.executable, "tools/check_privacy.py"])
     execute("report-tests", [sys.executable, "-m", "unittest", "tools.test_run_self_audit", "tools.test_run_engine_contract",
-                            "tools.test_check_privacy"])
+                            "tools.test_check_privacy", "tools.test_coverage_upload"])
 
     def covered(stdout: str, stderr: str) -> None:
         data = json.loads((out / "coverage.json").read_text(encoding="utf-8"))
@@ -303,7 +308,15 @@ def main() -> int:
 
     execute("coverage", ["cargo", "llvm-cov", "--workspace", "--all-targets", "--locked", "--json",
                          "--summary-only", "--output-path", str(out / "coverage.json")], validate=covered)
-    execute("coverage-html", ["cargo", "llvm-cov", "report", "--html", "--output-dir", str(out / "coverage-html")])
+    execute("coverage-html", ["cargo", "llvm-cov", "report", "--workspace", "--html", "--output-dir", str(out / "coverage-html")])
+
+    def lcov(stdout: str, stderr: str) -> None:
+        path = out / "coverage.lcov"
+        normalized = normalize_lcov(path.read_text(encoding="utf-8"), report["metrics"]["coverage"])
+        path.write_text(normalized, encoding="utf-8")
+
+    execute("coverage-lcov", ["cargo", "llvm-cov", "report", "--workspace", "--lcov", "--output-path",
+                              str(out / "coverage.lcov")], validate=lcov)
 
     def engine(stdout: str, stderr: str) -> None:
         data = json.loads((out / "engine.json").read_text(encoding="utf-8"))

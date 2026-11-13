@@ -22,11 +22,13 @@ checks. Each badge links to its source or the explanation here.
   published Cargo package. Their versions can differ.
 - **Asset downloads** counts GitHub release-asset downloads, including reports
   and repeat downloads. It is not a count of users or installations.
-- **Documentation**, **MIT license**, **Rust minimum** and **Security policy**
+- **Documentation**, **MIT license** and **Rust minimum**
   are navigation or project metadata, not audit results.
 - **CI**, **Security** and **Self-audit** are live workflow statuses on `main`.
   Self-audit includes the dependency license/source check; Security has the
   separate scope listed below. Click through to inspect the commit and logs.
+- **Dependency licenses** follows the dedicated cargo-deny workflow on `main`;
+  its scope is Cargo license metadata and source policy, not all asset rights.
 - **Core lines** is a pinned release snapshot: **93.61%** on Linux for
   [`preview-0.6.0`](https://github.com/dmytro-yemelianov/upyr/releases/tag/preview-0.6.0),
   commit `b45f5aea30926e9989a451560ba4cbb1333b772f`. It includes inline unit tests,
@@ -39,8 +41,11 @@ checks. Each badge links to its source or the explanation here.
   repository so GitHub can display it inline. Move this badge to a new release
   only after verifying its published evidence.
 
-There is no configured FOSSA or Codecov result and no completed ASVS L2 assessment
-for Upyr. Those labels are not interchangeable with the checks above.
+Independent coverage publication, the dedicated dependency-license check and the
+optional FOSSA connection are documented in [quality integrations](quality-integrations.md).
+A service badge is added only after its actual result is verified. The
+[ASVS 5.0 applicability review](security/asvs-5.0-review.md) records evidence and
+open controls; it does not claim an ASVS level pass.
 
 ## What is measured
 
@@ -55,6 +60,13 @@ for Upyr. Those labels are not interchangeable with the checks above.
 | Correctness / memory | 18 portable engine oracle, allocation and memory-budget checks | Versioned synthetic fixtures; exact limits in report |
 | Latency | Mapping p50, p95, p99, max, sample count and allocations | Release build on the named host; observation, no timing gate |
 | Evidence integrity | Commit, dirty-tree flag, source/lockfile hashes, tool versions, commands and SHA-256 of evidence | Source changes during a run fail the audit |
+
+New audits also export source-scoped LCOV, verified against the LLVM JSON totals,
+for external publication. Codecov may aggregate individual LCOV lines differently;
+its percentage is not substituted for the local core gate. HTML exports now
+explicitly include all workspace packages. The immutable 0.6.0 preview's JSON
+contains all four crates, while its older HTML export omits the standalone
+`upyr-wasm` host-test view.
 
 The core coverage floor starts below the first measured macOS baseline (92.48%).
 Other crate and workspace percentages are reported without an arbitrary target.
