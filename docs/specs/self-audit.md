@@ -22,8 +22,8 @@ Publish a workflow summary and evidence artifact even on failure. Link existing
 three-platform, WASM and security workflows with their distinct scope; do not
 claim their latest results were measured by this run. Following the user's RAPS
 badge example, keep the README to two compact rows: release, Cargo version, asset
-downloads, documentation, license and Rust minimum; then CI, security, self-audit,
-release core coverage and dependency-license policy. Security policy remains
+downloads, documentation, license, Rust minimum and release core coverage; then
+CI, security, self-audit, verified Codecov coverage and dependency-license policy. Security policy remains
 linked in the privacy section. Live workflow badges follow main;
 coverage identifies a verified release snapshot and host. Explain their scope
 in the detailed report. Do not imply unconfigured FOSSA/Codecov integrations or

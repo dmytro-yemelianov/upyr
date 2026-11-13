@@ -15,8 +15,8 @@ CI artifacts expire after 90 days; release attachments retain the release snapsh
 
 ## README badges
 
-The README uses two short badge rows: distribution details, then engineering
-checks. Each badge links to its source or the explanation here.
+The README uses two short badge rows: distribution details and release coverage,
+then current engineering checks. Each badge links to its source or explanation.
 
 - **GitHub release** includes previews; **Crates.io** independently tracks the
   published Cargo package. Their versions can differ.
@@ -29,6 +29,11 @@ checks. Each badge links to its source or the explanation here.
   separate scope listed below. Click through to inspect the commit and logs.
 - **Dependency licenses** follows the dedicated cargo-deny workflow on `main`;
   its scope is Cargo license metadata and source policy, not all asset rights.
+- **Codecov** shows processed Linux workspace coverage from successful `main`
+  audits. It is a separate aggregation of LCOV line observations, including inline
+  tests, and is not the pinned release core percentage beside the release badges.
+  Its dashboard identifies the measured commit and per-file results; the service's
+  standard badge rounds the displayed percentage to a whole number.
 - **Core lines** is a pinned release snapshot: **93.61%** on Linux for
   [`preview-0.6.0`](https://github.com/dmytro-yemelianov/upyr/releases/tag/preview-0.6.0),
   commit `b45f5aea30926e9989a451560ba4cbb1333b772f`. It includes inline unit tests,
