@@ -267,6 +267,11 @@ pub(super) const SEARCH_PARAMETERS: &[SearchParameter] = &[
     },
     SearchParameter {
         tab: SettingsTab::About,
+        label: "Check for updates",
+        terms: "update upgrade releases version download оновлення версія завантаження",
+    },
+    SearchParameter {
+        tab: SettingsTab::About,
         label: "Version and license",
         terms: "about release semver copyright mit",
     },

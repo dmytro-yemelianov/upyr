@@ -7,6 +7,8 @@ L2 pass or certification**. The current stable standard has 345 requirements,
 253 at levels 1–2; this document does not assert individual verification of all
 253. Chapter applicability is not a compliance percentage.
 
+**Subsequent source change:** the unreleased [manual update check](../specs/manual-update-check.md) adds a user-triggered HTTPS client in desktop settings. The no-runtime-client applicability statements below describe the pinned commit above, not this newer source. Secure-communication controls for the new client require their own review; this change does not extend the original evidence.
+
 Source: [OWASP ASVS 5.0.0](https://github.com/OWASP/ASVS/releases/tag/v5.0.0),
 [official requirements CSV](https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/docs_en/OWASP_Application_Security_Verification_Standard_5.0.0_en.csv).
 CSV SHA-256: `98c8fe911b9edb403af8ee05d3ce8201ecac2659e313b053890a62847cdcf680`.

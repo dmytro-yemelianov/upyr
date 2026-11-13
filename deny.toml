@@ -8,6 +8,9 @@ allow = [
     "ISC", "Zlib", "Unicode-3.0", "CC0-1.0", "Unlicense",
 ]
 exceptions = [
+    # TLS trust anchors for the manual update check; full agreement is bundled
+    # in THIRD_PARTY_NOTICES.md as required by CDLA-Permissive-2.0 section 2.1.
+    { name = "webpki-roots", version = "=1.0.12", allow = ["CDLA-Permissive-2.0"] },
     # Existing eframe font bundle; redistribution notices are retained upstream.
     { name = "epaint_default_fonts", version = "=0.32.3", allow = ["OFL-1.1", "Ubuntu-font-1.0"] },
     # Existing directories dependency; unmodified MPL source is available on crates.io.
