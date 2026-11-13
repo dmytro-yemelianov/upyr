@@ -11,6 +11,10 @@ FOSSA's dashboard also says **scan depth is limited**. Its displayed security
 status is therefore not evidence of an unrestricted vulnerability assessment.
 The project report requires authentication; the public license badge is failing.
 
+The [Wayland follow-up](fossa-wayland-follow-up-2026-11-13.md) records the exact
+Linux dependency constraints and the Plasma blur protocol reference. Both
+findings remain open; the follow-up does not change the initial audit result.
+
 ## Evidence and scope
 
 [The evidence manifest](fossa-review-2026-11-13.json) records the lockfile hash,

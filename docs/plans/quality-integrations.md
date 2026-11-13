@@ -24,3 +24,10 @@ Spec: [quality-integrations.md](../specs/quality-integrations.md).
 5. Preserve upstream font notices in the existing packaged notices file. Record
    alternate-license and platform/asset scope evidence for exact crate versions;
    keep Linux protocol licensing and the active outdated package open.
+6. Apply approved applicability decisions only to the selected package versions
+   in Upyr, with evidence and re-review conditions. Record the actual service
+   outcome before updating status claims; do not add global or all-version rules.
+7. Review the two active Linux Wayland findings separately. The
+   [follow-up](../security/fossa-wayland-follow-up-2026-11-13.md) establishes why
+   neither a compatible lockfile update nor an MIT-metadata dismissal resolves
+   them. Keep both active pending a supported migration or distribution review.
