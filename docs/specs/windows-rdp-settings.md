@@ -2,9 +2,10 @@
 
 Windows 11 Pro over RDP was reported to keep the Upyr background process alive
 while settings briefly opened and closed, and automatic switching did not work.
-The precise remote error is pending. Source inspection found that both settings
-frontends required OpenGL; the existing installer smoke test only exercised CLI
-commands. A fresh configuration also intentionally has automatic correction off.
+The remote error confirmed the cause: `egui_glow requires opengl 2.0+`. Both
+settings frontends required OpenGL; the existing installer smoke test only
+exercised CLI commands. A fresh configuration also intentionally has automatic
+correction off; the user's Scancode/automatic-correction typing check is pending.
 
 Windows GUI settings must use system Direct3D 12 through wgpu, allowing WARP on
 machines without a compatible hardware adapter. macOS/Linux retain their current
