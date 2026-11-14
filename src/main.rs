@@ -200,6 +200,19 @@ fn doctor() -> Result<()> {
     let config = Config::load()?;
     println!("Upyr {}", env!("CARGO_PKG_VERSION"));
     println!("Platform: {}", std::env::consts::OS);
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_REMOTESESSION};
+        // SAFETY: GetSystemMetrics takes a constant index and no pointers.
+        let remote = unsafe { GetSystemMetrics(SM_REMOTESESSION) } != 0;
+        println!("Settings renderer: Direct3D 12 (WARP software fallback)");
+        println!("Remote session: {remote}");
+        if remote {
+            println!(
+                "RDP input: use Scancode mode in the client for automatic layout switching; Unicode mode sends characters using the client layout."
+            );
+        }
+    }
     println!(
         "Configuration: {} ({})",
         path.display(),

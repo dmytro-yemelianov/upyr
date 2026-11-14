@@ -20,6 +20,13 @@ change between minor releases while the version is below 1.0.
   account token or device identifier is sent. Text processing and WASM remain
   offline. The privacy guard permits this client only in its settings module.
 
+### Fixed
+
+- Windows settings use Direct3D 12 with WARP software rendering available,
+  removing the dependency on an OpenGL driver in RDP sessions. Failed startup
+  shows a native error dialog, and terminal launches retain diagnostic output.
+  Windows package CI also opens and closes both settings interfaces.
+
 ### Planned
 
 - Notarized Developer ID distribution for macOS.

@@ -493,6 +493,23 @@ only an intact original word or a complete replacement with that letter preserve
 | Linux/X11 | Preview | DEB and tar package, XKB layout mapping, StatusNotifierItem tray, desktop-notification feedback, and AccessKit-backed settings accessibility; native Wayland global input awaits a portal-backed design |
 | WebAssembly | Engine preview | DOM-independent `upyr-core` binding with generated TypeScript contracts, plus a site-local browser adapter (`site/upyr-web.js`) that powers the live playground on [upyr.org](https://upyr.org/#try-it); a published npm package is planned |
 
+### Windows over RDP
+
+In a fresh configuration, enable **Settings → Correction → Automatic correction**
+and layout switching. In Windows App on macOS, select **Connections → Keyboard
+Mode → Scancode** so the remote Windows layout determines the typed characters.
+Unicode mode sends characters already translated by the Mac's layout, so switching
+the Windows layout cannot change those characters. See
+[Microsoft's keyboard-mode reference](https://learn.microsoft.com/en-us/windows-app/input-keyboard-mouse-touch-pen?tabs=macos#keyboard-modes).
+
+Source builds use Direct3D 12 for both Windows settings interfaces, with the
+system WARP software adapter available when no suitable GPU is present. Published
+0.6.0 packages predate this renderer change. If settings closes during startup,
+run `upyr.exe settings --pixel` from PowerShell to see the error. The terminal
+editor remains available with `upyr.exe settings --tui`: enter `auto on`,
+`layout on`, `save`, then `quit`. `upyr.exe doctor` reports correction state,
+configuration path, active layout and remote-session status.
+
 ## Architecture
 
 ```text
