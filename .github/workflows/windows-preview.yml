@@ -1,0 +1,122 @@
+name: Windows test installer
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-preview.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'src/**'
+      - 'crates/**'
+      - 'assets/**'
+      - 'packaging/windows/**'
+      - 'tests/fixtures/config/**'
+      - 'LICENSE'
+      - 'THIRD_PARTY_NOTICES.md'
+  workflow_dispatch:
+
+# Test artifacts only: no release environment, deployment, secrets or publishing.
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Build and verify Windows test installer
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: 1.95.0
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - name: Build release binaries
+        run: cargo build --release --locked -p upyr
+      - name: Install Inno Setup
+        run: choco install innosetup --version 6.7.1 --no-progress -y
+      - name: Build installer and portable package
+        shell: pwsh
+        run: ./packaging/windows/package.ps1
+      - name: Verify installation and preserve existing configuration
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $install = Join-Path $env:RUNNER_TEMP 'upyr-install'
+          $env:UPYR_CONFIG = Join-Path $env:RUNNER_TEMP 'upyr-upgrade.toml'
+          Copy-Item tests/fixtures/config/published-v6.toml $env:UPYR_CONFIG
+          $before = (Get-FileHash $env:UPYR_CONFIG).Hash
+          $installer = Get-ChildItem dist/*-setup.exe | Select-Object -First 1
+          $installerArgs = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$install`"")
+          $process = Start-Process -FilePath $installer.FullName -ArgumentList $installerArgs -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          foreach ($binary in @('upyr.exe', 'upyr-background.exe', 'upyr-settings.exe')) {
+            if (-not (Test-Path (Join-Path $install $binary))) { throw "Missing $binary" }
+          }
+          $cli = Join-Path $install 'upyr.exe'
+          if ((& $cli convert ghbdsn) -ne 'привіт') { throw 'Installed conversion failed' }
+          $doctor = (& $cli doctor) -join "`n"
+          if ($LASTEXITCODE -ne 0 -or $doctor -notmatch 'Aggressive, minimum 5 characters') {
+            throw 'Existing config did not load'
+          }
+          if ((Get-FileHash $env:UPYR_CONFIG).Hash -ne $before) { throw 'Config changed' }
+          $env:UPYR_CONFIG = Join-Path $env:RUNNER_TEMP 'upyr-clean.toml'
+          & $cli init
+          if ($LASTEXITCODE -ne 0) { throw 'Clean init failed' }
+          if (((& $cli doctor) -join "`n") -notmatch 'Automatic correction: disabled') {
+            throw 'Unexpected clean defaults'
+          }
+      - name: Verify installed pixel and standard settings windows
+        shell: pwsh
+        run: ./packaging/windows/test-settings.ps1 -InstallDirectory (Join-Path $env:RUNNER_TEMP 'upyr-install')
+      - name: Record test build provenance and installation instructions
+        shell: pwsh
+        run: |
+          $source = (git rev-parse HEAD).Trim()
+          @{
+            type = 'Windows CI test build'
+            source_commit = $source
+            version = (& ./target/release/upyr.exe --version).Trim()
+            run = "https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          } | ConvertTo-Json | Set-Content dist/build-info.json -Encoding utf8
+          Get-ChildItem dist -File | Where-Object { $_.Extension -in '.exe', '.zip' } | ForEach-Object {
+            '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+          } | Set-Content dist/SHA256SUMS.txt -Encoding utf8
+          @'
+          Windows test build from a pull request, not a published release.
+
+          1. Quit the running Upyr from its system-tray menu, if installed.
+          2. Run the included *-setup.exe and complete the installer.
+          3. Launch Upyr from the Start menu. Existing settings are preserved.
+          4. Open Settings > About > Check for updates to check manually.
+
+          Automatic correction is off in a new configuration. Enable it in
+          Settings > Correction. In Windows App on macOS, choose Connections >
+          Keyboard Mode > Scancode for automatic switching inside the RDP session.
+          Terminal settings fallback: upyr.exe settings --tui
+          Diagnostics: upyr.exe doctor
+
+          Portable: extract the inner ZIP and run upyr-background.exe.
+          Source commit and build URL: build-info.json. Checksums: SHA256SUMS.txt.
+          '@ | Set-Content dist/INSTALL.txt -Encoding utf8
+      - name: Upload Windows test packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-test-installer
+          path: |
+            dist/*-setup.exe
+            dist/*.zip
+            dist/build-info.json
+            dist/SHA256SUMS.txt
+            dist/INSTALL.txt
+          if-no-files-found: error
+          retention-days: 14

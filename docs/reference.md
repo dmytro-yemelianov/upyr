@@ -2,7 +2,7 @@
 
 [Quick start](../README.md) · [Configuration](#configuration) · [Globe key](#globe-key-on-macos) · [Engine](#how-correction-works) · [Platform details](#platform-status)
 
-**Source version:** v0.6.0 preview. Published downloads can lag the source version; use [GitHub Releases](https://github.com/dmytro-yemelianov/upyr/releases). **There is no Apple-verified Upyr build yet.** The current macOS preview is ad-hoc signed, not Apple Developer ID signed, and not notarized; Gatekeeper may show "Apple could not verify Upyr is free of malware." Upyr has no automatic update checker, so check GitHub Releases manually for newer or notarized builds. macOS is the primary supported desktop target. Release CI is configured to build and smoke-test Windows and Linux/X11 packages, but those platforms remain preview targets. Upyr follows [Semantic Versioning](#versioning-and-releases); compatibility may change before 1.0.
+**Source version:** v0.6.0 preview. Published downloads can lag the source version; use [GitHub Releases](https://github.com/dmytro-yemelianov/upyr/releases). **There is no Apple-verified Upyr build yet.** The current macOS preview is ad-hoc signed, not Apple Developer ID signed, and not notarized; Gatekeeper may show "Apple could not verify Upyr is free of malware." Upyr never checks automatically. Source builds offer **Settings → About → Check for updates**; published 0.6.0 builds still use GitHub Releases manually. macOS is the primary supported desktop target. Release CI is configured to build and smoke-test Windows and Linux/X11 packages, but those platforms remain preview targets. Upyr follows [Semantic Versioning](#versioning-and-releases); compatibility may change before 1.0.
 
 ## What it does
 
@@ -229,9 +229,10 @@ Model and policy behavior is measured against the frozen [signed N-gram v1 evalu
 
 ## Privacy and security
 
-Upyr is designed to work without an account, server, or runtime network connection.
+Text correction works without an account, server, or network connection.
 
-- **No telemetry or analytics.** The desktop and WASM runtime paths have no HTTP client, updater, crash reporter, advertising SDK, or analytics integration.
+- **No telemetry or analytics.** No crash reporter, advertising SDK or analytics integration is used. The WASM runtime and text-processing engine have no network client.
+- **Manual update checks only.** In source builds, **Settings → About → Check for updates** requests public GitHub release metadata only after a click. It sends the Upyr version in a User-Agent, without typed text, clipboard contents, configuration or device identifiers. GitHub sees the connection’s IP address. The UI stays responsive, prevents concurrent checks, and shows errors with manual retry. It checks up to 100 releases for a newer semantic version with packages for this platform, including labelled previews; same-version rebuilds are not updates. A separate **Open release** link opens the browser. No automatic checks, downloads or installation run. Published 0.6.0 packages do not yet include this button.
 - **No remote inference.** Layout mapping, n-gram scoring, dictionaries, and settings stay on the device.
 - **No typing history.** Automatic mode keeps only a bounded in-memory prefix for the active input boundary. It does not keep a typing log; resets discard the prefix. When learning is enabled, repeated manual fixes save only the resulting rules or exceptions to your configuration file.
 - **Private configuration writes.** On macOS and Linux, Upyr replaces configuration atomically and enforces owner-only `0600` file permissions; Windows uses the per-user application-data ACL.
@@ -240,7 +241,7 @@ Upyr is designed to work without an account, server, or runtime network connecti
 - **Permission restraint.** macOS Accessibility is requested only when required, an existing grant is accepted silently, and a missing grant is prompted at most once per process.
 - **Inspectable artifacts.** The implementation is MIT-licensed, release builds are produced by GitHub Actions, and the release pipeline smoke-tests packaged conversion.
 
-The corpus generator ([`tools/generate_ngram_model.py`](../tools/generate_ngram_model.py)), the clean-holdout generator ([`tools/generate_clean_holdout.py`](../tools/generate_clean_holdout.py)), and the sound-pack asset generator ([`tools/generate_event_sound_pack.py`](../tools/generate_event_sound_pack.py)) are the only intentional network-capable development tools. When explicitly run, the first two download pinned public archives and verify SHA-256 before processing, and the third calls the ElevenLabs Sound Effects API to render bundled event cues. None is called by the desktop app or WASM runtime, which have no network client.
+The corpus generator ([`tools/generate_ngram_model.py`](../tools/generate_ngram_model.py)), the clean-holdout generator ([`tools/generate_clean_holdout.py`](../tools/generate_clean_holdout.py)), and the sound-pack asset generator ([`tools/generate_event_sound_pack.py`](../tools/generate_event_sound_pack.py)) are the only intentional network-capable development tools. When explicitly run, the first two download pinned public archives and verify SHA-256 before processing, and the third calls the ElevenLabs Sound Effects API to render bundled event cues. None is called by the desktop app or WASM runtime. The optional desktop update check is separate from these development tools.
 
 Security CI adds RustSec dependency auditing, CodeQL analysis, pull-request dependency review, and scheduled scans. These controls reduce risk; they are not a claim that any non-trivial program is vulnerability-free. Please follow [`SECURITY.md`](../SECURITY.md) to report a suspected vulnerability instead of opening a public issue.
 
@@ -491,6 +492,23 @@ only an intact original word or a complete replacement with that letter preserve
 | Windows | Preview | Tray app, installer and portable ZIP, foreground-layout mapping, broad clipboard snapshot/restore support, and AccessKit-backed settings accessibility |
 | Linux/X11 | Preview | DEB and tar package, XKB layout mapping, StatusNotifierItem tray, desktop-notification feedback, and AccessKit-backed settings accessibility; native Wayland global input awaits a portal-backed design |
 | WebAssembly | Engine preview | DOM-independent `upyr-core` binding with generated TypeScript contracts, plus a site-local browser adapter (`site/upyr-web.js`) that powers the live playground on [upyr.org](https://upyr.org/#try-it); a published npm package is planned |
+
+### Windows over RDP
+
+In a fresh configuration, enable **Settings → Correction → Automatic correction**
+and layout switching. In Windows App on macOS, select **Connections → Keyboard
+Mode → Scancode** so the remote Windows layout determines the typed characters.
+Unicode mode sends characters already translated by the Mac's layout, so switching
+the Windows layout cannot change those characters. See
+[Microsoft's keyboard-mode reference](https://learn.microsoft.com/en-us/windows-app/input-keyboard-mouse-touch-pen?tabs=macos#keyboard-modes).
+
+Source builds use Direct3D 12 for both Windows settings interfaces, with the
+system WARP software adapter available when no suitable GPU is present. Published
+0.6.0 packages predate this renderer change. If settings closes during startup,
+run `upyr.exe settings --pixel` from PowerShell to see the error. The terminal
+editor remains available with `upyr.exe settings --tui`: enter `auto on`,
+`layout on`, `save`, then `quit`. `upyr.exe doctor` reports correction state,
+configuration path, active layout and remote-session status.
 
 ## Architecture
 
