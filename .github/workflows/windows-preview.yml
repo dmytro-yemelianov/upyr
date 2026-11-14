@@ -75,6 +75,9 @@ jobs:
           if (((& $cli doctor) -join "`n") -notmatch 'Automatic correction: disabled') {
             throw 'Unexpected clean defaults'
           }
+      - name: Verify installed pixel and standard settings windows
+        shell: pwsh
+        run: ./packaging/windows/test-settings.ps1 -InstallDirectory (Join-Path $env:RUNNER_TEMP 'upyr-install')
       - name: Record test build provenance and installation instructions
         shell: pwsh
         run: |
@@ -95,6 +98,12 @@ jobs:
           2. Run the included *-setup.exe and complete the installer.
           3. Launch Upyr from the Start menu. Existing settings are preserved.
           4. Open Settings > About > Check for updates to check manually.
+
+          Automatic correction is off in a new configuration. Enable it in
+          Settings > Correction. In Windows App on macOS, choose Connections >
+          Keyboard Mode > Scancode for automatic switching inside the RDP session.
+          Terminal settings fallback: upyr.exe settings --tui
+          Diagnostics: upyr.exe doctor
 
           Portable: extract the inner ZIP and run upyr-background.exe.
           Source commit and build URL: build-info.json. Checksums: SHA256SUMS.txt.

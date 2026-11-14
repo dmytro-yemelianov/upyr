@@ -66,7 +66,7 @@ pub(super) fn run(activation: ActivationInbox) -> Result<bool> {
             viewport: egui::ViewportBuilder::default()
                 .with_inner_size([780.0, 680.0])
                 .with_min_inner_size([480.0, 400.0]),
-            ..Default::default()
+            ..super::native_options()
         },
         Box::new(move |cc| {
             apply_style(&cc.egui_ctx);

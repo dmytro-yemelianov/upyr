@@ -268,7 +268,7 @@ pub fn run_with(options: SettingsOptions) -> Result<()> {
                 .with_title(tr("Upyr Settings"))
                 .with_inner_size([680.0, 800.0])
                 .with_min_inner_size([520.0, 560.0]),
-            ..Default::default()
+            ..native_options()
         };
         eframe::run_native(
             tr("Upyr Settings"),
@@ -281,6 +281,26 @@ pub fn run_with(options: SettingsOptions) -> Result<()> {
         )
         .map_err(|error| anyhow!(error.to_string()))
     }
+}
+
+/// Both egui frontends use the same platform renderer. Windows' system OpenGL
+/// implementation can be too old over RDP; DX12 can use the built-in WARP
+/// software adapter when no suitable hardware adapter is available.
+fn native_options() -> eframe::NativeOptions {
+    #[cfg(target_os = "windows")]
+    {
+        let mut options = eframe::NativeOptions {
+            renderer: eframe::Renderer::Wgpu,
+            ..Default::default()
+        };
+        if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_options.wgpu_setup
+        {
+            setup.instance_descriptor.backends = wgpu::Backends::DX12;
+        }
+        options
+    }
+    #[cfg(not(target_os = "windows"))]
+    eframe::NativeOptions::default()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
