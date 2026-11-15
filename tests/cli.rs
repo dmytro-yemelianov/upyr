@@ -70,6 +70,8 @@ fn init_and_doctor_report_current_configuration() {
     assert!(report.contains("Modifier gesture: Disabled"));
     #[cfg(target_os = "macos")]
     assert!(report.contains("Accessibility access: "));
+    #[cfg(target_os = "macos")]
+    assert!(report.contains("Secure Input: "));
 
     let _ = fs::remove_dir_all(config.parent().unwrap());
 }

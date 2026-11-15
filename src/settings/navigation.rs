@@ -16,6 +16,8 @@ pub(super) enum SettingsTab {
     General,
     Automatic,
     Exceptions,
+    #[cfg(target_os = "macos")]
+    Applications,
     Shortcuts,
     Feedback,
     Advanced,
@@ -23,10 +25,12 @@ pub(super) enum SettingsTab {
 }
 
 impl SettingsTab {
-    pub(super) const ALL: [Self; 7] = [
+    pub(super) const ALL: [Self; if cfg!(target_os = "macos") { 8 } else { 7 }] = [
         Self::General,
         Self::Automatic,
         Self::Exceptions,
+        #[cfg(target_os = "macos")]
+        Self::Applications,
         Self::Shortcuts,
         Self::Feedback,
         Self::Advanced,
@@ -46,6 +50,8 @@ impl SettingsTab {
             Self::General => "General",
             Self::Automatic => "Correction",
             Self::Exceptions => "Exceptions",
+            #[cfg(target_os = "macos")]
+            Self::Applications => "Applications",
             Self::Shortcuts => "Shortcuts",
             Self::Feedback => "Feedback",
             Self::Advanced => "Advanced",
@@ -58,6 +64,8 @@ impl SettingsTab {
             Self::General => "general",
             Self::Automatic => "automatic",
             Self::Exceptions => "exceptions",
+            #[cfg(target_os = "macos")]
+            Self::Applications => "applications",
             Self::Shortcuts => "shortcuts",
             Self::Feedback => "feedback",
             Self::Advanced => "advanced",
@@ -72,6 +80,8 @@ impl SettingsTab {
     pub(super) const fn cli_argument(self) -> Option<&'static str> {
         match self {
             Self::About => Some("--about"),
+            #[cfg(target_os = "macos")]
+            Self::Applications => None,
             Self::General
             | Self::Automatic
             | Self::Exceptions
@@ -89,6 +99,12 @@ pub(super) struct SearchParameter {
 }
 
 pub(super) const SEARCH_PARAMETERS: &[SearchParameter] = &[
+    #[cfg(target_os = "macos")]
+    SearchParameter {
+        tab: SettingsTab::Applications,
+        label: "Application layouts",
+        terms: "raycast application app layout english ukrainian програми винятки розкладка англійська українська",
+    },
     SearchParameter {
         tab: SettingsTab::General,
         label: "Interface language",

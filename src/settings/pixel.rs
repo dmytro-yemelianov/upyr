@@ -356,6 +356,8 @@ impl PixelSettings {
         self.forms.config.clone_from(&self.draft.edited);
         match self.section {
             SettingsTab::General => self.forms.draw_general(ui),
+            #[cfg(target_os = "macos")]
+            SettingsTab::Applications => self.forms.draw_applications(ui),
             SettingsTab::Shortcuts => self.forms.draw_shortcuts(ui),
             SettingsTab::Feedback => self.forms.draw_feedback(ui),
             SettingsTab::Advanced => self.forms.draw_advanced(ui),
@@ -661,6 +663,8 @@ mod tests {
             (SettingsTab::General, "Мова інтерфейсу"),
             (SettingsTab::Automatic, "ВИПРАВЛЕННЯ"),
             (SettingsTab::Exceptions, "ВИНЯТКИ"),
+            #[cfg(target_os = "macos")]
+            (SettingsTab::Applications, "Розкладка для програм"),
             (SettingsTab::Shortcuts, "Перетворити виділене"),
             (SettingsTab::Feedback, "Візуальні індикатори"),
             (SettingsTab::Advanced, "Затримка копіювання"),

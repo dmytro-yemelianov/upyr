@@ -1,5 +1,6 @@
 #![allow(unsafe_code)]
 use crate::settings::i18n::tr;
+mod applications;
 
 use std::{
     cell::{Cell, OnceCell, RefCell},
@@ -72,6 +73,7 @@ struct ControllerIvars {
 }
 
 struct Controls {
+    applications: applications::ApplicationControls,
     updates: UpdateControls,
     window: Retained<NSWindow>,
     tabs: Retained<NSTabView>,
@@ -213,6 +215,7 @@ define_class!(
             self.ivars().flag_choices.borrow_mut().accept(config.globe_switch.layout_flags.clone());
             // Show the saved list: an edited "two words" row became two rows.
             self.rebuild_exception_rows(&config.auto_correct_exceptions);
+        self.controls().applications.load(&config.application_layout_rules, self);
             let language_changed = config.ui_language != super::i18n::language();
             self.ivars().config.replace(config);
             self.refresh_flag_choices();
@@ -491,6 +494,25 @@ define_class!(
         #[unsafe(method(hideFeedback:))]
         fn hide_feedback(&self, _sender: Option<&AnyObject>) {
             crate::feedback::hide_layout_indicator();
+        }
+
+        #[unsafe(method(addApplicationRule:))]
+        fn add_application_rule(&self, _sender: &AnyObject) {
+            self.controls().applications.add(&crate::application_layout::ApplicationLayoutRule {
+                application: String::new(), layout: upyr_core::InputLayout::English,
+            }, self);
+        }
+        #[unsafe(method(addRaycastRule:))]
+        fn add_raycast_rule(&self, _sender: &AnyObject) {
+            let rule = crate::application_layout::ApplicationLayoutRule::raycast();
+            if !self.controls().applications.rules().iter().any(|r| r.application.eq_ignore_ascii_case(&rule.application)) {
+                self.controls().applications.add(&rule, self);
+            }
+        }
+        #[unsafe(method(removeApplicationRule:))]
+        fn remove_application_rule(&self, sender: &AnyObject) {
+            let tag: isize = unsafe { msg_send![sender, tag] };
+            self.controls().applications.remove(tag);
         }
 
         #[unsafe(method(addException:))]
@@ -925,6 +947,8 @@ impl NativeController {
             new_word: exceptions_new_word,
         } = make_exceptions_page(self, mtm);
         add_tab(&tabs, SettingsTab::Exceptions, &exceptions_page, mtm);
+        let applications = applications::ApplicationControls::new(self, mtm);
+        add_tab(&tabs, SettingsTab::Applications, &applications.page, mtm);
         let (
             shortcuts,
             selection_shortcut,
@@ -989,6 +1013,7 @@ impl NativeController {
         self.ivars()
             .controls
             .set(Controls {
+                applications,
                 window: window.clone(),
                 tabs,
                 search,
@@ -1092,6 +1117,7 @@ impl NativeController {
         config.auto_correct_delay_ms =
             parse_number(&controls.auto_delay, "automatic correction delay", 10, 250)?;
         config.auto_correct_exceptions = self.exception_words();
+        config.application_layout_rules = controls.applications.rules();
         config.modifier_gesture = match controls.modifier_gesture.indexOfSelectedItem() {
             1 => ModifierGesture::DoubleControl,
             2 => ModifierGesture::DoubleShift,
@@ -1176,6 +1202,9 @@ impl NativeController {
         );
         set_text(&controls.auto_delay, config.auto_correct_delay_ms);
         self.rebuild_exception_rows(&config.auto_correct_exceptions);
+        self.controls()
+            .applications
+            .load(&config.application_layout_rules, self);
         controls.selection_shortcut.set_value(&config.hotkey);
         controls
             .previous_word_shortcut

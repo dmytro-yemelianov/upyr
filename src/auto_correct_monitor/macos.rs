@@ -75,6 +75,11 @@ struct Capture {
 
 pub(super) fn start(state: Arc<ListenerState>) -> Result<()> {
     MainThreadMarker::new().context("keyboard monitoring must start on the main thread")?;
+    if crate::accessibility::secure_input_enabled() {
+        tracing::warn!(
+            "macOS Secure Input is enabled; keyboard monitoring waits until its owner releases protected input"
+        );
+    }
     MONITOR.with(|slot| {
         let mut slot = slot.borrow_mut();
         if slot.is_some() {

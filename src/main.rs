@@ -225,6 +225,16 @@ fn doctor() -> Result<()> {
     println!("Layout following: {}", config.switch_layout);
     println!("Config schema: {}", config.config_version);
     #[cfg(target_os = "macos")]
+    println!(
+        "Application layout rules: {}",
+        config
+            .application_layout_rules
+            .iter()
+            .map(|rule| format!("{} → {:?}", rule.application, rule.layout))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    #[cfg(target_os = "macos")]
     {
         println!(
             "Globe-key switching: {} ({:?}, {} ms)",
@@ -244,6 +254,15 @@ fn doctor() -> Result<()> {
             "granted"
         } else {
             "not granted"
+        }
+    );
+    #[cfg(target_os = "macos")]
+    println!(
+        "Secure Input: {}",
+        if upyr::accessibility::secure_input_enabled() {
+            "enabled — macOS blocks global keyboard monitoring; leave the password field or end the owning app's secure-input session"
+        } else {
+            "disabled"
         }
     );
     println!(

@@ -30,6 +30,8 @@ use crate::{
     layout::Direction,
 };
 
+#[cfg(target_os = "macos")]
+mod applications;
 mod draft;
 #[cfg(any(target_os = "macos", test))]
 mod flag_choices;
@@ -894,6 +896,11 @@ impl SettingsApp {
         ui.small(tr(CORRECTION_FOOTNOTE));
     }
 
+    #[cfg(target_os = "macos")]
+    fn draw_applications(&mut self, ui: &mut egui::Ui) {
+        applications::draw(&mut self.config.application_layout_rules, ui);
+    }
+
     fn draw_exceptions(&mut self, ui: &mut egui::Ui) {
         section_heading(
             ui,
@@ -1457,6 +1464,8 @@ impl eframe::App for SettingsApp {
                         SettingsTab::General => self.draw_general(ui),
                         SettingsTab::Automatic => self.draw_automatic(ui),
                         SettingsTab::Exceptions => self.draw_exceptions(ui),
+                        #[cfg(target_os = "macos")]
+                        SettingsTab::Applications => self.draw_applications(ui),
                         SettingsTab::Shortcuts => self.draw_shortcuts(ui),
                         SettingsTab::Feedback => self.draw_feedback(ui),
                         SettingsTab::Advanced => self.draw_advanced(ui),
@@ -1863,6 +1872,7 @@ mod tests {
 
         for label in [
             "Globe key switching",
+            "Application layouts",
             "Correct words in terminals",
             "Slash commands in Superset",
             "Undo auto-correction",

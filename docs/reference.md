@@ -512,6 +512,38 @@ configuration path, active layout and remote-session status.
 
 ## Architecture
 
+### Application layout rules (macOS)
+
+In **Settings → Applications**, add a rule for an exact application name or
+bundle ID and choose English or Ukrainian. **Raycast → English** adds the
+stable `com.raycast.macos` rule. It selects an English source whenever Raycast
+receives keyboard focus, including its nonactivating search panel after
+Command+Space; it keeps an already active English variant. You can manually
+change layouts until focus leaves Raycast and returns. Internal field/window
+focus changes do not force the preferred layout again. Panel detection uses
+Accessibility focus notifications, without polling keys or recording text.
+
+Rules work independently of automatic correction and stop when Upyr is paused.
+Upyr does not register the launcher shortcut or change layouts when activating
+apps without a rule. Missing layout families leave the current source unchanged.
+New configurations have no application rules. Example:
+
+```toml
+[[application_layout_rules]]
+application = "com.raycast.macos"
+layout = "english"
+```
+
+If correction stops despite granted Accessibility permission, run `upyr doctor`.
+On macOS, **Secure Input: enabled** means the OS is protecting keyboard input
+and blocks global keyboard monitors. Leave the password field or finish the
+owning app's protected-input session. If `loginwindow` remains the owner after
+unlocking, a normal lock/unlock cycle may release it; restarting Upyr cannot
+clear another process's Secure Input. Upyr reports this condition and never
+disables the protection. See Apple's [Secure Event Input note](https://developer.apple.com/library/archive/technotes/tn2150/_index.html).
+
+### Components
+
 ```text
 upyr-core          platform-neutral mapping, tracking, n-gram policy
 upyr-wasm          DOM-independent WebAssembly API

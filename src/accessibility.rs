@@ -83,6 +83,17 @@ pub fn is_trusted() -> bool {
     application_is_trusted()
 }
 
+/// A system-wide protected-input session blocks keyboard monitoring even when
+/// Accessibility is granted. Only its owner can legitimately end that session.
+#[allow(unsafe_code)]
+pub fn secure_input_enabled() -> bool {
+    #[link(name = "Carbon", kind = "framework")]
+    unsafe extern "C" {
+        fn IsSecureEventInputEnabled() -> u8;
+    }
+    unsafe { IsSecureEventInputEnabled() != 0 }
+}
+
 /// Requests Accessibility at most once during this process. The trust check
 /// always happens first, so an existing grant never opens a macOS prompt.
 pub fn request_once_if_needed() -> bool {

@@ -19,6 +19,20 @@ pub(super) fn translate(language: UiLanguage, text: &str) -> &str {
         return text;
     }
     match text {
+        "Applications" => "Програми",
+        "Application layouts" => "Розкладка для програм",
+        "English" => "Англійська",
+        "Ukrainian" => "Українська",
+        "Add application" => "Додати програму",
+        "Raycast → English" => "Raycast → англійська",
+        "No application rules yet." => "Правил для програм поки немає.",
+        "Application name or bundle ID" => "Назва програми або bundle ID",
+        "Choose the layout when an app becomes active. You can still change it manually until the next activation. Works independently of automatic correction; paused with Upyr." => {
+            "Виберіть розкладку при переході в програму. Її можна змінити вручну до наступного відкриття. Правила не залежать від автовиправлення; пауза Upyr зупиняє їх."
+        }
+        "Use an exact app name, such as Raycast, or its bundle ID. Upyr does not switch layouts for apps without a rule." => {
+            "Укажіть точну назву програми, як-от Raycast, або її bundle ID. Для програм без правила Upyr не перемикає розкладку."
+        }
         "Interface language" => "Мова інтерфейсу",
         "Save and reopen settings to apply the language." => {
             "Збережіть і відкрийте налаштування знову, щоб змінити мову."
