@@ -27,6 +27,13 @@ change between minor releases while the version is below 1.0.
 
 ### Fixed
 
+- Windows: automatic correction works in Windows 11 Notepad. The key listener
+  no longer attaches to the foreground window's input queue, which made
+  Notepad ignore the Ctrl+C a correction uses to read the word; every
+  correction there failed or left the caret displaced. Keys typed while a
+  correction edits the text are now held and replayed after the corrected
+  word, so fast typing no longer lands inside the edit.
+
 - macOS application rules also follow keyboard focus in nonactivating panels.
   `upyr doctor` reports Secure Input separately from Accessibility permission.
 

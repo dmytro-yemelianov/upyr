@@ -20,6 +20,8 @@ mod function_keys;
 pub mod globe_switch;
 mod hotkey_bindings;
 mod input_context;
+#[cfg(target_os = "windows")]
+mod key_hold;
 // Only the macOS app has undo and the guarded pipeline that learning uses.
 pub mod layout;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

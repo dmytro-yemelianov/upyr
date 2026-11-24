@@ -117,6 +117,10 @@ struct App {
     gesture: Option<ModifierGestureMonitor>,
     auto_monitor: Option<AutoCorrectMonitor>,
     auto_tracker: AutoWordTracker,
+    /// Holds the user's keys from the moment a word is accepted until its
+    /// correction is pasted, so they cannot land inside the edit.
+    #[cfg(target_os = "windows")]
+    auto_hold: Option<crate::key_hold::KeyHold>,
     /// Events dispatched before monitor suspension but handled during the edit.
     #[cfg(target_os = "macos")]
     deferred_auto_keys: Option<Vec<AutoKeyEvent>>,
@@ -307,6 +311,8 @@ pub fn run(config: Config, hotkey_override: Option<String>) -> Result<()> {
         gesture,
         auto_monitor,
         auto_tracker: AutoWordTracker::default(),
+        #[cfg(target_os = "windows")]
+        auto_hold: None,
         #[cfg(target_os = "macos")]
         deferred_auto_keys: Some(Vec::new()),
         #[cfg(target_os = "macos")]
@@ -1193,6 +1199,8 @@ impl App {
         match decision {
             AutoDecision::Correct(correction) => {
                 debug!(direction = ?correction.direction, "automatic word accepted for correction");
+                #[cfg(target_os = "windows")]
+                self.begin_auto_hold();
                 self.schedule_auto_correction(correction);
             }
             AutoDecision::Continue => debug!("automatic word needs more confidence"),
@@ -1214,6 +1222,8 @@ impl App {
             // another queued key can overtake this recognized prefix.
             #[cfg(target_os = "macos")]
             self.apply_auto_correction(self.auto_generation, correction);
+            #[cfg(target_os = "windows")]
+            self.begin_auto_hold();
             #[cfg(not(target_os = "macos"))]
             let _ = self.event_proxy.send_event(AppEvent::ApplyAutoCorrection {
                 generation: self.auto_generation,
@@ -1290,8 +1300,18 @@ impl App {
         });
     }
 
+    #[cfg(target_os = "windows")]
+    fn begin_auto_hold(&mut self) {
+        if self.auto_hold.is_none() {
+            self.auto_hold = crate::key_hold::KeyHold::start();
+        }
+    }
+
     #[cfg(not(target_os = "macos"))]
     fn apply_auto_correction(&mut self, generation: u64, correction: AutoCorrection) {
+        // Dropping the hold replays the held keys, on every return path.
+        #[cfg(target_os = "windows")]
+        let mut hold = self.auto_hold.take();
         if generation != self.auto_generation
             || self.paused
             || self.processing
@@ -1305,12 +1325,20 @@ impl App {
         conversion_config.direction = correction.direction;
         let result = {
             let auto_monitor = self.auto_monitor.as_ref();
+            #[cfg(target_os = "windows")]
+            let hold = &mut hold;
             let mut on_text_committed = || {
                 if let Some(monitor) = auto_monitor {
                     // Paste and layout switching are complete. Resume before
                     // the trailing clipboard-restore delay so the first key of
                     // the next word cannot disappear from the tracker.
                     monitor.set_suspended(false);
+                }
+                // Replay the keys typed during the edit after the corrected
+                // word, in the layout the correction switched to.
+                #[cfg(target_os = "windows")]
+                if let Some(hold) = hold.as_mut() {
+                    hold.release();
                 }
             };
             convert_previous_input_if_matches(
@@ -1354,6 +1382,9 @@ impl App {
         self.auto_generation = self.auto_generation.wrapping_add(1);
         self.processing = false;
         self.set_auto_suspended(false);
+        // A skipped or failed edit restored the caret; replay after it.
+        #[cfg(target_os = "windows")]
+        drop(hold);
     }
 
     #[cfg(target_os = "macos")]
