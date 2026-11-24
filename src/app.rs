@@ -86,6 +86,8 @@ struct PendingLineBreak {
 
 struct App {
     #[cfg(target_os = "macos")]
+    application_layout_monitor: Option<crate::application_layout::Monitor>,
+    #[cfg(target_os = "macos")]
     conversion: Option<PendingConversion>,
     #[cfg(target_os = "macos")]
     line_break: LineBreak,
@@ -278,6 +280,8 @@ pub fn run(config: Config, hotkey_override: Option<String>) -> Result<()> {
     info!(hotkey = %config.hotkey, modifier_gesture = ?config.modifier_gesture, auto_correct = config.auto_correct, "Upyr is running; select mistyped text and press the hotkey");
     let mut app = App {
         #[cfg(target_os = "macos")]
+        application_layout_monitor: None,
+        #[cfg(target_os = "macos")]
         conversion: None,
         #[cfg(target_os = "macos")]
         queued_conversion: None,
@@ -333,6 +337,8 @@ pub fn run(config: Config, hotkey_override: Option<String>) -> Result<()> {
     };
     #[cfg(target_os = "macos")]
     app.refresh_globe_monitor();
+    #[cfg(target_os = "macos")]
+    app.refresh_application_layout_monitor();
     #[cfg(target_os = "macos")]
     app.refresh_accessibility_watcher();
     event_loop
@@ -1574,6 +1580,28 @@ impl App {
         });
     }
 
+    #[cfg(target_os = "macos")]
+    fn refresh_application_layout_monitor(&mut self) {
+        if self.paused || self.config.application_layout_rules.is_empty() {
+            self.application_layout_monitor = None;
+            return;
+        }
+        if self
+            .application_layout_monitor
+            .as_ref()
+            .is_some_and(|m| m.matches(&self.config.application_layout_rules))
+        {
+            return;
+        }
+        self.application_layout_monitor = None;
+        match crate::application_layout::Monitor::start(
+            self.config.application_layout_rules.clone(),
+        ) {
+            Ok(monitor) => self.application_layout_monitor = Some(monitor),
+            Err(error) => error!(%error, "could not start application layout rules"),
+        }
+    }
+
     fn toggle_paused(&mut self) -> Result<()> {
         #[cfg(target_os = "macos")]
         self.clear_undo();
@@ -1602,6 +1630,8 @@ impl App {
         self.reset_auto_context();
         #[cfg(target_os = "macos")]
         self.refresh_globe_monitor();
+        #[cfg(target_os = "macos")]
+        self.refresh_application_layout_monitor();
         #[cfg(target_os = "macos")]
         self.refresh_accessibility_watcher();
         self.update_tray()?;
@@ -1669,6 +1699,8 @@ impl App {
         self.reset_auto_context();
         #[cfg(target_os = "macos")]
         self.refresh_globe_monitor();
+        #[cfg(target_os = "macos")]
+        self.refresh_application_layout_monitor();
         if !self.config.show_layout_indicator {
             self.feedback_generation = self.feedback_generation.wrapping_add(1);
             crate::feedback::hide_layout_indicator();

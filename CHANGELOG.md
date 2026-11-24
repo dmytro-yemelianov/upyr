@@ -6,6 +6,35 @@ change between minor releases while the version is below 1.0.
 
 ## [Unreleased]
 
+### Added
+
+- macOS application layout rules: choose English or Ukrainian when a specific
+  app becomes active. Native/pixel settings include an Applications page and
+  a Raycast → English preset. Manual changes remain possible until the next
+  activation; global Pause suspends these rules.
+
+- Settings → About: **Check for updates**, in Ukrainian and English, checks
+  published GitHub releases only after a click. It compares semantic versions
+  with packages for the current platform, labels previews and links to the
+  release. No scheduled checks, automatic downloads or installation.
+
+### Privacy
+
+- The manual update check is the only desktop HTTP client: a bounded HTTPS GET
+  for public Upyr release metadata. No typed text, clipboard data, configuration,
+  account token or device identifier is sent. Text processing and WASM remain
+  offline. The privacy guard permits this client only in its settings module.
+
+### Fixed
+
+- macOS application rules also follow keyboard focus in nonactivating panels.
+  `upyr doctor` reports Secure Input separately from Accessibility permission.
+
+- Windows settings use Direct3D 12 with WARP software rendering available,
+  removing the dependency on an OpenGL driver in RDP sessions. Failed startup
+  shows a native error dialog, and terminal launches retain diagnostic output.
+  Windows package CI also opens and closes both settings interfaces.
+
 ### Planned
 
 - Notarized Developer ID distribution for macOS.

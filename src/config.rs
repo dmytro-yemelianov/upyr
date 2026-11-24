@@ -275,6 +275,9 @@ pub struct Config {
     /// stays off, toggled from the menu bar. Omitted when empty.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub auto_correct_disabled_apps: Vec<String>,
+    /// macOS: select a preferred layout once when an application becomes active.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub application_layout_rules: Vec<crate::application_layout::ApplicationLayoutRule>,
     /// macOS: Backspace as the first key after an automatic correction
     /// reverts it. Omitted while on.
     #[serde(skip_serializing_if = "is_true")]
@@ -327,6 +330,7 @@ impl Default for Config {
             auto_correct_exceptions: Vec::new(),
             auto_correct_rules: Vec::new(),
             auto_correct_disabled_apps: Vec::new(),
+            application_layout_rules: Vec::new(),
             backspace_undo: true,
             auto_correct_learning: true,
             transliterate_hotkey: String::new(),
@@ -635,6 +639,25 @@ impl Config {
         for rule in &self.auto_correct_rules {
             if let Err(error) = upyr_core::parse_trigger(rule) {
                 bail!("auto_correct_rules entry {rule:?} is invalid: {error}");
+            }
+        }
+        let mut applications = std::collections::HashSet::new();
+        if self.application_layout_rules.len() > 128 {
+            bail!("At most 128 application layout rules are supported");
+        }
+        for rule in &self.application_layout_rules {
+            let app = &rule.application;
+            if app.trim().is_empty()
+                || app.trim() != app
+                || app.len() > 256
+                || app.chars().any(char::is_control)
+            {
+                bail!(
+                    "Application rules need a non-empty application name or bundle ID without surrounding spaces"
+                );
+            }
+            if !applications.insert(app.to_lowercase()) {
+                bail!("Each application can have only one layout rule");
             }
         }
         Ok(())

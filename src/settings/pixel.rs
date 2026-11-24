@@ -66,7 +66,7 @@ pub(super) fn run(activation: ActivationInbox) -> Result<bool> {
             viewport: egui::ViewportBuilder::default()
                 .with_inner_size([780.0, 680.0])
                 .with_min_inner_size([480.0, 400.0]),
-            ..Default::default()
+            ..super::native_options()
         },
         Box::new(move |cc| {
             apply_style(&cc.egui_ctx);
@@ -356,6 +356,8 @@ impl PixelSettings {
         self.forms.config.clone_from(&self.draft.edited);
         match self.section {
             SettingsTab::General => self.forms.draw_general(ui),
+            #[cfg(target_os = "macos")]
+            SettingsTab::Applications => self.forms.draw_applications(ui),
             SettingsTab::Shortcuts => self.forms.draw_shortcuts(ui),
             SettingsTab::Feedback => self.forms.draw_feedback(ui),
             SettingsTab::Advanced => self.forms.draw_advanced(ui),
@@ -661,6 +663,8 @@ mod tests {
             (SettingsTab::General, "Мова інтерфейсу"),
             (SettingsTab::Automatic, "ВИПРАВЛЕННЯ"),
             (SettingsTab::Exceptions, "ВИНЯТКИ"),
+            #[cfg(target_os = "macos")]
+            (SettingsTab::Applications, "Розкладка для програм"),
             (SettingsTab::Shortcuts, "Перетворити виділене"),
             (SettingsTab::Feedback, "Візуальні індикатори"),
             (SettingsTab::Advanced, "Затримка копіювання"),

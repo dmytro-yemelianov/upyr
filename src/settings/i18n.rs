@@ -19,6 +19,20 @@ pub(super) fn translate(language: UiLanguage, text: &str) -> &str {
         return text;
     }
     match text {
+        "Applications" => "Програми",
+        "Application layouts" => "Розкладка для програм",
+        "English" => "Англійська",
+        "Ukrainian" => "Українська",
+        "Add application" => "Додати програму",
+        "Raycast → English" => "Raycast → англійська",
+        "No application rules yet." => "Правил для програм поки немає.",
+        "Application name or bundle ID" => "Назва програми або bundle ID",
+        "Choose the layout when an app becomes active. You can still change it manually until the next activation. Works independently of automatic correction; paused with Upyr." => {
+            "Виберіть розкладку при переході в програму. Її можна змінити вручну до наступного відкриття. Правила не залежать від автовиправлення; пауза Upyr зупиняє їх."
+        }
+        "Use an exact app name, such as Raycast, or its bundle ID. Upyr does not switch layouts for apps without a rule." => {
+            "Укажіть точну назву програми, як-от Raycast, або її bundle ID. Для програм без правила Upyr не перемикає розкладку."
+        }
         "Interface language" => "Мова інтерфейсу",
         "Save and reopen settings to apply the language." => {
             "Збережіть і відкрийте налаштування знову, щоб змінити мову."
@@ -30,6 +44,29 @@ pub(super) fn translate(language: UiLanguage, text: &str) -> &str {
         "Feedback" => "Вигляд і звуки",
         "Advanced" => "Додатково",
         "About" => "Про програму",
+        "Check for updates" => "Перевірити оновлення",
+        "Open release" => "Відкрити реліз",
+        "Contacts GitHub only when you press the button. Installation stays manual." => {
+            "Звертається до GitHub лише після натискання. Встановлення — вручну."
+        }
+        "Checking for updates…" => "Перевіряємо оновлення…",
+        "No newer version is available for this platform." => {
+            "Для цієї платформи новішої версії немає."
+        }
+        " (preview)" => " (попередня версія)",
+        "GitHub's request limit was reached. Try again later." => {
+            "Досягнуто ліміту запитів GitHub. Спробуйте пізніше."
+        }
+        "Could not read the release information. Try again later." => {
+            "Не вдалося прочитати відомості про реліз. Спробуйте пізніше."
+        }
+        "No release for this platform was found." => "Релізу для цієї платформи не знайдено.",
+        "Could not reach GitHub. Check your connection and try again." => {
+            "Не вдалося з’єднатися з GitHub. Перевірте підключення та спробуйте ще раз."
+        }
+        "Could not start or finish the check. Try again." => {
+            "Не вдалося виконати перевірку. Спробуйте ще раз."
+        }
         "Core conversion, clipboard, and startup behavior." => {
             "Перетворення тексту, буфер обміну та запуск програми."
         }

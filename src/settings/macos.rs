@@ -1,5 +1,6 @@
 #![allow(unsafe_code)]
 use crate::settings::i18n::tr;
+mod applications;
 
 use std::{
     cell::{Cell, OnceCell, RefCell},
@@ -61,6 +62,7 @@ const EXCEPTION_REMOVE_WIDTH: f64 = 90.0;
 mod flags_gallery;
 
 struct ControllerIvars {
+    updates: RefCell<super::updates::UpdateCheck>,
     config: RefCell<Config>,
     autostart_status: RefCell<autostart::AutostartStatus>,
     activation: ActivationInbox,
@@ -71,6 +73,8 @@ struct ControllerIvars {
 }
 
 struct Controls {
+    applications: applications::ApplicationControls,
+    updates: UpdateControls,
     window: Retained<NSWindow>,
     tabs: Retained<NSTabView>,
     search: Retained<NSSearchField>,
@@ -121,6 +125,12 @@ struct Controls {
 struct ExceptionRow {
     field: Retained<NSTextField>,
     remove: Retained<NSButton>,
+}
+
+struct UpdateControls {
+    check: Retained<NSButton>,
+    open: Retained<NSButton>,
+    status: Retained<NSTextField>,
 }
 
 struct ExceptionsControls {
@@ -205,6 +215,7 @@ define_class!(
             self.ivars().flag_choices.borrow_mut().accept(config.globe_switch.layout_flags.clone());
             // Show the saved list: an edited "two words" row became two rows.
             self.rebuild_exception_rows(&config.auto_correct_exceptions);
+        self.controls().applications.load(&config.application_layout_rules, self);
             let language_changed = config.ui_language != super::i18n::language();
             self.ivars().config.replace(config);
             self.refresh_flag_choices();
@@ -485,6 +496,25 @@ define_class!(
             crate::feedback::hide_layout_indicator();
         }
 
+        #[unsafe(method(addApplicationRule:))]
+        fn add_application_rule(&self, _sender: &AnyObject) {
+            self.controls().applications.add(&crate::application_layout::ApplicationLayoutRule {
+                application: String::new(), layout: upyr_core::InputLayout::English,
+            }, self);
+        }
+        #[unsafe(method(addRaycastRule:))]
+        fn add_raycast_rule(&self, _sender: &AnyObject) {
+            let rule = crate::application_layout::ApplicationLayoutRule::raycast();
+            if !self.controls().applications.rules().iter().any(|r| r.application.eq_ignore_ascii_case(&rule.application)) {
+                self.controls().applications.add(&rule, self);
+            }
+        }
+        #[unsafe(method(removeApplicationRule:))]
+        fn remove_application_rule(&self, sender: &AnyObject) {
+            let tag: isize = unsafe { msg_send![sender, tag] };
+            self.controls().applications.remove(tag);
+        }
+
         #[unsafe(method(addException:))]
         fn add_exception(&self, _sender: &AnyObject) {
             let input = self.controls().exceptions_new_word.stringValue().to_string();
@@ -511,6 +541,9 @@ define_class!(
 
         #[unsafe(method(checkSettingsActivation:))]
         fn check_settings_activation(&self, _sender: Option<&AnyObject>) {
+            if self.ivars().updates.borrow_mut().poll() {
+                self.refresh_updates();
+            }
             if self.ivars().audio_poll.get().elapsed() >= std::time::Duration::from_secs(1) {
                 self.ivars().audio_poll.set(std::time::Instant::now());
                 self.refresh_audio_output_status();
@@ -526,10 +559,36 @@ define_class!(
             self.schedule_activation_poll();
         }
 
+        #[unsafe(method(checkForUpdates:))]
+        fn check_for_updates(&self, _sender: &AnyObject) {
+            self.ivars().updates.borrow_mut().start();
+            self.refresh_updates();
+        }
+
+        #[unsafe(method(openUpdateRelease:))]
+        fn open_update_release(&self, _sender: &AnyObject) {
+            if let Some(url) = self.ivars().updates.borrow().state.release_url() {
+                self.open_external_url(url);
+            }
+        }
+
     }
 );
 
 impl NativeController {
+    fn refresh_updates(&self) {
+        let updates = self.ivars().updates.borrow();
+        self.controls()
+            .updates
+            .check
+            .setEnabled(!updates.is_checking());
+        self.controls()
+            .updates
+            .open
+            .setHidden(updates.state.release_url().is_none());
+        set_text(&self.controls().updates.status, updates.state.message());
+    }
+
     fn open_external_url(&self, url: &str) {
         match Command::new("open").arg(url).spawn() {
             Ok(child) => {
@@ -779,6 +838,7 @@ impl NativeController {
     ) -> Retained<Self> {
         let flag_choices = FlagChoices::new(config.globe_switch.layout_flags.clone());
         let this = Self::alloc(mtm).set_ivars(ControllerIvars {
+            updates: RefCell::new(super::updates::UpdateCheck::default()),
             config: RefCell::new(config),
             autostart_status: RefCell::new(autostart_status),
             activation,
@@ -887,6 +947,8 @@ impl NativeController {
             new_word: exceptions_new_word,
         } = make_exceptions_page(self, mtm);
         add_tab(&tabs, SettingsTab::Exceptions, &exceptions_page, mtm);
+        let applications = applications::ApplicationControls::new(self, mtm);
+        add_tab(&tabs, SettingsTab::Applications, &applications.page, mtm);
         let (
             shortcuts,
             selection_shortcut,
@@ -918,7 +980,7 @@ impl NativeController {
         add_tab(&tabs, SettingsTab::Feedback, &feedback, mtm);
         let (advanced, copy_delay, paste_delay, restore_delay) = make_advanced_page(mtm);
         add_tab(&tabs, SettingsTab::Advanced, &advanced, mtm);
-        let about = make_about_page(self, mtm);
+        let (about, updates) = make_about_page(self, mtm);
         add_tab(&tabs, SettingsTab::About, &about, mtm);
         content.addSubview(&tabs);
 
@@ -951,6 +1013,7 @@ impl NativeController {
         self.ivars()
             .controls
             .set(Controls {
+                applications,
                 window: window.clone(),
                 tabs,
                 search,
@@ -996,6 +1059,7 @@ impl NativeController {
                 copy_delay,
                 paste_delay,
                 restore_delay,
+                updates,
             })
             .ok()
             .expect("native settings controls must only be initialized once");
@@ -1053,6 +1117,7 @@ impl NativeController {
         config.auto_correct_delay_ms =
             parse_number(&controls.auto_delay, "automatic correction delay", 10, 250)?;
         config.auto_correct_exceptions = self.exception_words();
+        config.application_layout_rules = controls.applications.rules();
         config.modifier_gesture = match controls.modifier_gesture.indexOfSelectedItem() {
             1 => ModifierGesture::DoubleControl,
             2 => ModifierGesture::DoubleShift,
@@ -1137,6 +1202,9 @@ impl NativeController {
         );
         set_text(&controls.auto_delay, config.auto_correct_delay_ms);
         self.rebuild_exception_rows(&config.auto_correct_exceptions);
+        self.controls()
+            .applications
+            .load(&config.application_layout_rules, self);
         controls.selection_shortcut.set_value(&config.hotkey);
         controls
             .previous_word_shortcut
@@ -2153,7 +2221,10 @@ fn make_advanced_page(
     (page, copy, paste, restore)
 }
 
-fn make_about_page(controller: &NativeController, mtm: MainThreadMarker) -> Retained<NSView> {
+fn make_about_page(
+    controller: &NativeController,
+    mtm: MainThreadMarker,
+) -> (Retained<NSView>, UpdateControls) {
     let page = page(mtm);
     page_header(
         &page,
@@ -2171,49 +2242,79 @@ fn make_about_page(controller: &NativeController, mtm: MainThreadMarker) -> Reta
     page.addSubview(&privacy_heading);
     page.addSubview(&multiline_label(
         PRIVACY_SUMMARY,
-        rect(24.0, 276.0, 620.0, 50.0),
+        rect(24.0, 282.0, 620.0, 44.0),
         mtm,
     ));
 
-    let implementation_heading = label(tr("How it works"), rect(24.0, 238.0, 610.0, 24.0), mtm);
+    let implementation_heading = label(tr("How it works"), rect(24.0, 252.0, 610.0, 24.0), mtm);
     implementation_heading.setFont(Some(&NSFont::boldSystemFontOfSize(14.0)));
     page.addSubview(&implementation_heading);
     page.addSubview(&multiline_label(
         IMPLEMENTATION_SUMMARY,
-        rect(24.0, 178.0, 620.0, 56.0),
+        rect(24.0, 194.0, 620.0, 54.0),
         mtm,
     ));
 
-    let license_heading = label(tr("Open source"), rect(24.0, 140.0, 610.0, 24.0), mtm);
+    let license_heading = label(tr("Open source"), rect(24.0, 164.0, 610.0, 24.0), mtm);
     license_heading.setFont(Some(&NSFont::boldSystemFontOfSize(14.0)));
     page.addSubview(&license_heading);
     page.addSubview(&label(
         tr("MIT licensed. Source, security policy, and release history are public."),
-        rect(24.0, 116.0, 620.0, 22.0),
+        rect(24.0, 140.0, 620.0, 22.0),
         mtm,
     ));
     page.addSubview(&action_button(
         tr("Project Website"),
-        rect(24.0, 68.0, 150.0, 32.0),
+        rect(24.0, 100.0, 150.0, 32.0),
         controller,
         sel!(openProjectWebsite:),
         mtm,
     ));
     page.addSubview(&action_button(
         tr("Source Repository"),
-        rect(184.0, 68.0, 158.0, 32.0),
+        rect(184.0, 100.0, 158.0, 32.0),
         controller,
         sel!(openSourceRepository:),
         mtm,
     ));
     page.addSubview(&action_button(
         tr("Report Security Issue"),
-        rect(352.0, 68.0, 178.0, 32.0),
+        rect(352.0, 100.0, 178.0, 32.0),
         controller,
         sel!(reportSecurityIssue:),
         mtm,
     ));
-    page
+    let check = action_button(
+        tr("Check for updates"),
+        rect(24.0, 56.0, 220.0, 32.0),
+        controller,
+        sel!(checkForUpdates:),
+        mtm,
+    );
+    let open = action_button(
+        tr("Open release"),
+        rect(256.0, 56.0, 180.0, 32.0),
+        controller,
+        sel!(openUpdateRelease:),
+        mtm,
+    );
+    open.setHidden(true);
+    let status = multiline_label(
+        &super::updates::CheckState::Idle.message(),
+        rect(24.0, 6.0, 620.0, 44.0),
+        mtm,
+    );
+    page.addSubview(&check);
+    page.addSubview(&open);
+    page.addSubview(&status);
+    (
+        page,
+        UpdateControls {
+            check,
+            open,
+            status,
+        },
+    )
 }
 
 fn page(mtm: MainThreadMarker) -> Retained<NSView> {

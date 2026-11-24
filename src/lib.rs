@@ -3,6 +3,7 @@
 #[cfg(target_os = "macos")]
 pub mod accessibility;
 pub mod app;
+pub mod application_layout;
 pub mod audio_output;
 mod auto_correct;
 mod auto_correct_monitor;
