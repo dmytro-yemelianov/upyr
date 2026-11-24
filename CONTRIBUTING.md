@@ -32,6 +32,35 @@ The CLI can exercise layout conversion without granting global input access:
 cargo run --locked -- convert ghbdsn
 ```
 
+### Developing on Windows
+
+Install the MSVC Rust toolchain with `rustup`, the Visual Studio Build Tools
+"Desktop development with C++" workload, Git and Python 3. Packaging also needs
+Inno Setup 6 (`choco install innosetup` or `winget install JRSoftware.InnoSetup`).
+
+A short edit–test loop in PowerShell:
+
+```powershell
+$env:UPYR_CONFIG = "$env:TEMP\upyr-dev.toml"   # keep your installed config untouched
+cargo run --locked -- doctor
+cargo run --locked -- run                        # tray app in this console, with its logs
+cargo run --locked -- settings
+```
+
+Set `$env:RUST_LOG = "upyr=debug"` for more detail. Quit an installed Upyr
+first, so only one copy hooks the keyboard.
+
+To build and try the installer exactly as CI does:
+
+```powershell
+cargo build --release --locked -p upyr
+./packaging/windows/package.ps1                  # writes dist\*-setup.exe and the portable ZIP
+./packaging/windows/test-settings.ps1 -InstallDirectory <install dir>
+```
+
+Over RDP, choose the client's Scancode keyboard mode; see "Windows over RDP" in
+`docs/reference.md`.
+
 ## Required checks
 
 Run the checks relevant to your platform before opening a pull request:
