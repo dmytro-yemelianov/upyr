@@ -18,6 +18,8 @@ use std::{
 
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "windows")]
+mod windows;
 use device_query::Keycode;
 #[cfg(target_os = "macos")]
 use device_query::{DeviceQuery, DeviceState};
@@ -655,6 +657,11 @@ fn spawn_listener(state: &Arc<ListenerState>) -> Result<()> {
             #[cfg(not(target_os = "macos"))]
             let mut capture_state = initial_capture_state();
             let callback_state = Arc::clone(&listener_state);
+            #[cfg(target_os = "windows")]
+            let result = windows::listen(move |event_type, name| {
+                handle_event(&mut capture_state, &callback_state, event_type, name);
+            });
+            #[cfg(not(target_os = "windows"))]
             let result = rdev::listen(move |event| {
                 handle_event(
                     &mut capture_state,

@@ -145,6 +145,8 @@ fn convert_selection_if_matches(
         return Err(error).context("could not send the copy shortcut");
     }
     thread::sleep(Duration::from_millis(config.copy_delay_ms));
+    #[cfg(target_os = "windows")]
+    wait_for_late_copy(&probe);
 
     let selected = match read_copied_text(&mut clipboard, &probe) {
         Some(text) => text,
@@ -291,6 +293,24 @@ fn arm_copy_probe(clipboard: &mut Clipboard) -> Result<CopyProbe> {
     clipboard_guard::set_temporary_text(clipboard, &marker)
         .context("could not prepare the clipboard")?;
     Ok(CopyProbe::Marker(marker))
+}
+
+/// An application can take longer than the configured copy delay to publish
+/// its selection: Windows 11 Notepad sometimes does on the first copy after
+/// a pause. Reading too early reports no selection and abandons a correction
+/// whose text is still selected, so keep watching the clipboard revision a
+/// little longer. Costs nothing when the copy has already landed.
+#[cfg(target_os = "windows")]
+fn wait_for_late_copy(probe: &CopyProbe) {
+    const LATE_COPY_LIMIT: Duration = Duration::from_millis(300);
+    const POLL_INTERVAL: Duration = Duration::from_millis(10);
+    let CopyProbe::Revision(before) = probe else {
+        return;
+    };
+    let deadline = std::time::Instant::now() + LATE_COPY_LIMIT;
+    while clipboard_guard::revision() == Some(*before) && std::time::Instant::now() < deadline {
+        thread::sleep(POLL_INTERVAL);
+    }
 }
 
 fn read_copied_text(clipboard: &mut Clipboard, probe: &CopyProbe) -> Option<String> {
